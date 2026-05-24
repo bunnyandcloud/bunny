@@ -1,5 +1,6 @@
 mod api;
 mod cdp_collector;
+mod claude;
 mod cli;
 mod middleware;
 mod novnc_proxy;

@@ -159,6 +159,18 @@ pub fn refresh_client(target: &str) {
     let _ = run(&["refresh-client", "-t", target]);
 }
 
+/// Send literal keystrokes to a tmux pane (bypasses web xterm / host clipboard).
+pub fn send_keys_literal(target: &str, text: &str, enter: bool) -> Result<()> {
+    if !target_alive(target) {
+        anyhow::bail!("tmux target not alive: {target}");
+    }
+    run(&["send-keys", "-t", target, "-l", "--", text])?;
+    if enter {
+        run(&["send-keys", "-t", target, "Enter"])?;
+    }
+    Ok(())
+}
+
 /// Visible pane + scrollback (use before respawn or recreating a session).
 /// Current working directory of the tmux pane (if session still exists).
 pub fn pane_cwd(target: &str) -> Option<String> {

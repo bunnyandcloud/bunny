@@ -228,6 +228,14 @@ impl TerminalManager {
             .map(|s| s.buffer.replay_from(from))
     }
 
+    /// Recent scrollback (for parsing OAuth URLs during Claude setup).
+    pub fn recent_output(&self, id: Uuid) -> Option<String> {
+        self.terminals
+            .read()
+            .get(&id)
+            .map(|s| s.buffer.all_content())
+    }
+
     /// Stop attach client and kill tmux window if applicable.
     pub fn tmux_target(&self, id: Uuid) -> Option<String> {
         self.terminals
@@ -292,12 +300,12 @@ fn build_allowlisted_env(cwd: &Path) -> HashMap<String, String> {
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     env.insert("PWD".into(), cwd.display().to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    env.insert("HOME".into(), home.clone());
+    let local_bin = format!("{home}/.local/bin");
     env.insert(
         "PATH".into(),
-        "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".into(),
+        format!("{local_bin}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
     );
-    if let Ok(home) = std::env::var("HOME") {
-        env.insert("HOME".into(), home);
-    }
     env
 }

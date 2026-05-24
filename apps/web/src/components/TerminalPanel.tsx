@@ -16,11 +16,13 @@ interface Props {
   terminalId: string;
   /** When false, panel stays connected but hidden (multi-tab shells). */
   active?: boolean;
+  /** When false, do not steal focus on activate (avoids host clipboard paste into xterm). */
+  autoFocus?: boolean;
   readonly?: boolean;
 }
 
 const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel(
-  { terminalId, active = true, readonly },
+  { terminalId, active = true, autoFocus = true, readonly },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +52,9 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       return;
     }
     fitRef.current.fit();
-    termRef.current.focus();
+    if (autoFocus) {
+      termRef.current.focus();
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN && termRef.current) {
       wsRef.current.send(
         JSON.stringify({
@@ -60,7 +64,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
         }),
       );
     }
-  }, [active]);
+  }, [active, autoFocus]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -81,7 +85,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
     term.open(containerRef.current);
     fit.fit();
     fitRef.current = fit;
-    if (active) {
+    if (active && autoFocus) {
       term.focus();
     }
     termRef.current = term;

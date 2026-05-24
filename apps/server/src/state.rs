@@ -1,4 +1,5 @@
 use crate::cdp_collector::CdpCollectorHandle;
+use crate::claude::{AuthFlow, InstallState};
 use crate::realtime::RealtimeHub;
 use anyhow::Result;
 use bunny_auth::AuthService;
@@ -35,6 +36,8 @@ pub struct AppState {
     pub secrets_passphrase: Mutex<Option<String>>,
     pub fcm: FcmClient,
     pub webrtc_sidecar: RwLock<Option<crate::webrtc::WebRtcSidecar>>,
+    pub claude_install: Mutex<InstallState>,
+    pub claude_auth: Mutex<AuthFlow>,
 }
 
 pub struct PreviewState {
@@ -99,6 +102,8 @@ impl AppState {
             secrets_passphrase: Mutex::new(secrets_passphrase),
             fcm,
             webrtc_sidecar: RwLock::new(None),
+            claude_install: Mutex::new(InstallState::default()),
+            claude_auth: Mutex::new(AuthFlow::default()),
             supervisor: RwLock::new(ProcessSupervisor::new(
                 config.recovery.process_supervisor.max_restarts,
                 config.recovery.process_supervisor.restart_window_seconds,

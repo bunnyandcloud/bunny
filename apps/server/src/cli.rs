@@ -375,6 +375,12 @@ pub async fn run_doctor() -> Result<()> {
     } else {
         println!("  ⚠ cdp-sidecar/index.js not found");
     }
+    let (label, ok, hint) = crate::claude::doctor_check();
+    if ok {
+        println!("  ✓ {label}");
+    } else {
+        println!("  ⚠ {label} — {hint}");
+    }
     println!("\n✓ Doctor complete");
     Ok(())
 }
@@ -423,6 +429,12 @@ async fn serve(
     crate::recovery::restore_sessions(&state);
     crate::recovery::spawn_relay_if_enabled(state.clone());
     crate::recovery::spawn_health_checks(state.clone());
+    let prefetch = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::claude::ensure_install_script(&prefetch.data_dir).await {
+            tracing::warn!("claude install script prefetch: {e}");
+        }
+    });
     if state.config.webrtc.enabled {
         match crate::webrtc::spawn_webrtc_sidecar(state.clone()).await {
             Ok(sidecar) => {

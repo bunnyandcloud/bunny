@@ -35,7 +35,8 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
     let public = Router::new()
         .route("/auth/bootstrap", post(auth_bootstrap))
         .route("/auth/login", post(auth_login))
-        .route("/agent/info", get(agent_info));
+        .route("/agent/info", get(agent_info))
+        .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect));
 
     let protected = Router::new()
         .route("/auth/logout", post(auth_logout))
@@ -85,6 +86,11 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/voice/confirm", post(voice_confirm))
         .route("/push/register", post(push_register))
         .route("/push/register/:device_id", delete(push_unregister))
+        .route("/claude/status", get(claude_status))
+        .route("/claude/install", post(claude_install))
+        .route("/claude/auth/start", post(claude_auth_start))
+        .route("/claude/auth/code", post(claude_auth_code))
+        .route("/claude/auth/detect-code", post(claude_auth_detect_code))
         .route("/webrtc/config", get(webrtc_config))
         .route("/sessions/:id/webrtc/offer", post(webrtc_offer))
         .route("/sessions/:id/webrtc/candidate", post(webrtc_candidate))
@@ -735,12 +741,28 @@ async fn get_browser(
 }
 
 async fn browser_control(
-    State(_state): State<Arc<AppState>>,
-    Extension(_user): Extension<Uuid>,
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
-    Json(body): Json<serde_json::Value>,
+    Json(body): Json<BrowserControlRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _ = (id, body);
+    let session_id = browser_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::BrowserView)?;
+    if let Some(url) = body.navigate.as_deref() {
+        if url.starts_with("https://claude.com/")
+            || url.starts_with("https://claude.ai/")
+            || url.contains("/api/v1/claude/oauth/redirect/")
+        {
+            state.browsers.restart(id, url)?;
+            state
+                .clone()
+                .start_browser_cdp(session_id, id)
+                .await
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+        } else {
+            return Err(ApiError::validation("only Claude OAuth URLs are allowed"));
+        }
+    }
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -850,6 +872,107 @@ async fn browser_events_ws(
         .ok_or_else(|| ApiError::not_found("browser session"))?;
     ensure_session_access(&state, user, session_id, Action::ConsoleView)?;
     Ok(ws.on_upgrade(move |socket| ws::handle_browser_events(socket, state, id)))
+}
+
+async fn claude_oauth_redirect(
+    State(state): State<Arc<AppState>>,
+    Path(token): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let url = crate::claude::take_oauth_redirect_url(&state, token)
+        .ok_or_else(|| ApiError::not_found("oauth redirect link expired or not ready"))?;
+    Ok(Redirect::temporary(&url).into_response())
+}
+
+async fn claude_status(
+    State(state): State<Arc<AppState>>,
+    Extension(_user): Extension<Uuid>,
+) -> Json<crate::claude::ClaudeStatus> {
+    let install = state.claude_install.lock();
+    let auth = state.claude_auth.lock();
+    Json(crate::claude::status_snapshot(&install, &auth))
+}
+
+async fn claude_install(
+    State(state): State<Arc<AppState>>,
+    Extension(_user): Extension<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if crate::claude::is_installed() {
+        let mut install = state.claude_install.lock();
+        install.state = "ready".into();
+        install.message = "Claude Code is already installed.".into();
+        install.error = None;
+        return Ok(Json(serde_json::json!({ "started": false, "state": "ready" })));
+    }
+    crate::claude::spawn_install(state);
+    Ok(Json(serde_json::json!({ "started": true })))
+}
+
+async fn claude_auth_start(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<ClaudeAuthStartRequest>,
+) -> Result<Json<ClaudeAuthStartResponse>, ApiError> {
+    if !crate::claude::is_installed() {
+        return Err(ApiError::validation(
+            "Claude is not installed — use Install Claude on the home page first",
+        ));
+    }
+    let session_id = body
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| ApiError::validation("session_id"))?;
+    if let Some(sid) = session_id {
+        ensure_session_access(&state, user, sid, Action::TerminalWrite)?;
+    }
+    let (session_id, terminal_id) = crate::claude::start_auth_flow(state.clone(), user, session_id)
+        .await
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(ClaudeAuthStartResponse {
+        session_id: session_id.to_string(),
+        terminal_id: terminal_id.to_string(),
+    }))
+}
+
+async fn claude_auth_code(
+    State(state): State<Arc<AppState>>,
+    Extension(_user): Extension<Uuid>,
+    Json(body): Json<ClaudeAuthCodeRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    crate::claude::apply_detected_auth_code(&state, &body.code)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn claude_auth_detect_code(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<ClaudeAuthDetectRequest>,
+) -> Result<Json<ClaudeAuthDetectResponse>, ApiError> {
+    let browser_id =
+        Uuid::parse_str(&body.browser_id).map_err(|_| ApiError::validation("browser_id"))?;
+    let session_id = browser_session_id(&state, browser_id)?;
+    ensure_session_access(&state, user, session_id, Action::BrowserView)?;
+    let cdp_port = state
+        .browsers
+        .get_cdp_port(browser_id)
+        .ok_or_else(|| ApiError::not_found("browser session"))?;
+    if let Some(code) = crate::claude::detect_code_from_cdp_port(cdp_port).await {
+        let hint = crate::claude::oauth_code_hint(&code);
+        crate::claude::apply_detected_auth_code(&state, &code)
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+        return Ok(Json(ClaudeAuthDetectResponse {
+            found: true,
+            submitted: true,
+            code_hint: Some(hint),
+        }));
+    }
+    Ok(Json(ClaudeAuthDetectResponse {
+        found: false,
+        submitted: false,
+        code_hint: None,
+    }))
 }
 
 async fn agent_info(State(state): State<Arc<AppState>>) -> Json<AgentInfoResponse> {
@@ -1082,6 +1205,39 @@ pub struct SecretUpsertRequest {
 pub struct SecretScopeQuery {
     pub scope: String,
     pub session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct BrowserControlRequest {
+    pub navigate: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ClaudeAuthStartRequest {
+    pub session_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ClaudeAuthStartResponse {
+    pub session_id: String,
+    pub terminal_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct ClaudeAuthCodeRequest {
+    pub code: String,
+}
+
+#[derive(Deserialize)]
+pub struct ClaudeAuthDetectRequest {
+    pub browser_id: String,
+}
+
+#[derive(Serialize)]
+pub struct ClaudeAuthDetectResponse {
+    pub found: bool,
+    pub submitted: bool,
+    pub code_hint: Option<String>,
 }
 
 #[derive(Deserialize)]

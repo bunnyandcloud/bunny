@@ -37,6 +37,17 @@ pub fn sidecar_script_path() -> Option<PathBuf> {
     None
 }
 
+pub fn extract_oauth_script_path() -> Option<PathBuf> {
+    sidecar_script_path().and_then(|p| {
+        let sibling = p.parent()?.join("extract-oauth-code.js");
+        if sibling.exists() {
+            Some(sibling)
+        } else {
+            None
+        }
+    })
+}
+
 pub async fn spawn_cdp_collector(
     state: Arc<AppState>,
     session_id: Uuid,
@@ -83,6 +94,11 @@ pub async fn spawn_cdp_collector(
                     continue;
                 }
             };
+
+            if parsed.get("type").and_then(|t| t.as_str()) == Some("claude.oauth_code") {
+                // Legacy — auto-import disabled; import is manual via /claude/auth/detect-code only.
+                continue;
+            }
 
             if let Some(event) = map_cdp_line_to_event(&parsed) {
                 let event_type = event

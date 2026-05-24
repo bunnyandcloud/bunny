@@ -273,6 +273,69 @@ export function browserWebrtcCandidate(
   });
 }
 
+export interface ClaudeStatus {
+  installed: boolean;
+  authenticated: boolean;
+  version: string | null;
+  binary: string | null;
+  install: {
+    state: string;
+    message: string;
+    error: string | null;
+  };
+  auth: {
+    active: boolean;
+    phase: string;
+    session_id: string | null;
+    terminal_id: string | null;
+    oauth_url: string | null;
+    oauth_browser_url: string | null;
+    code_submitted: boolean;
+    error: string | null;
+  };
+}
+
+export function getClaudeStatus() {
+  return api<ClaudeStatus>('/claude/status');
+}
+
+export function installClaude() {
+  return api<{ started: boolean; state?: string }>('/claude/install', {
+    method: 'POST',
+  });
+}
+
+export function startClaudeAuth(sessionId?: string) {
+  return api<{ session_id: string; terminal_id: string }>('/claude/auth/start', {
+    method: 'POST',
+    body: JSON.stringify(sessionId ? { session_id: sessionId } : {}),
+  });
+}
+
+export function submitClaudeAuthCode(code: string) {
+  return api<{ ok: boolean }>('/claude/auth/code', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function detectClaudeAuthCode(browserId: string) {
+  return api<{ found: boolean; submitted: boolean; code_hint?: string | null }>(
+    '/claude/auth/detect-code',
+    {
+      method: 'POST',
+      body: JSON.stringify({ browser_id: browserId }),
+    },
+  );
+}
+
+export function browserNavigate(browserId: string, url: string) {
+  return api<{ ok: boolean }>(`/browser-sessions/${browserId}/control`, {
+    method: 'POST',
+    body: JSON.stringify({ navigate: url }),
+  });
+}
+
 export function sessionRealtimeWsUrl(sessionId: string) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}/api/v1/sessions/${sessionId}/realtime`;

@@ -22,6 +22,15 @@ import VaultInjectPanel from './VaultInjectPanel';
 import VaultUnlockModal from './VaultUnlockModal';
 import PreviewPanel from './PreviewPanel';
 import BrowserPanel from './BrowserPanel';
+import ClaudeSetupPanel from './ClaudeSetupPanel';
+
+function browserStorageKey(sessionId: string) {
+  return `bunny-browser-id:${sessionId}`;
+}
+
+function isClaudeSetupMode() {
+  return new URLSearchParams(location.search).get('claude') === 'setup';
+}
 
 interface Props {
   sessionId: string;
@@ -57,7 +66,12 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [vaultCollapsed, setVaultCollapsed] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('terminal');
+  const [suppressTerminalFocus, setSuppressTerminalFocus] = useState(false);
   const [previewPort, setPreviewPort] = useState(3000);
+  const [claudeBrowserId, setClaudeBrowserId] = useState<string | null>(() =>
+    sessionStorage.getItem(browserStorageKey(sessionId)),
+  );
+  const claudeSetup = isClaudeSetupMode();
   const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
 
   const refreshVaultStatus = useCallback(async () => {
@@ -143,8 +157,8 @@ export default function SessionWorkspace({ sessionId }: Props) {
   }, [sessionId, refreshShells]);
 
   useEffect(() => {
-    openShell(true);
-  }, [openShell]);
+    openShell(!claudeSetup);
+  }, [openShell, claudeSetup]);
 
   useEffect(() => {
     refreshVaultStatus();
@@ -316,6 +330,29 @@ export default function SessionWorkspace({ sessionId }: Props) {
           minSize={30}
         >
           <div className="h-full flex flex-col">
+            {claudeSetup && (
+              <div className="shrink-0 p-2 border-b border-bunny-border">
+                <ClaudeSetupPanel
+                  sessionId={sessionId}
+                  browserId={claudeBrowserId}
+                  onBrowserId={(id) => {
+                    setClaudeBrowserId(id);
+                    sessionStorage.setItem(browserStorageKey(sessionId), id);
+                  }}
+                  onOpenBrowserTab={() => setWorkspaceTab('browser')}
+                  onOpenTerminalTab={(terminalId) => {
+                    setWorkspaceTab('terminal');
+                    setSuppressTerminalFocus(true);
+                    void refreshShells().then((list) => {
+                      if (terminalId && list.some((s) => s.id === terminalId)) {
+                        setActiveId(terminalId);
+                      }
+                    });
+                    window.setTimeout(() => setSuppressTerminalFocus(false), 2500);
+                  }}
+                />
+              </div>
+            )}
             <div className="flex items-center gap-1 px-2 py-1 border-b border-bunny-border bg-bunny-panel shrink-0">
               {(
                 [
@@ -388,6 +425,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
                         }}
                         terminalId={shell.id}
                         active={visible}
+                        autoFocus={!suppressTerminalFocus}
                       />
                     </div>
                   );

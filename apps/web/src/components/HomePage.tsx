@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState, type MouseEvent } from 'react';
-import { createSession, deleteSession, listSessions, renameSession } from '../lib/api';
+import {
+  createSession,
+  deleteSession,
+  getClaudeStatus,
+  installClaude,
+  listSessions,
+  renameSession,
+  startClaudeAuth,
+  type ClaudeStatus,
+} from '../lib/api';
 import InlineRename from './InlineRename';
 
 interface SessionItem {
@@ -20,6 +29,14 @@ export default function HomePage({ email, isOwner }: Props) {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [claudeBusy, setClaudeBusy] = useState(false);
+
+  const refreshClaude = useCallback(() => {
+    getClaudeStatus()
+      .then(setClaude)
+      .catch(() => setClaude(null));
+  }, []);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -32,7 +49,19 @@ export default function HomePage({ email, isOwner }: Props) {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    refreshClaude();
+  }, [refresh, refreshClaude]);
+
+  useEffect(() => {
+    if (!claude) return;
+    const installing =
+      claude.install.state === 'installing' || claude.install.state === 'downloading';
+    if (!installing && claude.auth.phase !== 'waiting_url' && claude.auth.phase !== 'waiting_code') {
+      return;
+    }
+    const t = setInterval(refreshClaude, 1500);
+    return () => clearInterval(t);
+  }, [claude, refreshClaude]);
 
   async function handleNewSession() {
     setCreating(true);
@@ -48,6 +77,36 @@ export default function HomePage({ email, isOwner }: Props) {
 
   function openSession(id: string) {
     location.href = `/s/${id}`;
+  }
+
+  async function handleSetupClaude() {
+    setClaudeBusy(true);
+    setError(null);
+    try {
+      if (!claude?.installed) {
+        await installClaude();
+        let attempts = 0;
+        while (attempts < 120) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const s = await getClaudeStatus();
+          setClaude(s);
+          if (s.installed) break;
+          if (s.install.state === 'failed') {
+            throw new Error(s.install.error || 'Claude installation failed');
+          }
+          attempts += 1;
+        }
+        const final = await getClaudeStatus();
+        if (!final.installed) {
+          throw new Error('Claude installation timed out');
+        }
+      }
+      const { session_id } = await startClaudeAuth();
+      location.href = `/s/${session_id}?claude=setup`;
+    } catch (e) {
+      setError(String(e));
+      setClaudeBusy(false);
+    }
   }
 
   async function handleDeleteSession(id: string, e: MouseEvent) {
@@ -96,7 +155,34 @@ export default function HomePage({ email, isOwner }: Props) {
             Secrets vault
           </button>
         )}
+        {claude && !claude.authenticated && (
+          <button
+            type="button"
+            onClick={handleSetupClaude}
+            disabled={
+              claudeBusy ||
+              claude.install.state === 'installing' ||
+              claude.install.state === 'downloading'
+            }
+            className="px-5 py-2.5 rounded border border-bunny-accent text-bunny-accent font-medium text-sm hover:bg-bunny-panel disabled:opacity-50"
+          >
+            {claudeBusy ||
+            claude.install.state === 'installing' ||
+            claude.install.state === 'downloading'
+              ? 'Setting up…'
+              : 'Setup Claude'}
+          </button>
+        )}
+        {claude?.authenticated && (
+          <span className="text-xs text-emerald-400 self-center">
+            Claude Code ready{claude.version ? ` · ${claude.version}` : ''}
+          </span>
+        )}
       </div>
+
+      {claude && !claude.authenticated && claude.install.message && !claude.installed && (
+        <p className="text-bunny-muted text-xs max-w-md text-center">{claude.install.message}</p>
+      )}
 
       {error && (
         <p className="text-red-400 text-sm max-w-md text-center" role="alert">

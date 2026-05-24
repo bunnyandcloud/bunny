@@ -19,10 +19,6 @@ export default function App() {
     check();
   }, [check]);
 
-  if (location.pathname === '/login' || (!user && !loading)) {
-    return <LoginPage />;
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-bunny-muted">
@@ -32,8 +28,7 @@ export default function App() {
   }
 
   if (!user) {
-    location.href = `/login?next=${encodeURIComponent(location.pathname)}`;
-    return null;
+    return <LoginPage />;
   }
 
   if (sessionId) {
