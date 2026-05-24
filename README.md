@@ -1,6 +1,6 @@
 # bunny
 
-Remote development and debugging tool for Linux servers: PTY terminals, port previews, instrumented desktop browser, unified timeline, and secure local authentication.
+Remote development and debugging tool for Linux servers: PTY terminals, port previews, instrumented desktop browser, unified timeline, and secure local authentication..
 
 ## Quick start
 
