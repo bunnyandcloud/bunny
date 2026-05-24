@@ -87,13 +87,3 @@ if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
   echo "           x11vnc=$(command -v x11vnc || echo missing)"
   echo "           websockify=$(command -v websockify || echo missing)"
 fi
-echo ""
-echo "Next steps (from the repository root):"
-echo ""
-echo "  ./bunny setup         # installs prerequisites automatically if Rust is missing"
-echo "  bunny configure"
-echo "  bunny doctor          # verify browser + sidecars"
-echo "  bunny run"
-echo ""
-echo "  # Or in one shot on Debian/Ubuntu (prerequisites + binary):"
-echo "  ./scripts/install.sh"
