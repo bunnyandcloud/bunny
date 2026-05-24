@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Resolve repo root even when this file is invoked via a symlink (e.g. /usr/local/bin/bunny).
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+exec "$ROOT/scripts/bunny-wrapper.sh" "$@"

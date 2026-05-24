@@ -1,0 +1,18 @@
+[Unit]
+Description=bunny remote dev agent
+After=network.target
+
+[Service]
+Type=simple
+User=bunny
+Group=bunny
+ExecStart=/usr/local/bin/bunny start --host 127.0.0.1 --port 7681
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=300
+StartLimitBurst=5
+Environment=HOME=/home/bunny
+WorkingDirectory=/home/bunny
+
+[Install]
+WantedBy=multi-user.target

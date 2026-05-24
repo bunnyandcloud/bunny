@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/server",
+    "crates/bunny-core",
+    "crates/bunny-auth",
+    "crates/bunny-pty",
+    "crates/bunny-browser",
+    "crates/bunny-relay",
+    "crates/bunny-secrets",
+    "crates/bunny-push",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bunny-dev/bunny"
+
+[workspace.dependencies]
+anyhow = "1"
+argon2 = "0.5"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["ws", "macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+figment = { version = "0.10", features = ["yaml", "env"] }
+futures = "0.3"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+parking_lot = "0.12"
+portable-pty = "0.8"
+rand = "0.8"
+regex = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+axum-extra = { version = "0.9", features = ["cookie"] }
+cookie = "0.18"
+http-body-util = "0.1"
+bytes = "1"
+time = { version = "=0.3.36" }
+aes-gcm = "0.10"

@@ -1,0 +1,17 @@
+[package]
+name = "bunny-pty"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bunny-core = { path = "../bunny-core" }
+bytes.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+portable-pty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true

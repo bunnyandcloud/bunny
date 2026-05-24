@@ -1,0 +1,58 @@
+auth:
+  mode: local
+  require_auth: true
+
+server:
+  bind_host: 127.0.0.1
+  port: 7681
+
+security:
+  default_role: viewer
+  require_auth: true
+  session_ttl_minutes: 120
+  redact_secrets: true
+  expose_cdp: false
+  expose_vnc: false
+
+browser:
+  enabled: true
+  width: 1440
+  height: 900
+  ephemeral_profile: true
+
+terminal:
+  shell: /bin/bash
+  env_mode: allowlist
+  output_buffer_lines: 5000
+
+network:
+  collect_metadata: true
+  collect_headers: false
+  collect_bodies: false
+  redact_sensitive_headers: true
+
+recovery:
+  enabled: true
+  state_store: sqlite
+  process_supervisor:
+    enabled: true
+    max_restarts: 5
+    restart_window_seconds: 60
+  terminal:
+    preserve_buffer: true
+    buffer_lines: 5000
+    restart_policy: manual
+  browser:
+    restart_policy: on-failure
+    restore_last_url: true
+  relay:
+    restart_policy: always
+    backoff_initial_ms: 1000
+    backoff_max_ms: 60000
+
+voice:
+  enabled: true
+  provider: native
+  push_to_talk: true
+  require_confirmation: true
+  allow_direct_run: false

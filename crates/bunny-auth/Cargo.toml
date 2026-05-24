@@ -1,0 +1,19 @@
+[package]
+name = "bunny-auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+argon2.workspace = true
+base64.workspace = true
+bunny-core = { path = "../bunny-core" }
+chrono.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

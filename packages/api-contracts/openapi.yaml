@@ -1,0 +1,150 @@
+openapi: 3.1.0
+info:
+  title: bunny API
+  version: 1.0.0
+  description: Remote dev/debug agent API
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+paths:
+  /auth/bootstrap:
+    post:
+      summary: Create owner account (first run only)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BootstrapRequest'
+      responses:
+        '200':
+          description: Owner created
+  /auth/login:
+    post:
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+  /auth/logout:
+    post:
+      summary: Logout
+  /auth/me:
+    get:
+      summary: Current user
+  /sessions:
+    get:
+      summary: List sessions
+    post:
+      summary: Create session
+  /sessions/{id}:
+    get:
+      summary: Get session
+  /sessions/{id}/join:
+    post:
+      summary: Join session
+  /sessions/{id}/stop:
+    post:
+      summary: Stop session
+  /sessions/{id}/reset:
+    post:
+      summary: Reset session
+  /terminals:
+    get:
+      summary: List terminals
+    post:
+      summary: Create terminal
+  /terminals/{id}/ws:
+    get:
+      summary: Terminal WebSocket
+  /previews:
+    post:
+      summary: Create port preview
+  /browser-sessions:
+    post:
+      summary: Create browser session
+  /timeline:
+    get:
+      summary: Unified timeline
+  /voice/intent:
+    post:
+      summary: Voice intent proposal
+  /voice/confirm:
+    post:
+      summary: Confirm voice action
+  /push/register:
+    post:
+      summary: Register device for push (FCM)
+  /push/register/{device_id}:
+    delete:
+      summary: Unregister push device
+  /webrtc/config:
+    get:
+      summary: ICE servers and WebRTC availability
+  /sessions/{id}/webrtc/offer:
+    post:
+      summary: WebRTC SDP offer → answer
+  /sessions/{id}/webrtc/candidate:
+    post:
+      summary: Trickle ICE candidate
+  /browser-sessions/{id}/webrtc/offer:
+    post:
+      summary: WebRTC browser screencast offer
+  /browser-sessions/{id}/webrtc/candidate:
+    post:
+      summary: Browser WebRTC ICE candidate
+  /browser-sessions/{id}/webrtc/stop:
+    post:
+      summary: Stop browser WebRTC stream
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: bunny_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    BootstrapRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+        device_id: { type: string }
+    SessionResponse:
+      type: object
+      properties:
+        id: { type: string }
+        login_url: { type: string }
+        auth_required: { type: boolean }
+    TerminalResponse:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        ws_url: { type: string }
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }

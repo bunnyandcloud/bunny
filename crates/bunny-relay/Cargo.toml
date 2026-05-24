@@ -1,0 +1,14 @@
+[package]
+name = "bunny-relay"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bunny-core = { path = "../bunny-core" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+uuid.workspace = true

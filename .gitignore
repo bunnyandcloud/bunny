@@ -1,0 +1,39 @@
+# Rust (workspace root)
+/target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Flutter (apps/mobile/.gitignore has platform-specific rules)
+**/.dart_tool/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Bunny runtime
+.bunny/
+*.db
+*.db-journal
+
+# Secrets & env (keep .env.example committable)
+secrets.enc
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

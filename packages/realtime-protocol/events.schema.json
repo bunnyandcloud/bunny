@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bunny.dev/schemas/realtime/v1/events.json",
+  "title": "BunnyRealtimeEvent",
+  "description": "WebSocket realtime events protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/TerminalOutput" },
+    { "$ref": "#/$defs/TerminalStatus" },
+    { "$ref": "#/$defs/BrowserConsole" },
+    { "$ref": "#/$defs/BrowserNetwork" },
+    { "$ref": "#/$defs/TimelineEvent" },
+    { "$ref": "#/$defs/SessionStatusChanged" },
+    { "$ref": "#/$defs/SyncReply" },
+    { "$ref": "#/$defs/RecoveryEvent" },
+    { "$ref": "#/$defs/WebRtcIce" },
+    { "$ref": "#/$defs/WebRtcMessage" }
+  ],
+  "$defs": {
+    "TerminalOutput": {
+      "type": "object",
+      "required": ["type", "terminalId", "data", "offset"],
+      "properties": {
+        "type": { "const": "terminal.output" },
+        "terminalId": { "type": "string" },
+        "data": { "type": "string" },
+        "offset": { "type": "integer" }
+      }
+    },
+    "TerminalStatus": {
+      "type": "object",
+      "required": ["type", "terminalId", "status"],
+      "properties": {
+        "type": { "const": "terminal.status.changed" },
+        "terminalId": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "BrowserConsole": {
+      "type": "object",
+      "required": ["type", "level", "text"],
+      "properties": {
+        "type": { "const": "browser.console" },
+        "level": { "enum": ["log", "info", "warn", "error"] },
+        "text": { "type": "string" },
+        "url": { "type": "string" },
+        "ts": { "type": "string", "format": "date-time" }
+      }
+    },
+    "BrowserNetwork": {
+      "type": "object",
+      "required": ["type", "requestId", "phase"],
+      "properties": {
+        "type": { "const": "browser.network" },
+        "requestId": { "type": "string" },
+        "phase": { "enum": ["started", "completed", "failed"] },
+        "method": { "type": "string" },
+        "urlRedacted": { "type": "string" },
+        "status": { "type": "integer" },
+        "timingMs": { "type": "number" }
+      }
+    },
+    "TimelineEvent": {
+      "type": "object",
+      "required": ["type", "eventId", "sequence"],
+      "properties": {
+        "type": { "const": "timeline.event" },
+        "eventId": { "type": "string" },
+        "sequence": { "type": "integer" },
+        "payload": { "type": "object" }
+      }
+    },
+    "SessionStatusChanged": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "session.status.changed" },
+        "sessionId": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "SyncReply": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "sync.reply" },
+        "missedEvents": { "type": "array" },
+        "requiresBrowserReconnect": { "type": "boolean" }
+      }
+    },
+    "RecoveryEvent": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "recovery.completed" },
+        "component": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    },
+    "WebRtcIce": {
+      "type": "object",
+      "required": ["type", "candidate"],
+      "properties": {
+        "type": { "const": "webrtc.ice" },
+        "candidate": { "type": "object" }
+      }
+    },
+    "WebRtcMessage": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "webrtc.message" },
+        "data": { "type": "string" }
+      }
+    }
+  }
+}

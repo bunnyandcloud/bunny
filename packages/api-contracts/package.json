@@ -1,0 +1,11 @@
+{
+  "name": "@bunny/api-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate:ts": "openapi-typescript openapi.yaml -o generated/types.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.4.0"
+  }
+}
