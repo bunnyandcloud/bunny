@@ -6,6 +6,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE="$ROOT/target/release/bunny"
 DEBUG="$ROOT/target/debug/bunny"
 
+source_cargo_env() {
+  # rustup installs to ~/.cargo/bin; subprocess installs do not update this shell's PATH.
+  # Use if/then: with set -e, a false [[ ]] as the last statement in a function exits the script.
+  if [[ -f "${HOME}/.cargo/env" ]]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.cargo/env"
+  fi
+}
+
+source_cargo_env
+
 runnable() {
   local bin="$1"
   # Require the `run` subcommand (ignore stale release binaries from older trees).
@@ -60,6 +71,27 @@ exec_bunny() {
 
 # Handled by the shell launcher (not the Rust binary).
 if [[ "${1:-}" == "setup" ]]; then
+  shift
+  SETUP_SKIP_PREREQS=0
+  SETUP_MINIMAL=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --minimal)
+        SETUP_MINIMAL=1
+        shift
+        ;;
+      --skip-prerequisites | --skip-prereqs)
+        SETUP_SKIP_PREREQS=1
+        shift
+        ;;
+      *)
+        echo "bunny setup: unknown option: $1" >&2
+        echo "  Usage: ./bunny setup [--minimal] [--skip-prerequisites]" >&2
+        exit 1
+        ;;
+    esac
+  done
+
   PATH_MARKER="# bunny CLI PATH"
 
   pick_install_dir() {
@@ -117,12 +149,18 @@ if [[ "${1:-}" == "setup" ]]; then
     fi
   fi
 
+  if [[ "$SETUP_SKIP_PREREQS" -eq 0 ]] && ! command -v cargo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    prereq_args=()
+    [[ "$SETUP_MINIMAL" -eq 1 ]] && prereq_args+=(--minimal)
+    echo "→ Rust not found — installing prerequisites (Debian/Ubuntu)…" >&2
+    "$ROOT/scripts/install-prerequisites.sh" "${prereq_args[@]}"
+    source_cargo_env
+  fi
+
   if command -v cargo >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
     build_release_binary
   else
-    echo "⚠ Rust not installed — run: ./scripts/install-prerequisites.sh"
+    echo "⚠ Rust not installed — run: ./scripts/install-prerequisites.sh (or ./bunny setup on Debian/Ubuntu)"
   fi
 
   echo ""
@@ -139,8 +177,6 @@ if ! command -v cargo >/dev/null 2>&1; then
   echo "bunny: Rust toolchain required — run: ./scripts/install-prerequisites.sh" >&2
   exit 1
 fi
-# shellcheck source=/dev/null
-[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
 if ! runnable "$RELEASE" || server_sources_newer_than_release; then
   build_release_binary

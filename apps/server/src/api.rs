@@ -105,7 +105,7 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         Router::new().route(
             "/",
             get(|| async {
-                "bunny API running. Run: bunny run --web-ui  (or: cd apps/web && npm run build)"
+                "bunny API running. Run: bunny run  (or: cd apps/web && npm run build)"
             }),
         )
     };

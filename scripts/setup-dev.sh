@@ -65,7 +65,7 @@ EOF
 No setup required. From the repository root:
 
   ./bunny configure
-  ./bunny run --web-ui
+  ./bunny run
 
 Optional — use "bunny" without ./ in the current shell:
 

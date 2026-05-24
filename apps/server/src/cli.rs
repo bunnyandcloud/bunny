@@ -31,7 +31,7 @@ pub enum Commands {
     },
     /// Start API server
     Start(StartOpts),
-    /// Run the agent (optionally build and serve the web UI)
+    /// Run the agent (builds and serves the web UI by default; use --no-web-ui to skip)
     Run(RunOpts),
     /// Start dev session with optional preview and browser
     Dev(DevOpts),
@@ -82,9 +82,6 @@ pub struct RunOpts {
     pub host: String,
     #[arg(long, default_value = "7681")]
     pub port: u16,
-    /// Build apps/web if needed and serve the UI on the same port as the API (default: on)
-    #[arg(long, default_value_t = true)]
-    pub web_ui: bool,
     /// Agent only — do not build or serve apps/web
     #[arg(long = "no-web-ui")]
     pub no_web_ui: bool,
@@ -215,7 +212,7 @@ pub async fn run_run(state: Arc<AppState>, opts: RunOpts) -> Result<()> {
     }
     print_banner();
 
-    let serve_web_ui = opts.web_ui && !opts.no_web_ui;
+    let serve_web_ui = !opts.no_web_ui;
     let web_dist = if serve_web_ui {
         let repo_root = crate::web_ui::find_repo_root().ok_or_else(|| {
             anyhow::anyhow!(

@@ -4,7 +4,7 @@
 
 ```bash
 ./bunny configure
-./bunny run --web-ui
+./bunny run
 # optional: cd apps/web && npm run dev  (Vite HMR on :5173, proxies API)
 cd apps/mobile && flutter pub get
 ```

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Install **before** `cargo build` or `bunny run --web-ui`:
+Install **before** `cargo build` or `bunny run`:
 
 | Tool | Notes |
 |------|--------|
@@ -44,8 +44,10 @@ See [README prerequisites](../README.md#prerequisites) for step-by-step commands
 git clone https://github.com/bunny-dev/bunny.git && cd bunny
 ./bunny setup
 bunny configure
-./bunny run --web-ui
+./bunny run
 ```
+
+On a fresh Debian/Ubuntu host, `./bunny setup` installs missing prerequisites (Rust, Node, browser stack) before building. Use `./bunny setup --minimal` to skip the browser stack.
 
 The launcher `./bunny` at the repo root **is** the CLI. It runs a release binary when built, otherwise compiles via Cargo on first use. See [README](../README.md#setup-and-permissions) for `setup` vs `sudo`.
 
@@ -54,7 +56,7 @@ The launcher `./bunny` at the repo root **is** the CLI. It runs a release binary
 ```bash
 ./bunny setup
 bunny configure
-bunny run --web-ui
+bunny run
 ```
 
 `setup` chooses the install directory from your permissions:
@@ -80,22 +82,24 @@ docker run -dit --name bunny-dev \
 
 docker exec -it bunny-dev bash
 cd /opt/bunny
-./scripts/install-prerequisites.sh
-source "$HOME/.cargo/env"
 ./bunny setup
 bunny configure
 bunny doctor
-bunny run --web-ui
+bunny run
 ```
 
 ## System install (release binary on PATH)
 
+On Debian/Ubuntu, prerequisites are installed automatically:
+
 ```bash
-curl -fsSL https://get.bunny.dev | sh   # or:
+curl -fsSL https://get.bunny.dev | sh   # or from a clone:
 ./scripts/install.sh
 bunny configure
-bunny run --web-ui
+bunny run
 ```
+
+Skip browser stack: `./scripts/install.sh --minimal`. Already have Rust/Node: `./scripts/install.sh --skip-prerequisites`.
 
 Copies the binary to `~/.local/bin`. You still need the repo (or a release bundle with `apps/web`) to build the UI.
 
@@ -121,7 +125,7 @@ See [security](../security/README.md).
 ## SSH tunnel mode
 
 ```bash
-./bunny run --web-ui --host 127.0.0.1 --port 7681
+./bunny run --host 127.0.0.1 --port 7681
 ssh -L 7681:127.0.0.1:7681 user@server
 ```
 
@@ -136,6 +140,6 @@ sudo systemctl enable --now bunny-agent
 
 - Linux (primary target) or macOS (dev)
 - Rust 1.86+
-- Node.js 20+ and npm (first `bunny run --web-ui` build)
+- Node.js 20+ and npm (first `bunny run` build)
 - **Browser tab:** Chromium, Xvfb, x11vnc, websockify + sidecar `npm install` (see `./scripts/install-prerequisites.sh`; use `--minimal` to skip)
 - Verify with `bunny doctor`

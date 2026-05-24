@@ -2,6 +2,19 @@
 
 Remote development and debugging tool for Linux servers: PTY terminals, port previews, instrumented desktop browser, unified timeline, and secure local authentication.
 
+## Quick start
+
+```bash
+git clone https://github.com/bunny-dev/bunny.git && cd bunny
+./bunny setup
+bunny configure
+bunny run
+```
+
+On Debian/Ubuntu, `./bunny setup` installs prerequisites (Rust, Node, browser stack) automatically when needed.
+
+Open the UI in your browser (see [where to connect](#where-to-open-the-ui) below). Verbose Rust build: `BUNNY_VERBOSE_BUILD=1 ./bunny setup`
+
 ## Prerequisites
 
 | Tool | Version | Used for |
@@ -12,7 +25,7 @@ Remote development and debugging tool for Linux servers: PTY terminals, port pre
 | **tmux** | any | Persistent terminals |
 | **Neovim** (`nvim`) | any | Default editor on the remote host |
 
-**Browser preview & streaming** (installed by `./scripts/install-prerequisites.sh`; skip with `--minimal`):
+**Browser preview & streaming** (installed automatically by `./bunny setup` on Debian/Ubuntu):
 
 | Tool | Used for |
 |------|----------|
@@ -58,19 +71,12 @@ node --version
 npm --version
 ```
 
-Or run the helper script from the repo (core + browser stack + sidecar npm by default):
+Or run the helper script manually:
 
 ```bash
 ./scripts/install-prerequisites.sh
 source "$HOME/.cargo/env"
 bunny doctor
-```
-
-Minimal install (no Chromium / noVNC / sidecars):
-
-```bash
-./scripts/install-prerequisites.sh --minimal
-source "$HOME/.cargo/env"
 ```
 
 ### macOS
@@ -83,33 +89,6 @@ curl -fsSL https://sh.rustup.rs | sh
 ```
 
 After installing Rust, **open a new shell** or run `source "$HOME/.cargo/env"` so `cargo` is on your `PATH`.
-
-## Quick start
-
-On a **fresh Linux machine** (VM or container), install [prerequisites](#linux-ubuntu--debian--docker) first, then:
-
-```bash
-git clone https://github.com/bunny-dev/bunny.git && cd bunny
-
-# One-time: install CLI on PATH and compile the agent (quiet, ~few minutes)
-./bunny setup
-
-bunny configure
-bunny run --web-ui
-```
-
-Open the UI in your browser (see [where to connect](#where-to-open-the-ui) below).
-
-`./bunny setup` links `bunny` on your `PATH` and builds `target/release/bunny` once. Later commands (`configure`, `run`, …) start instantly with no Rust compile noise. `bunny run --web-ui` only builds the web UI (`npm`) if `apps/web/dist` is missing.
-
-Verbose Rust build (for developers): `BUNNY_VERBOSE_BUILD=1 ./bunny setup`
-
-Manual build (optional):
-
-```bash
-cargo build --release -p bunny-server
-cd apps/web && npm install && npm run build
-```
 
 ### Docker (fresh Ubuntu container)
 
@@ -129,12 +108,10 @@ Inside the container:
 ```bash
 docker exec -it bunny-dev bash
 cd /opt/bunny
-./scripts/install-prerequisites.sh   # required for Browser tab (Xvfb, Chromium, noVNC)
-source "$HOME/.cargo/env"
 ./bunny setup
 bunny configure
-bunny doctor                         # must show ✓ Xvfb and ✓ Chromium
-bunny run --web-ui
+bunny doctor
+bunny run
 ```
 
 In Docker, the launcher and agent bind **`0.0.0.0:7681`** automatically so port publishing works. Confirm you see:
@@ -143,7 +120,7 @@ In Docker, the launcher and agent bind **`0.0.0.0:7681`** automatically so port 
 
 ### Where to open the UI
 
-| Where you run `bunny run --web-ui` | URL in your browser |
+| Where you run `bunny run` | URL in your browser |
 |-----------------------------------|---------------------|
 | **Same machine** (Linux VM with desktop, or SSH with port forward) | `http://127.0.0.1:7681` |
 | **Docker** on your laptop (`-p 127.0.0.1:7681:7681`) | `http://127.0.0.1:7681` on the laptop |
@@ -159,7 +136,7 @@ Use this when the agent runs on a VPS or cloud VM and you want to open the web U
 **1. Listen on all interfaces**
 
 ```bash
-bunny run --web-ui --host 0.0.0.0 --port 7681
+bunny run --host 0.0.0.0 --port 7681
 ```
 
 Or set it once in config (`~/.config/bunny/config.yaml`, or `.bunny.yaml` in the repo — see [.bunny.yaml.example](.bunny.yaml.example)):
@@ -214,7 +191,7 @@ From the repo root you can skip `setup` and call the launcher directly:
 
 ```bash
 ./bunny configure
-./bunny run --web-ui
+./bunny run
 ```
 
 ## Monorepo layout
