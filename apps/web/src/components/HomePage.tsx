@@ -173,12 +173,13 @@ export default function HomePage({ email, isOwner }: Props) {
               : 'Setup Claude'}
           </button>
         )}
-        {claude?.authenticated && (
-          <span className="text-xs text-emerald-400 self-center">
-            Claude Code ready{claude.version ? ` · ${claude.version}` : ''}
-          </span>
-        )}
       </div>
+
+      {claude?.authenticated && (
+        <p className="text-xs text-emerald-400 text-center">
+          Claude Code ready{claude.version ? ` · ${claude.version}` : ''}
+        </p>
+      )}
 
       {claude && !claude.authenticated && claude.install.message && !claude.installed && (
         <p className="text-bunny-muted text-xs max-w-md text-center">{claude.install.message}</p>
