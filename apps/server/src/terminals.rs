@@ -239,6 +239,8 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
         detach_terminal(state, record.id);
     }
 
+    let secret_env = state.secret_env_for_session(record.session_id);
+
     let (tmux_target, fresh_shell) = if state.terminals.uses_tmux() {
         match resolve_tmux_target(state, record)? {
             Some(t) => (Some(t), false),
@@ -253,6 +255,7 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
                         record.id,
                         &resume_cwd,
                         record.init_command.as_deref(),
+                        &secret_env,
                     )?),
                     true,
                 )
@@ -264,7 +267,6 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
 
     let initial_scrollback = format_initial_scrollback(history, fresh_shell);
 
-    let secret_env = state.secret_env_for_session(record.session_id);
     let (term_id, tmux_out) = state.terminals.create_with_id(
         record.id,
         record.session_id,
@@ -314,6 +316,177 @@ fn row_to_record(row: TerminalRow) -> TerminalRecord {
         rows: row.8,
         tmux_target: row.9,
     }
+}
+
+/// Write secrets to a root-only script and `source` it (values never appear on screen).
+fn inject_secrets_via_env_file(
+    state: &AppState,
+    terminal_id: Uuid,
+    secret_env: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let dir = std::path::Path::new(&state.data_dir).join("secret-inject");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{terminal_id}.sh"));
+    let mut body = String::from("# bunny — do not commit\n");
+    for (key, value) in secret_env {
+        if key.starts_with("BUNNY_SECRET_") {
+            let escaped = value.replace('\'', "'\"'\"'");
+            body.push_str(&format!("export {key}='{escaped}'\n"));
+        }
+    }
+    std::fs::write(&path, &body)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let path_str = path.to_string_lossy();
+    state.terminals.write(terminal_id, "stty -echo 2>/dev/null\n")?;
+    state.terminals.write(terminal_id, &format!(". \"{path_str}\"\n"))?;
+    state.terminals.write(terminal_id, "stty echo 2>/dev/null\n")?;
+    Ok(())
+}
+
+/// After vault unlock, push `BUNNY_SECRET_*` into shells that are already running.
+/// When `session_id` is set, only terminals for that workspace session are updated.
+pub fn refresh_secrets_in_running_shells(state: &AppState, session_id: Option<Uuid>) {
+    if !state.secrets.lock().is_unlocked() {
+        return;
+    }
+
+    let mut records: Vec<TerminalRecord> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for (tid, sid) in state.terminal_sessions.read().iter() {
+        if session_id.is_some_and(|want| *sid != want) {
+            continue;
+        }
+        if !seen.insert(*tid) {
+            continue;
+        }
+        if let Ok(Some(row)) = state.auth.db().lock().get_terminal(*tid) {
+            records.push(row_to_record(row));
+        }
+    }
+
+    let db_rows = if let Some(sid) = session_id {
+        state
+            .auth
+            .db()
+            .lock()
+            .list_terminals_for_session(sid)
+            .unwrap_or_default()
+    } else {
+        state
+            .auth
+            .db()
+            .lock()
+            .list_terminals_with_status("running")
+            .unwrap_or_default()
+    };
+
+    for row in db_rows {
+        let record = row_to_record(row);
+        if session_id.is_some_and(|sid| record.session_id != sid) {
+            continue;
+        }
+        if seen.insert(record.id) {
+            records.push(record);
+        }
+    }
+
+    if records.is_empty() {
+        tracing::info!(
+            ?session_id,
+            "vault unlocked: no terminals to refresh with secrets"
+        );
+        return;
+    }
+
+    let default_shell = state.config.terminal.shell.clone();
+    let tmux_installed = tmux::available();
+    let mut refreshed = 0usize;
+
+    for record in records {
+        let secret_env = state.secret_env_for_session(record.session_id);
+        if secret_env.is_empty() {
+            continue;
+        }
+
+        let cwd = PathBuf::from(&record.cwd);
+        let shell = if record.shell.is_empty() {
+            default_shell.as_str()
+        } else {
+            record.shell.as_str()
+        };
+
+        let mut done = false;
+        if tmux_installed {
+            let target = resolve_tmux_target(state, &record)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    let name = tmux::terminal_session_name(record.id);
+                    if tmux::has_session(&name) {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                });
+            if let Some(target) = target {
+                let cwd = tmux::pane_cwd(&target)
+                    .map(PathBuf::from)
+                    .unwrap_or(cwd);
+                match tmux::reload_shell_secrets(&target, &cwd, shell, &secret_env) {
+                    Ok(()) => {
+                        state.terminals.refresh_display(record.id);
+                        done = true;
+                    }
+                    Err(e) => tracing::warn!(
+                        terminal = %record.id,
+                        error = %e,
+                        "tmux reload_shell_secrets failed"
+                    ),
+                }
+            }
+        }
+
+        if !done && state.terminals.get(record.id).is_some() {
+            match inject_secrets_via_env_file(state, record.id, &secret_env) {
+                Ok(()) => done = true,
+                Err(e) => tracing::warn!(
+                    terminal = %record.id,
+                    error = %e,
+                    "env-file secret inject failed"
+                ),
+            }
+        }
+
+        if !done {
+            tracing::warn!(
+                terminal = %record.id,
+                tmux_installed,
+                "vault unlock: could not refresh secrets for this shell"
+            );
+            continue;
+        }
+
+        refreshed += 1;
+        tracing::info!(
+            terminal = %record.id,
+            session = %record.session_id,
+            vars = secret_env.len(),
+            tmux = tmux_installed,
+            "refreshed shell secrets after vault unlock"
+        );
+    }
+
+    tracing::info!(
+        ?session_id,
+        refreshed,
+        total = seen.len(),
+        "vault unlock secret refresh complete"
+    );
 }
 
 pub fn ensure_session_terminals_live(state: &Arc<AppState>, session_id: Uuid) {

@@ -32,7 +32,8 @@ pub async fn handle_terminal_ws(
     if let Some(target) = state.terminals.tmux_target(terminal_id) {
         let cwd = terminal_cwd(&state, terminal_id).unwrap_or_else(default_shell_cwd);
         let shell = &state.config.terminal.shell;
-        let _ = tmux::ensure_shell_running(&target, &cwd, shell);
+        let secret_env = secret_env_for_terminal(&state, terminal_id);
+        let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
     }
 
     let from = from_offset.unwrap_or(0);
@@ -65,7 +66,8 @@ pub async fn handle_terminal_ws(
                                         let cwd = terminal_cwd(&state, terminal_id)
                                             .unwrap_or_else(default_shell_cwd);
                                         let shell = &state.config.terminal.shell;
-                                        let _ = tmux::ensure_shell_running(&target, &cwd, shell);
+                                        let secret_env = secret_env_for_terminal(&state, terminal_id);
+                                        let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
                                     }
                                     let from = from_offset.unwrap_or(0);
                                     let has_history =
@@ -115,6 +117,15 @@ fn terminal_cwd(state: &AppState, terminal_id: Uuid) -> Option<PathBuf> {
         .ok()
         .flatten()
         .map(|row| PathBuf::from(row.5))
+}
+
+fn secret_env_for_terminal(state: &AppState, terminal_id: Uuid) -> std::collections::HashMap<String, String> {
+    state
+        .terminal_sessions
+        .read()
+        .get(&terminal_id)
+        .map(|session_id| state.secret_env_for_session(*session_id))
+        .unwrap_or_default()
 }
 
 /// Push scrollback to the client. Returns true when persisted history was included.

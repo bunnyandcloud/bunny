@@ -31,6 +31,8 @@ pub struct AppState {
     pub timeline_seq: AtomicU64,
     pub data_dir: String,
     pub secrets: Mutex<SecretsVault>,
+    /// Passphrase kept in memory while vault is unlocked via API (cleared on lock).
+    pub secrets_passphrase: Mutex<Option<String>>,
     pub fcm: FcmClient,
     pub webrtc_sidecar: RwLock<Option<crate::webrtc::WebRtcSidecar>>,
 }
@@ -56,13 +58,16 @@ impl AppState {
         let fcm = FcmClient::new(fcm_key);
         if let Ok(pass) = std::env::var("BUNNY_SECRETS_PASSPHRASE") {
             let mut vault = secrets;
+            let mut stored_pass = None;
             if vault.path().exists() {
-                let _ = vault.unlock(&pass);
+                if vault.unlock(&pass).is_ok() {
+                    stored_pass = Some(pass);
+                }
             }
-            return Self::from_parts(config, data_dir, auth, vault, fcm);
+            return Self::from_parts(config, data_dir, auth, vault, fcm, stored_pass);
         }
 
-        Self::from_parts(config, data_dir, auth, secrets, fcm)
+        Self::from_parts(config, data_dir, auth, secrets, fcm, None)
     }
 
     fn from_parts(
@@ -71,6 +76,7 @@ impl AppState {
         auth: AuthService,
         secrets: SecretsVault,
         fcm: FcmClient,
+        secrets_passphrase: Option<String>,
     ) -> Result<Self> {
         let mut redactor = Redactor::new();
         if secrets.is_unlocked() {
@@ -90,6 +96,7 @@ impl AppState {
             browsers: BrowserManager::new(config.browser.width, config.browser.height),
             redactor: RwLock::new(redactor),
             secrets: Mutex::new(secrets),
+            secrets_passphrase: Mutex::new(secrets_passphrase),
             fcm,
             webrtc_sidecar: RwLock::new(None),
             supervisor: RwLock::new(ProcessSupervisor::new(

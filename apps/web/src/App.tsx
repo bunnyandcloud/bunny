@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import HomePage from './components/HomePage';
 import LoginPage from './components/LoginPage';
-import SessionWorkspace from './components/SessionWorkspace';
 import { useAuth } from './store/auth';
+
+const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
+const SecretsPage = lazy(() => import('./components/SecretsPage'));
 
 function parseSessionFromPath(): string | null {
   const m = location.pathname.match(/^\/s\/([^/]+)/);
@@ -35,8 +37,36 @@ export default function App() {
   }
 
   if (sessionId) {
-    return <SessionWorkspace sessionId={sessionId} />;
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+            Loading session…
+          </div>
+        }
+      >
+        <SessionWorkspace sessionId={sessionId} />
+      </Suspense>
+    );
   }
 
-  return <HomePage email={user.email} />;
+  if (location.pathname === '/secrets') {
+    if (!user.isOwner) {
+      location.href = '/';
+      return null;
+    }
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+            Loading…
+          </div>
+        }
+      >
+        <SecretsPage email={user.email} />
+      </Suspense>
+    );
+  }
+
+  return <HomePage email={user.email} isOwner={user.isOwner} />;
 }

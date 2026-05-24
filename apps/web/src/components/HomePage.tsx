@@ -11,9 +11,10 @@ interface SessionItem {
 
 interface Props {
   email: string;
+  isOwner: boolean;
 }
 
-export default function HomePage({ email }: Props) {
+export default function HomePage({ email, isOwner }: Props) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -77,14 +78,25 @@ export default function HomePage({ email }: Props) {
         <p className="text-bunny-muted text-sm">Start or resume a remote dev session.</p>
       </div>
 
-      <button
-        type="button"
-        onClick={handleNewSession}
-        disabled={creating}
-        className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
-      >
-        {creating ? 'Creating…' : 'New session'}
-      </button>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={handleNewSession}
+          disabled={creating}
+          className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
+        >
+          {creating ? 'Creating…' : 'New session'}
+        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={() => { location.href = '/secrets'; }}
+            className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
+          >
+            Secrets vault
+          </button>
+        )}
+      </div>
 
       {error && (
         <p className="text-red-400 text-sm max-w-md text-center" role="alert">

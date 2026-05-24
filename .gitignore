@@ -17,6 +17,7 @@ coverage/
 
 # Bunny runtime
 .bunny/
+secret-inject/
 *.db
 *.db-journal
 

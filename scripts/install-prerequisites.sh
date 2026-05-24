@@ -11,7 +11,7 @@ fi
 echo "→ Installing system packages (curl, build tools, SSL)…"
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
-$SUDO apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git
+$SUDO apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "→ Installing Rust (rustup)…"

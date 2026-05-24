@@ -6,6 +6,7 @@ mod preview;
 mod realtime;
 mod recovery;
 mod secrets_cli;
+mod secrets_ops;
 mod state;
 mod terminals;
 mod web_ui;

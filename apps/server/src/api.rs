@@ -1,5 +1,9 @@
 use crate::middleware;
 use crate::preview;
+use crate::secrets_ops::{
+    self, ensure_secrets_access, init_vault, list_secrets, lock_vault, reveal_secret, remove_secret,
+    unlock_vault, upsert_secret, SecretMetaResponse, SecretRevealResponse, VaultStatusResponse,
+};
 use crate::state::AppState;
 use crate::terminals::{
     default_session_path_label, default_shell_cwd, ensure_session_terminals_live, persist_terminal,
@@ -66,6 +70,13 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/browser-sessions/:id/webrtc/stop", post(browser_webrtc_stop))
         .route("/timeline", get(get_timeline))
         .route("/audit-logs", get(get_audit_logs))
+        .route("/secrets/status", get(secrets_status))
+        .route("/secrets/init", post(secrets_init))
+        .route("/secrets/unlock", post(secrets_unlock))
+        .route("/secrets/lock", post(secrets_lock))
+        .route("/secrets", get(secrets_list).post(secrets_upsert))
+        .route("/secrets/:name/reveal", get(secrets_reveal))
+        .route("/secrets/:name", delete(secrets_delete))
         .route("/voice/intent", post(voice_intent))
         .route("/voice/confirm", post(voice_confirm))
         .route("/push/register", post(push_register))
@@ -165,10 +176,16 @@ async fn auth_me(
     Extension(user): Extension<Uuid>,
 ) -> Result<Json<MeResponse>, ApiError> {
     let (email, created_at) = state.auth.me(user).map_err(|_| ApiError::unauthorized())?;
+    let is_owner = state
+        .auth
+        .owner_id()
+        .map(|owner| owner == user)
+        .unwrap_or(false);
     Ok(Json(MeResponse {
         user_id: user.to_string(),
         email,
         created_at: created_at.to_rfc3339(),
+        is_owner,
     }))
 }
 
@@ -552,7 +569,12 @@ async fn terminal_input(
         .copied()
         .ok_or_else(|| ApiError::not_found("terminal"))?;
     ensure_session_access(&state, user, session_id, Action::TerminalWrite)?;
-    state.terminals.write(id, &body.data)?;
+    crate::terminals::prepare_terminal_connection(&state, id)
+        .map_err(|_| ApiError::not_found("terminal"))?;
+    state
+        .terminals
+        .write(id, &body.data)
+        .map_err(|_| ApiError::not_found("terminal"))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -929,7 +951,117 @@ fn classify_command_risk(cmd: &str) -> &'static str {
     }
 }
 
+async fn secrets_status(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<VaultStatusResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    Ok(Json(secrets_ops::vault_status(&state)))
+}
+
+async fn secrets_init(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<SecretsInitRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    init_vault(&state, &body.passphrase, &body.confirm_passphrase)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn secrets_unlock(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<SecretsPassphraseRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    let session_id = body
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| ApiError::validation("invalid session_id"))?;
+    unlock_vault(&state, &body.passphrase, session_id)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn secrets_lock(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    lock_vault(&state);
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn secrets_list(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<Vec<SecretMetaResponse>>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    Ok(Json(list_secrets(&state)?))
+}
+
+async fn secrets_upsert(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<SecretUpsertRequest>,
+) -> Result<Json<SecretMetaResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    Ok(Json(upsert_secret(
+        &state,
+        &body.name,
+        &body.scope,
+        body.session_id,
+        &body.value,
+    )?))
+}
+
+async fn secrets_delete(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(name): Path<String>,
+    Query(q): Query<SecretScopeQuery>,
+) -> Result<StatusCode, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    remove_secret(&state, &name, &q.scope, q.session_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn secrets_reveal(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(name): Path<String>,
+    Query(q): Query<SecretScopeQuery>,
+) -> Result<Json<SecretRevealResponse>, ApiError> {
+    ensure_secrets_access(&state, user)?;
+    Ok(Json(reveal_secret(&state, &name, &q.scope, q.session_id)?))
+}
+
 // --- DTOs ---
+
+#[derive(Serialize)]
+pub struct OkResponse { pub ok: bool }
+#[derive(Deserialize)]
+pub struct SecretsInitRequest { pub passphrase: String, pub confirm_passphrase: String }
+#[derive(Deserialize)]
+pub struct SecretsPassphraseRequest {
+    pub passphrase: String,
+    /// When set, reload shells in this workspace session after unlock.
+    pub session_id: Option<String>,
+}
+#[derive(Deserialize)]
+pub struct SecretUpsertRequest {
+    pub name: String,
+    pub scope: String,
+    pub session_id: Option<String>,
+    pub value: String,
+}
+#[derive(Deserialize)]
+pub struct SecretScopeQuery {
+    pub scope: String,
+    pub session_id: Option<String>,
+}
 
 #[derive(Deserialize)]
 pub struct BootstrapRequest { pub email: String, pub password: String }
@@ -949,7 +1081,7 @@ pub struct LoginRequest { pub email: String, pub password: String, pub device_id
 #[derive(Serialize)]
 pub struct LoginResponse { pub user_id: String, pub email: String, pub expires_at: String }
 #[derive(Serialize)]
-pub struct MeResponse { pub user_id: String, pub email: String, pub created_at: String }
+pub struct MeResponse { pub user_id: String, pub email: String, pub created_at: String, pub is_owner: bool }
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
     pub project_path: Option<String>,
@@ -1122,11 +1254,11 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn unauthorized() -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: "authentication required".into() } }
-    fn forbidden(msg: &str) -> Self { Self { status: StatusCode::FORBIDDEN, code: "FORBIDDEN".into(), message: msg.into() } }
-    fn not_found(r: &str) -> Self { Self { status: StatusCode::NOT_FOUND, code: "NOT_FOUND".into(), message: format!("{r} not found") } }
-    fn conflict(msg: &str) -> Self { Self { status: StatusCode::CONFLICT, code: "CONFLICT".into(), message: msg.into() } }
-    fn validation(msg: &str) -> Self { Self { status: StatusCode::BAD_REQUEST, code: "VALIDATION_ERROR".into(), message: msg.into() } }
+    pub(crate) fn unauthorized() -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: "authentication required".into() } }
+    pub(crate) fn forbidden(msg: &str) -> Self { Self { status: StatusCode::FORBIDDEN, code: "FORBIDDEN".into(), message: msg.into() } }
+    pub(crate) fn not_found(r: &str) -> Self { Self { status: StatusCode::NOT_FOUND, code: "NOT_FOUND".into(), message: format!("{r} not found") } }
+    pub(crate) fn conflict(msg: &str) -> Self { Self { status: StatusCode::CONFLICT, code: "CONFLICT".into(), message: msg.into() } }
+    pub(crate) fn validation(msg: &str) -> Self { Self { status: StatusCode::BAD_REQUEST, code: "VALIDATION_ERROR".into(), message: msg.into() } }
 }
 
 impl From<anyhow::Error> for ApiError {

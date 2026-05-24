@@ -10,5 +10,22 @@ export default defineConfig({
       '/s': { target: 'http://127.0.0.1:7681', changeOrigin: true },
     },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    // xterm.js is ~500 kB minified; split it from the app shell.
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/@xterm') || id.includes('node_modules/xterm')) {
+            return 'xterm';
+          }
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) {
+            return 'react';
+          }
+        },
+      },
+    },
+  },
 });

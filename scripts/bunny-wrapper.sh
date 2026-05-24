@@ -12,9 +12,19 @@ runnable() {
   [[ -x "$bin" ]] && "$bin" run --help >/dev/null 2>&1
 }
 
+server_sources_newer_than_release() {
+  [[ -f "$RELEASE" ]] || return 1
+  find "$ROOT/apps/server/src" "$ROOT/crates" \
+    \( -name '*.rs' -o -name 'Cargo.toml' \) \
+    -newer "$RELEASE" -print -quit 2>/dev/null | grep -q .
+}
+
 build_release_binary() {
-  if runnable "$RELEASE"; then
-    return 0
+  if runnable "$RELEASE" && [[ "${BUNNY_FORCE_BUILD:-}" != "1" ]]; then
+    if ! server_sources_newer_than_release; then
+      return 0
+    fi
+    echo "→ Server sources changed since last build — recompiling…" >&2
   fi
   if [[ "${BUNNY_VERBOSE_BUILD:-}" == "1" ]]; then
     echo "→ Compiling bunny agent…" >&2
@@ -132,7 +142,7 @@ fi
 # shellcheck source=/dev/null
 [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
-if ! runnable "$RELEASE"; then
+if ! runnable "$RELEASE" || server_sources_newer_than_release; then
   build_release_binary
 fi
 

@@ -28,7 +28,7 @@ export function login(email: string, password: string) {
 }
 
 export function me() {
-  return api<{ user_id: string; email: string }>('/auth/me');
+  return api<{ user_id: string; email: string; is_owner: boolean }>('/auth/me');
 }
 
 export function listSessions() {
@@ -90,6 +90,13 @@ export function deleteTerminal(terminalId: string) {
   return api<void>(`/terminals/${terminalId}`, { method: 'DELETE' });
 }
 
+export function sendTerminalInput(terminalId: string, data: string) {
+  return api<void>(`/terminals/${terminalId}/input`, {
+    method: 'POST',
+    body: JSON.stringify({ data }),
+  });
+}
+
 export function renameTerminal(terminalId: string, name: string) {
   return api<{ id: string; name: string; status: string }>(`/terminals/${terminalId}`, {
     method: 'PATCH',
@@ -114,4 +121,70 @@ export function terminalWsUrl(terminalId: string, fromOffset?: number) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const q = fromOffset ? `?from_offset=${fromOffset}` : '';
   return `${proto}://${location.host}/api/v1/terminals/${terminalId}/ws${q}`;
+}
+
+export interface VaultStatus {
+  status: 'missing' | 'locked' | 'unlocked';
+  path: string;
+  ref_count: number;
+}
+
+export interface SecretMeta {
+  name: string;
+  scope: string;
+  session_id: string | null;
+  env_var: string;
+}
+
+export function getSecretsStatus() {
+  return api<VaultStatus>('/secrets/status');
+}
+
+export function initSecretsVault(passphrase: string, confirmPassphrase: string) {
+  return api<{ ok: boolean }>('/secrets/init', {
+    method: 'POST',
+    body: JSON.stringify({ passphrase, confirm_passphrase: confirmPassphrase }),
+  });
+}
+
+export function unlockSecretsVault(passphrase: string, sessionId?: string) {
+  return api<{ ok: boolean }>('/secrets/unlock', {
+    method: 'POST',
+    body: JSON.stringify({
+      passphrase,
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }),
+  });
+}
+
+export function lockSecretsVault() {
+  return api<{ ok: boolean }>('/secrets/lock', { method: 'POST' });
+}
+
+export function listSecrets() {
+  return api<SecretMeta[]>('/secrets');
+}
+
+export function upsertSecret(body: {
+  name: string;
+  scope: string;
+  session_id?: string;
+  value: string;
+}) {
+  return api<SecretMeta>('/secrets', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteSecret(name: string, scope: string, sessionId?: string) {
+  const params = new URLSearchParams({ scope });
+  if (sessionId) params.set('session_id', sessionId);
+  return api<void>(`/secrets/${encodeURIComponent(name)}?${params}`, { method: 'DELETE' });
+}
+
+export function revealSecret(name: string, scope: string, sessionId?: string) {
+  const params = new URLSearchParams({ scope });
+  if (sessionId) params.set('session_id', sessionId);
+  return api<{ value: string }>(`/secrets/${encodeURIComponent(name)}/reveal?${params}`);
 }

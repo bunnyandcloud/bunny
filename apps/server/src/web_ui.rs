@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 /// Monorepo root containing `apps/web/package.json`.
 pub fn find_repo_root() -> Option<PathBuf> {
@@ -49,12 +50,42 @@ pub fn web_dist_dir(repo_root: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
+fn dir_max_mtime(dir: &Path) -> Option<SystemTime> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut max: Option<SystemTime> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let candidate = if path.is_dir() {
+            dir_max_mtime(&path)
+        } else {
+            entry.metadata().ok().and_then(|m| m.modified().ok())
+        };
+        if let Some(t) = candidate {
+            max = Some(max.map(|m| m.max(t)).unwrap_or(t));
+        }
+    }
+    max
+}
+
+fn web_ui_stale(web_dir: &Path, dist: &Path) -> bool {
+    let dist_index = dist.join("index.html");
+    let Ok(dist_mtime) = dist_index.metadata().and_then(|m| m.modified()) else {
+        return true;
+    };
+    let src = web_dir.join("src");
+    dir_max_mtime(&src).is_some_and(|src_mtime| src_mtime > dist_mtime)
+}
+
 pub fn ensure_web_ui_built(repo_root: &Path) -> Result<PathBuf> {
     let web_dir = repo_root.join("apps/web");
     let dist = web_dir.join("dist");
     if dist.join("index.html").is_file() {
-        println!("✓ Web UI already built ({})", dist.display());
-        return Ok(dist);
+        if web_ui_stale(&web_dir, &dist) {
+            println!("→ Web UI sources changed — rebuilding (apps/web)…");
+        } else {
+            println!("✓ Web UI already built ({})", dist.display());
+            return Ok(dist);
+        }
     }
 
     if !Command::new("npm")

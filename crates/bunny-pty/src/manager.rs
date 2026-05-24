@@ -143,20 +143,25 @@ impl TerminalManager {
                 env.insert(k, v);
             }
         }
+        let secret_env: HashMap<String, String> = env
+            .iter()
+            .filter(|(k, _)| k.starts_with("BUNNY_SECRET_"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
 
         let (pty, tmux_target) = if self.use_tmux {
             let tmux_target = if let Some(target) = existing_tmux_target {
                 if tmux::target_alive(target) {
                     tmux::configure_session_for_web(tmux::session_name_from_target(target));
-                    tmux::ensure_shell_running(target, cwd, &self.default_shell)
+                    tmux::ensure_shell_running(target, cwd, &self.default_shell, &secret_env)
                         .context("respawn tmux shell")?;
                     target.to_string()
                 } else {
-                    tmux::ensure_terminal_session(id, cwd, init_command)
+                    tmux::ensure_terminal_session(id, cwd, init_command, &secret_env)
                         .context("recreate tmux session for shell")?
                 }
             } else {
-                tmux::ensure_terminal_session(id, cwd, init_command)
+                tmux::ensure_terminal_session(id, cwd, init_command, &secret_env)
                     .context("create tmux session for shell")?
             };
             let pty = PtySession::spawn_tmux_attach(

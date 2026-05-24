@@ -1,10 +1,16 @@
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
-import { useEffect, useRef } from 'react';
 import { terminalWsUrl } from '../lib/api';
 import { filterClientInput, filterServerOutput } from '../lib/terminalSanitize';
 import '@xterm/xterm/css/xterm.css';
+
+export interface TerminalPanelHandle {
+  /** Insert text at the cursor. Returns true when sent over the live WebSocket. */
+  inject: (text: string) => boolean;
+  focus: () => void;
+}
 
 interface Props {
   terminalId: string;
@@ -13,18 +19,31 @@ interface Props {
   readonly?: boolean;
 }
 
-export default function TerminalPanel({
-  terminalId,
-  active = true,
-  readonly,
-}: Props) {
+const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel(
+  { terminalId, active = true, readonly },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const injectFnRef = useRef<(text: string) => boolean>(() => false);
   const offsetRef = useRef(0);
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      inject(text: string) {
+        return injectFnRef.current(text);
+      },
+      focus() {
+        termRef.current?.focus();
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!active || !termRef.current || !fitRef.current || !containerRef.current) {
@@ -32,7 +51,6 @@ export default function TerminalPanel({
     }
     fitRef.current.fit();
     termRef.current.focus();
-    // Resize only — `refresh` redraws tmux's live screen (~24 lines) and wipes replayed scrollback.
     if (wsRef.current?.readyState === WebSocket.OPEN && termRef.current) {
       wsRef.current.send(
         JSON.stringify({
@@ -51,14 +69,6 @@ export default function TerminalPanel({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, Consolas, monospace',
-      windowOptions: {
-        setWinLines: false,
-        setWinColumns: false,
-        refreshWin: false,
-        setWinSizePixels: false,
-        setTitle: false,
-        pushTitle: false,
-      },
       theme: {
         background: '#0d1117',
         foreground: '#c9d1d9',
@@ -192,6 +202,23 @@ export default function TerminalPanel({
       });
     }
 
+    injectFnRef.current = (text: string): boolean => {
+      const term = termRef.current;
+      const ws = wsRef.current;
+      if (!term || readonly) return false;
+      const filtered = filterClientInput(text);
+      if (!filtered) return false;
+
+      // Show immediately (term.input does not mirror keyboard echo).
+      term.write(filtered);
+
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data: filtered }));
+        return true;
+      }
+      return false;
+    };
+
     const onResize = () => sendResizeDeferred();
     window.addEventListener('resize', onResize);
 
@@ -202,6 +229,8 @@ export default function TerminalPanel({
       window.removeEventListener('resize', onResize);
       wsRef.current?.close();
       fitRef.current = null;
+      termRef.current = null;
+      injectFnRef.current = () => false;
       term.dispose();
     };
   }, [terminalId, readonly]);
@@ -212,4 +241,6 @@ export default function TerminalPanel({
       className="h-full w-full min-h-[200px] p-1 bg-bunny-bg rounded"
     />
   );
-}
+});
+
+export default TerminalPanel;

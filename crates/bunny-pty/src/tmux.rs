@@ -1,14 +1,22 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
 
 pub fn available() -> bool {
-    Command::new("tmux")
+    tmux_version_output("tmux").is_some()
+        || ["/usr/bin/tmux", "/bin/tmux", "/usr/local/bin/tmux"]
+            .into_iter()
+            .any(|p| tmux_version_output(p).is_some())
+}
+
+fn tmux_version_output(bin: &str) -> Option<std::process::Output> {
+    Command::new(bin)
         .arg("-V")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .ok()
+        .filter(|o| o.status.success())
 }
 
 /// Legacy: one tmux session per workspace with a window per shell.
@@ -101,18 +109,28 @@ pub fn ensure_terminal_session(
     terminal_id: Uuid,
     cwd: &Path,
     init_command: Option<&str>,
+    secret_env: &HashMap<String, String>,
 ) -> Result<String> {
     let name = terminal_session_name(terminal_id);
     if has_session(&name) {
         configure_session_for_web(&name);
+        apply_session_secrets(&name, secret_env);
         return Ok(name);
     }
     let cwd = cwd.to_str().context("invalid cwd")?;
+    let mut args = vec![
+        "new-session".to_string(),
+        "-d".to_string(),
+        "-s".to_string(),
+        name.clone(),
+        "-c".to_string(),
+        cwd.to_string(),
+    ];
+    append_env_flags(&mut args, secret_env);
     if let Some(cmd) = init_command {
-        run(&["new-session", "-d", "-s", &name, "-c", cwd, cmd])?;
-    } else {
-        run(&["new-session", "-d", "-s", &name, "-c", cwd])?;
+        args.push(cmd.to_string());
     }
+    run_owned(&args)?;
     configure_session_for_web(&name);
     Ok(name)
 }
@@ -193,20 +211,50 @@ pub fn pane_is_dead(target: &str) -> bool {
         .any(|l| l.trim() == "1")
 }
 
-/// Start a fresh shell in the target when the pane died (e.g. after agent stop + SIGHUP).
-pub fn ensure_shell_running(target: &str, cwd: &Path, shell: &str) -> Result<()> {
-    if !target_alive(target) {
-        return Ok(());
-    }
-    if !pane_is_dead(target) {
+/// Respawn the pane with `BUNNY_SECRET_*` in the process environment (values never echoed).
+pub fn reload_shell_secrets(
+    target: &str,
+    cwd: &Path,
+    shell: &str,
+    secret_env: &HashMap<String, String>,
+) -> Result<()> {
+    if !target_alive(target) || secret_env.is_empty() {
         return Ok(());
     }
     let session = session_name_from_target(target);
     configure_session_for_web(session);
+    apply_session_secrets(session, secret_env);
     let cwd = cwd.to_str().context("invalid cwd")?;
-    tracing::info!(%target, "respawning dead tmux pane");
-    run(&["respawn-pane", "-k", "-t", target, "-c", cwd, shell])?;
+    tracing::info!(%target, "reloading shell with vault secrets");
+    let mut args = vec![
+        "respawn-pane".to_string(),
+        "-k".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "-c".to_string(),
+        cwd.to_string(),
+    ];
+    append_env_flags(&mut args, secret_env);
+    args.push(shell.to_string());
+    run_owned(&args)?;
     Ok(())
+}
+
+/// Start a fresh shell in the target when the pane died (e.g. after agent stop + SIGHUP).
+pub fn ensure_shell_running(
+    target: &str,
+    cwd: &Path,
+    shell: &str,
+    secret_env: &HashMap<String, String>,
+) -> Result<()> {
+    if !target_alive(target) {
+        return Ok(());
+    }
+    if !pane_is_dead(target) {
+        apply_session_secrets(session_name_from_target(target), secret_env);
+        return Ok(());
+    }
+    reload_shell_secrets(target, cwd, shell, secret_env)
 }
 
 pub fn kill_window(session: &str, window: &str) {
@@ -252,6 +300,28 @@ pub fn target_alive(target: &str) -> bool {
     } else {
         has_session(target)
     }
+}
+
+fn append_env_flags(args: &mut Vec<String>, secret_env: &HashMap<String, String>) {
+    for (key, value) in secret_env {
+        if key.starts_with("BUNNY_SECRET_") {
+            args.push("-e".to_string());
+            args.push(format!("{key}={value}"));
+        }
+    }
+}
+
+fn apply_session_secrets(session: &str, secret_env: &HashMap<String, String>) {
+    for (key, value) in secret_env {
+        if key.starts_with("BUNNY_SECRET_") {
+            let _ = run(&["set-environment", "-t", session, key, value]);
+        }
+    }
+}
+
+fn run_owned(args: &[String]) -> Result<()> {
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(&refs)
 }
 
 fn run(args: &[&str]) -> Result<()> {

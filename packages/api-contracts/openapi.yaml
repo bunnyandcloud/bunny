@@ -105,6 +105,29 @@ paths:
   /browser-sessions/{id}/webrtc/stop:
     post:
       summary: Stop browser WebRTC stream
+  /secrets/status:
+    get:
+      summary: Vault status (owner only)
+  /secrets/init:
+    post:
+      summary: Create encrypted vault (owner only)
+  /secrets/unlock:
+    post:
+      summary: Unlock vault (owner only)
+  /secrets/lock:
+    post:
+      summary: Lock vault (owner only)
+  /secrets:
+    get:
+      summary: List secret metadata (owner only)
+    post:
+      summary: Create or update secret (owner only)
+  /secrets/{name}:
+    delete:
+      summary: Remove secret (owner only)
+  /secrets/{name}/reveal:
+    get:
+      summary: Reveal secret value (owner only)
 components:
   securitySchemes:
     cookieAuth:
@@ -148,3 +171,16 @@ components:
           properties:
             code: { type: string }
             message: { type: string }
+    VaultStatusResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [missing, locked, unlocked] }
+        path: { type: string }
+        ref_count: { type: integer }
+    SecretMeta:
+      type: object
+      properties:
+        name: { type: string }
+        scope: { type: string }
+        session_id: { type: string, nullable: true }
+        env_var: { type: string }

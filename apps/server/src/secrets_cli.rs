@@ -76,6 +76,7 @@ pub async fn run_secrets(state: &AppState, opts: SecretsOpts) -> Result<()> {
         SecretsCommands::Unlock { passphrase } => run_unlock(state, passphrase),
         SecretsCommands::Lock => {
             state.secrets.lock().lock_vault();
+            *state.secrets_passphrase.lock() = None;
             state.refresh_redactor_secrets();
             println!("✓ Secrets vault locked");
             Ok(())
@@ -112,7 +113,8 @@ fn run_init(state: &AppState, passphrase: Option<String>) -> Result<()> {
     }
     state.secrets.lock().init(&pass).map_err(secrets_err)?;
     state.secrets.lock().unlock(&pass).map_err(secrets_err)?;
-    state.refresh_redactor_secrets();
+    *state.secrets_passphrase.lock() = Some(pass);
+    crate::secrets_ops::on_vault_unlocked_cli(state);
     println!("✓ Created {}", state.secrets_path().display());
     Ok(())
 }
@@ -122,7 +124,8 @@ fn run_unlock(state: &AppState, passphrase: Option<String>) -> Result<()> {
         prompt_password("Vault passphrase: ")
     });
     state.secrets.lock().unlock(&pass).map_err(secrets_err)?;
-    state.refresh_redactor_secrets();
+    *state.secrets_passphrase.lock() = Some(pass);
+    crate::secrets_ops::on_vault_unlocked_cli(state);
     println!("✓ Secrets vault unlocked");
     Ok(())
 }
@@ -147,7 +150,7 @@ fn run_set(
         value: val,
     };
     state.secrets.lock().set(entry).map_err(secrets_err)?;
-    let pass = current_passphrase(pass_hint)?;
+    let pass = current_passphrase(state, pass_hint)?;
     state.secrets.lock().save(&pass).map_err(secrets_err)?;
     sync_secret_ref(state, name, scope_str, sid)?;
     state.refresh_redactor_secrets();
@@ -194,7 +197,7 @@ fn run_remove(
     let scope = parse_scope(scope_str).map_err(secrets_err)?;
     let sid = parse_session_id(scope, session_id)?;
     state.secrets.lock().remove(name, scope, sid).map_err(secrets_err)?;
-    let pass = current_passphrase(pass_hint)?;
+    let pass = current_passphrase(state, pass_hint)?;
     state.secrets.lock().save(&pass).map_err(secrets_err)?;
     state
         .auth
@@ -221,10 +224,16 @@ fn ensure_unlocked(state: &AppState, passphrase: Option<String>) -> Result<()> {
     run_unlock(state, passphrase)
 }
 
-fn current_passphrase(passphrase: Option<String>) -> Result<String> {
-    Ok(passphrase
-        .or_else(read_passphrase_from_env)
-        .unwrap_or_else(|| prompt_password("Vault passphrase (to save): ")))
+fn current_passphrase(state: &AppState, passphrase: Option<String>) -> Result<String> {
+    if let Some(pass) = passphrase {
+        return Ok(pass);
+    }
+    if let Some(pass) = state.secrets_passphrase.lock().clone() {
+        return Ok(pass);
+    }
+    Ok(std::env::var("BUNNY_SECRETS_PASSPHRASE").unwrap_or_else(|_| {
+        prompt_password("Vault passphrase (to save): ")
+    }))
 }
 
 fn read_passphrase_from_env() -> Option<String> {
