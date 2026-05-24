@@ -10,6 +10,7 @@ Install **before** `cargo build` or `bunny run --web-ui`:
 | **Node.js 20+** + **npm** | Web UI build + WebRTC/CDP sidecars |
 | **build-essential**, **pkg-config**, **libssl-dev** | Linux compile deps |
 | **tmux** | Persistent terminals (included in install script) |
+| **Neovim** (`nvim`) | Default editor on the remote host (included in install script) |
 
 **Browser tab** (optional; not needed for port Preview):
 

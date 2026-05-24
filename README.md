@@ -10,6 +10,7 @@ Remote development and debugging tool for Linux servers: PTY terminals, port pre
 | **Node.js** + **npm** | 20+ | Web UI (`apps/web`) + WebRTC/CDP sidecars |
 | **Git** | any | Clone |
 | **tmux** | any | Persistent terminals |
+| **Neovim** (`nvim`) | any | Default editor on the remote host |
 
 **Browser preview & streaming** (installed by `./scripts/install-prerequisites.sh`; skip with `--minimal`):
 
@@ -29,7 +30,7 @@ Inside the container or VM:
 
 ```bash
 apt-get update
-apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux
+apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux neovim
 
 # Browser stack (Preview tab works without this; Browser tab needs it)
 apt-get install -y xvfb x11vnc websockify
@@ -78,6 +79,7 @@ source "$HOME/.cargo/env"
 xcode-select --install   # if needed
 curl -fsSL https://sh.rustup.rs | sh
 # Node: https://nodejs.org/ or brew install node
+# Neovim: brew install neovim
 ```
 
 After installing Rust, **open a new shell** or run `source "$HOME/.cargo/env"` so `cargo` is on your `PATH`.

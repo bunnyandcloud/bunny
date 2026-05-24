@@ -20,10 +20,10 @@ else
   SUDO="sudo"
 fi
 
-echo "→ Installing system packages (curl, build tools, SSL, tmux)…"
+echo "→ Installing system packages (curl, build tools, SSL, tmux, neovim)…"
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
-$SUDO apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux
+$SUDO apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux neovim
 
 if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
   echo "→ Installing browser stack (Xvfb, x11vnc, websockify, noVNC)…"
@@ -80,6 +80,7 @@ echo "  rustc:  $(rustc --version)"
 echo "  cargo:  $(cargo --version)"
 echo "  node:   $(node --version)"
 echo "  npm:    $(npm --version)"
+echo "  nvim:   $(nvim --version | head -1)"
 if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
   echo "  browser: chromium=$(command -v chromium || command -v chromium-browser || command -v google-chrome || echo missing)"
   echo "           Xvfb=$(command -v Xvfb || echo missing)"
