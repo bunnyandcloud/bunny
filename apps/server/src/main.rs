@@ -2,6 +2,7 @@ mod api;
 mod cdp_collector;
 mod cli;
 mod middleware;
+mod novnc_proxy;
 mod preview;
 mod realtime;
 mod recovery;

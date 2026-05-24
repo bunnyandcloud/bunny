@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Install build prerequisites on Debian/Ubuntu (Docker, VM). macOS: use rustup.rs and nodejs.org.
+#
+# Usage:
+#   ./scripts/install-prerequisites.sh              # core + browser stack + sidecar npm
+#   ./scripts/install-prerequisites.sh --minimal    # core only (no Chromium / noVNC / sidecars)
 set -euo pipefail
+
+INSTALL_BROWSER=1
+if [[ "${1:-}" == "--minimal" ]]; then
+  INSTALL_BROWSER=0
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -8,10 +20,17 @@ else
   SUDO="sudo"
 fi
 
-echo "→ Installing system packages (curl, build tools, SSL)…"
+echo "→ Installing system packages (curl, build tools, SSL, tmux)…"
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
 $SUDO apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux
+
+if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
+  echo "→ Installing browser stack (Xvfb, x11vnc, websockify, noVNC)…"
+  $SUDO apt-get install -y xvfb x11vnc websockify novnc
+  # Ubuntu 24.04+ ships `chromium-browser` as a snap stub (broken in Docker).
+  # Real Chromium is installed below via Playwright after sidecar npm install.
+fi
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "→ Installing Rust (rustup)…"
@@ -31,15 +50,51 @@ else
   echo "✓ Node already installed: $(node --version), npm $(npm --version)"
 fi
 
+if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
+  for sidecar in webrtc-sidecar cdp-sidecar; do
+    sidecar_dir="$REPO_ROOT/apps/server/$sidecar"
+    if [[ -f "$sidecar_dir/package.json" ]]; then
+      echo "→ npm install ($sidecar)…"
+      (cd "$sidecar_dir" && npm install --no-fund --no-audit)
+    fi
+  done
+
+  webrtc_dir="$REPO_ROOT/apps/server/webrtc-sidecar"
+  if [[ -f "$webrtc_dir/package.json" ]]; then
+    echo "→ Installing Chromium via Playwright (works in Docker; Ubuntu apt uses snap stubs)…"
+    (cd "$webrtc_dir" && npx playwright install chromium)
+    (cd "$webrtc_dir" && npx playwright install-deps chromium)
+    playwright_chrome="$(find "${HOME}/.cache/ms-playwright" -path '*/chromium-*/chrome-linux*/chrome' -type f 2>/dev/null | sort -V | tail -1)"
+    if [[ -n "$playwright_chrome" && -x "$playwright_chrome" ]]; then
+      $SUDO ln -sf "$playwright_chrome" /usr/local/bin/chromium
+      echo "✓ Linked /usr/local/bin/chromium → $playwright_chrome"
+    else
+      echo "⚠ Playwright Chromium binary not found under ~/.cache/ms-playwright" >&2
+    fi
+  fi
+fi
+
 echo ""
 echo "✓ Prerequisites ready"
 echo "  rustc:  $(rustc --version)"
 echo "  cargo:  $(cargo --version)"
 echo "  node:   $(node --version)"
 echo "  npm:    $(npm --version)"
+if [[ "$INSTALL_BROWSER" -eq 1 ]]; then
+  echo "  browser: chromium=$(command -v chromium || command -v chromium-browser || command -v google-chrome || echo missing)"
+  echo "           Xvfb=$(command -v Xvfb || echo missing)"
+  echo "           x11vnc=$(command -v x11vnc || echo missing)"
+  echo "           websockify=$(command -v websockify || echo missing)"
+fi
 echo ""
-echo "Next (from the bunny repo):"
-echo "  cd /opt/bunny   # or your clone path"
+echo "Next steps:"
+echo ""
+echo "  # If you do not have the repository yet (skip if you are already in the tree):"
+echo "  git clone https://github.com/bunny-dev/bunny.git   # see README for the canonical URL"
+echo "  cd bunny"
+echo ""
+echo "  # From the repository root (where ./bunny lives):"
 echo "  ./bunny setup"
 echo "  bunny configure"
+echo "  bunny doctor          # verify browser + sidecars"
 echo "  bunny run --web-ui"

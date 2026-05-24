@@ -10,6 +10,8 @@ pub struct BrowserStackConfig {
     pub height: u32,
     pub target_url: String,
     pub ephemeral_profile: bool,
+    /// Unique Chromium profile directory (avoids collisions between sessions).
+    pub profile_dir: Option<String>,
 }
 
 pub struct BrowserStack {
@@ -17,48 +19,78 @@ pub struct BrowserStack {
     pub cdp_port: u16,
     pub vnc_port: u16,
     pub novnc_port: u16,
+    pub profile_dir: Option<String>,
     pub status: BrowserStatus,
 }
 
 impl BrowserStack {
     pub fn start(config: &BrowserStackConfig) -> Result<Self> {
-        let display_num = 99u32;
-        let x11_display = format!(":{display_num}");
+        let x11_display = pick_display()?;
         let cdp_port = pick_port(9222)?;
         let vnc_port = pick_port(5900)?;
         let novnc_port = pick_port(6080)?;
 
         info!(%x11_display, cdp_port, vnc_port, novnc_port, "starting browser stack");
 
-        let xvfb = spawn_xvfb(&x11_display, config.width, config.height)?;
+        spawn_xvfb(&x11_display, config.width, config.height)?;
         std::thread::sleep(std::time::Duration::from_millis(500));
 
-        let chromium = spawn_chromium(&x11_display, cdp_port, &config.target_url, config.ephemeral_profile)?;
-        let vnc = spawn_vnc(&x11_display, vnc_port);
-        let websockify = spawn_websockify(vnc_port, novnc_port);
-
-        let _ = (xvfb, chromium, vnc, websockify);
+        let profile_dir = config.profile_dir.clone();
+        spawn_chromium(
+            &x11_display,
+            cdp_port,
+            &config.target_url,
+            config.width,
+            config.height,
+            config.ephemeral_profile,
+            profile_dir.as_deref(),
+        )?;
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        spawn_vnc(&x11_display, vnc_port);
+        spawn_websockify(vnc_port, novnc_port);
+        std::thread::sleep(std::time::Duration::from_millis(800));
 
         Ok(Self {
             x11_display,
             cdp_port,
             vnc_port,
             novnc_port,
+            profile_dir,
             status: BrowserStatus::Running,
         })
     }
 
     pub fn stop(&mut self) {
-        let _ = std::process::Command::new("pkill")
-            .arg("-f")
-            .arg(&self.x11_display)
-            .status();
+        kill_matching(&format!("websockify.*127.0.0.1:{}", self.vnc_port));
+        kill_matching(&format!("-rfbport {}", self.vnc_port));
+        kill_matching(&format!("Xvfb {}", self.x11_display));
+        kill_matching(&format!("DISPLAY={}", self.x11_display));
+        if let Some(dir) = &self.profile_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
         self.status = BrowserStatus::Stopped;
     }
 
     pub fn is_running(&mut self) -> bool {
         self.status == BrowserStatus::Running
     }
+}
+
+fn kill_matching(pattern: &str) {
+    let _ = Command::new("pkill")
+        .arg("-f")
+        .arg(pattern)
+        .status();
+}
+
+fn pick_display() -> Result<String> {
+    for n in 99..120u32 {
+        let lock = format!("/tmp/.X{n}-lock");
+        if !std::path::Path::new(&lock).exists() {
+            return Ok(format!(":{n}"));
+        }
+    }
+    Ok(":99".to_string())
 }
 
 fn spawn_xvfb(display: &str, width: u32, height: u32) -> Result<()> {
@@ -76,35 +108,99 @@ fn spawn_xvfb(display: &str, width: u32, height: u32) -> Result<()> {
     Ok(())
 }
 
+fn apply_chromium_args(
+    cmd: &mut std::process::Command,
+    cdp_port: u16,
+    url: &str,
+    width: u32,
+    height: u32,
+    profile_dir: Option<&str>,
+) {
+    cmd.arg(format!("--remote-debugging-port={cdp_port}"))
+        .arg(format!("--window-size={width},{height}"))
+        .arg("--window-position=0,0")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .arg("--no-sandbox")
+        .arg("--disable-dev-shm-usage")
+        .arg("--disable-background-timer-throttling")
+        .arg("--disable-renderer-backgrounding")
+        .arg(url);
+    if let Some(dir) = profile_dir {
+        cmd.arg(format!("--user-data-dir={dir}"));
+    }
+}
+
+pub fn resolve_chromium_binary() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("BUNNY_CHROMIUM_PATH") {
+        let path = std::path::PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    for candidate in [
+        "/usr/local/bin/chromium",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ] {
+        let path = std::path::PathBuf::from(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    find_playwright_chromium()
+}
+
+fn find_playwright_chromium() -> Option<std::path::PathBuf> {
+    let cache =
+        std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".cache/ms-playwright");
+    if !cache.is_dir() {
+        return None;
+    }
+    let mut versions = Vec::new();
+    for entry in std::fs::read_dir(&cache).ok()? {
+        let entry = entry.ok()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("chromium-") {
+            continue;
+        }
+        let chrome = entry.path().join("chrome-linux/chrome");
+        if chrome.is_file() {
+            versions.push((name, chrome));
+        }
+    }
+    versions.sort_by(|a, b| a.0.cmp(&b.0));
+    versions.pop().map(|(_, path)| path)
+}
+
 fn spawn_chromium(
     display: &str,
     cdp_port: u16,
     url: &str,
+    width: u32,
+    height: u32,
     ephemeral: bool,
+    profile_dir: Option<&str>,
 ) -> Result<()> {
-    let mut cmd = Command::new("chromium");
-    cmd.env("DISPLAY", display)
-        .arg(format!("--remote-debugging-port={cdp_port}"))
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--disable-gpu")
-        .arg(url);
-    if ephemeral {
-        cmd.arg("--incognito");
-    }
+    let chromium = resolve_chromium_binary().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Chromium not found. Run: ./scripts/install-prerequisites.sh \
+             (installs Playwright Chromium in Docker) then: bunny doctor"
+        )
+    })?;
+
+    let profile = profile_dir.map(|s| s.to_string()).or_else(|| {
+        ephemeral.then(|| "/tmp/bunny-chromium-profile".to_string())
+    });
+
+    let mut cmd = Command::new(&chromium);
+    cmd.env("DISPLAY", display);
+    apply_chromium_args(&mut cmd, cdp_port, url, width, height, profile.as_deref());
     cmd.stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .or_else(|_| {
-            Command::new("google-chrome")
-                .env("DISPLAY", display)
-                .arg(format!("--remote-debugging-port={cdp_port}"))
-                .arg(url)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| anyhow::anyhow!("failed to start chromium: {e}"))
-        })?;
+        .map_err(|e| anyhow::anyhow!("failed to start chromium ({}): {e}", chromium.display()))?;
     Ok(())
 }
 
@@ -118,6 +214,8 @@ fn spawn_vnc(display: &str, port: u16) -> Option<()> {
         .arg("-localhost")
         .arg("-nopw")
         .arg("-forever")
+        .arg("-shared")
+        .arg("-noxdamage")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -131,13 +229,10 @@ fn spawn_vnc(display: &str, port: u16) -> Option<()> {
 }
 
 fn spawn_websockify(vnc_port: u16, listen_port: u16) -> Option<()> {
-    match Command::new("websockify")
-        .arg(listen_port.to_string())
-        .arg(format!("127.0.0.1:{vnc_port}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+    let mut cmd = Command::new("websockify");
+    cmd.arg(listen_port.to_string())
+        .arg(format!("127.0.0.1:{vnc_port}"));
+    match cmd.stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
         Ok(_) => Some(()),
         Err(e) => {
             warn!("websockify not available: {e}");

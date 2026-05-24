@@ -15,17 +15,19 @@ import {
 } from '../lib/api';
 import { useAuth } from '../store/auth';
 import InlineRename from './InlineRename';
-import ConsolePanel from './ConsolePanel';
-import NetworkPanel from './NetworkPanel';
 import SecretsVaultBanner from './SecretsVaultBanner';
 import TerminalPanel, { type TerminalPanelHandle } from './TerminalPanel';
 import TerminalShellBar, { type ShellTab } from './TerminalShellBar';
 import VaultInjectPanel from './VaultInjectPanel';
 import VaultUnlockModal from './VaultUnlockModal';
+import PreviewPanel from './PreviewPanel';
+import BrowserPanel from './BrowserPanel';
 
 interface Props {
   sessionId: string;
 }
+
+type WorkspaceTab = 'terminal' | 'preview' | 'browser';
 
 function nextShellName(existing: ShellTab[]): string {
   const used = new Set(existing.map((s) => s.name));
@@ -54,6 +56,8 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [vaultCollapsed, setVaultCollapsed] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('terminal');
+  const [previewPort, setPreviewPort] = useState(3000);
   const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
 
   const refreshVaultStatus = useCallback(async () => {
@@ -307,8 +311,45 @@ export default function SessionWorkspace({ sessionId }: Props) {
         <SecretsVaultBanner onUnlock={() => setUnlockOpen(true)} />
       )}
       <PanelGroup direction="horizontal" className="flex-1">
-        <Panel defaultSize={60} minSize={30}>
+        <Panel
+          defaultSize={user?.isOwner && showVaultSection ? 75 : 100}
+          minSize={30}
+        >
           <div className="h-full flex flex-col">
+            <div className="flex items-center gap-1 px-2 py-1 border-b border-bunny-border bg-bunny-panel shrink-0">
+              {(
+                [
+                  ['terminal', 'Terminal'],
+                  ['preview', 'Preview'],
+                  ['browser', 'Browser'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setWorkspaceTab(id)}
+                  className={`text-xs px-2.5 py-1 rounded border ${
+                    workspaceTab === id
+                      ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10'
+                      : 'border-transparent text-bunny-muted hover:text-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {workspaceTab === 'preview' && (
+              <PreviewPanel
+                sessionId={sessionId}
+                defaultPort={previewPort}
+                onPortChange={setPreviewPort}
+              />
+            )}
+            {workspaceTab === 'browser' && (
+              <BrowserPanel sessionId={sessionId} targetPort={previewPort} />
+            )}
+            {workspaceTab === 'terminal' && (
+              <>
             <TerminalShellBar
               shells={shells}
               activeId={activeId}
@@ -377,42 +418,30 @@ export default function SessionWorkspace({ sessionId }: Props) {
                 </div>
               )}
             </div>
+              </>
+            )}
           </div>
         </Panel>
-        <PanelResizeHandle className="w-1 bg-bunny-border hover:bg-bunny-accent" />
-        <Panel defaultSize={40} minSize={20}>
-          <PanelGroup direction="vertical">
-            {showSidebarSecretsHint && (
-              <p className="px-2 py-1.5 text-[11px] leading-snug text-bunny-muted border-b border-bunny-border bg-bunny-panel/80">
-                Vault verrouillé — {vaultStatus?.ref_count} secret
-                {(vaultStatus?.ref_count ?? 0) > 1 ? 's' : ''} en attente.{' '}
-                <button
-                  type="button"
-                  className="text-bunny-accent hover:underline"
-                  onClick={() => setUnlockOpen(true)}
-                >
-                  Unlock
-                </button>{' '}
-                puis nouveau shell.
-              </p>
-            )}
-            <Panel defaultSize={showVaultSection ? 45 : 55}>
-              <div className="h-full flex flex-col border-b border-bunny-border">
-                <div className="px-2 py-1 text-xs text-bunny-muted">Console</div>
-                <ConsolePanel sessionId={sessionId} />
-              </div>
-            </Panel>
-            <PanelResizeHandle className="h-1 bg-bunny-border" />
-            <Panel defaultSize={showVaultSection ? 35 : 45}>
-              <div className="h-full flex flex-col border-b border-bunny-border">
-                <div className="px-2 py-1 text-xs text-bunny-muted">Network (metadata only)</div>
-                <NetworkPanel sessionId={sessionId} />
-              </div>
-            </Panel>
-            {user?.isOwner && showVaultSection && (
-              <>
-                <PanelResizeHandle className="h-1 bg-bunny-border" />
-                <Panel defaultSize={20} minSize={12}>
+        {user?.isOwner && showVaultSection && (
+          <>
+            <PanelResizeHandle className="w-1 bg-bunny-border hover:bg-bunny-accent" />
+            <Panel defaultSize={25} minSize={15}>
+              <div className="h-full flex flex-col bg-bunny-bg">
+                {showSidebarSecretsHint && (
+                  <p className="px-2 py-1.5 text-[11px] leading-snug text-bunny-muted border-b border-bunny-border bg-bunny-panel/80 shrink-0">
+                    Vault verrouillé — {vaultStatus?.ref_count} secret
+                    {(vaultStatus?.ref_count ?? 0) > 1 ? 's' : ''} en attente.{' '}
+                    <button
+                      type="button"
+                      className="text-bunny-accent hover:underline"
+                      onClick={() => setUnlockOpen(true)}
+                    >
+                      Unlock
+                    </button>{' '}
+                    puis nouveau shell.
+                  </p>
+                )}
+                <div className="flex-1 min-h-0">
                   <VaultInjectPanel
                     secrets={sessionSecrets}
                     locked={!vaultUnlocked}
@@ -422,11 +451,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
                       location.href = '/secrets';
                     }}
                   />
-                </Panel>
-              </>
-            )}
-          </PanelGroup>
-        </Panel>
+                </div>
+              </div>
+            </Panel>
+          </>
+        )}
       </PanelGroup>
     </div>
   );

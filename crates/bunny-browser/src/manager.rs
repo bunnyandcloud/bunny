@@ -22,11 +22,13 @@ impl BrowserManager {
 
     pub fn create(&self, stream_session_id: Uuid, target_url: &str) -> Result<Uuid> {
         let id = Uuid::new_v4();
+        let profile_dir = format!("/tmp/bunny-chromium-{id}");
         let stack = BrowserStack::start(&BrowserStackConfig {
             width: self.default_width,
             height: self.default_height,
             target_url: target_url.to_string(),
-            ephemeral_profile: true,
+            ephemeral_profile: false,
+            profile_dir: Some(profile_dir),
         })?;
         let _ = stream_session_id;
         self.sessions.write().insert(id, stack);
@@ -45,11 +47,13 @@ impl BrowserManager {
         if let Some(mut stack) = self.sessions.write().remove(&id) {
             stack.stop();
         }
+        let profile_dir = format!("/tmp/bunny-chromium-{id}");
         let stack = BrowserStack::start(&BrowserStackConfig {
             width: self.default_width,
             height: self.default_height,
             target_url: target_url.to_string(),
-            ephemeral_profile: true,
+            ephemeral_profile: false,
+            profile_dir: Some(profile_dir),
         })?;
         self.sessions.write().insert(id, stack);
         Ok(())

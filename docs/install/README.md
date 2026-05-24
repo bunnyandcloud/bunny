@@ -7,13 +7,31 @@ Install **before** `cargo build` or `bunny run --web-ui`:
 | Tool | Notes |
 |------|--------|
 | **Rust** | [rustup](https://rustup.rs) — then `source "$HOME/.cargo/env"` |
-| **Node.js 20+** + **npm** | Web UI build |
+| **Node.js 20+** + **npm** | Web UI build + WebRTC/CDP sidecars |
 | **build-essential**, **pkg-config**, **libssl-dev** | Linux compile deps |
+| **tmux** | Persistent terminals (included in install script) |
 
-Ubuntu / Debian / Docker (as root):
+**Browser tab** (optional; not needed for port Preview):
+
+| Tool | Notes |
+|------|--------|
+| **Chromium** | Playwright bundle (`npx playwright install chromium`) — Ubuntu 24.04 apt is snap-only |
+| **Xvfb**, **x11vnc**, **websockify**, **novnc** | Browser tab (noVNC) |
+| **Chromium via Playwright** | Installed by `install-prerequisites.sh` (apt `chromium` is a snap stub on Ubuntu 24.04 Docker) |
+| **Sidecar npm** | `apps/server/webrtc-sidecar`, `apps/server/cdp-sidecar` |
+
+Ubuntu / Debian / Docker (as root) — full install:
 
 ```bash
 ./scripts/install-prerequisites.sh
+source "$HOME/.cargo/env"
+bunny doctor
+```
+
+Minimal (no browser stack):
+
+```bash
+./scripts/install-prerequisites.sh --minimal
 source "$HOME/.cargo/env"
 ```
 
@@ -65,6 +83,7 @@ cd /opt/bunny
 source "$HOME/.cargo/env"
 ./bunny setup
 bunny configure
+bunny doctor
 bunny run --web-ui
 ```
 
@@ -117,4 +136,5 @@ sudo systemctl enable --now bunny-agent
 - Linux (primary target) or macOS (dev)
 - Rust 1.86+
 - Node.js 20+ and npm (first `bunny run --web-ui` build)
-- Optional: Chromium, Xvfb, x11vnc, websockify (for `--browser`)
+- **Browser tab:** Chromium, Xvfb, x11vnc, websockify + sidecar `npm install` (see `./scripts/install-prerequisites.sh`; use `--minimal` to skip)
+- Verify with `bunny doctor`

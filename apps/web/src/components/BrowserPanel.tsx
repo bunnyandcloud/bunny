@@ -1,0 +1,235 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  browserNovncUrl,
+  createBrowser,
+  getBrowser,
+  restartBrowser,
+} from '../lib/api';
+import { useBrowserWebRtc } from '../lib/useBrowserWebRtc';
+
+interface Props {
+  sessionId: string;
+  targetPort?: number;
+}
+
+type ViewMode = 'novnc' | 'webrtc';
+
+function browserStorageKey(sessionId: string) {
+  return `bunny-browser-id:${sessionId}`;
+}
+
+/** Stack (Xvfb → Chromium → x11vnc → websockify) needs a few seconds before noVNC can connect. */
+async function waitForBrowserStack(browserId: string) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const info = await getBrowser(browserId);
+    if (info.novncPort != null) {
+      await new Promise((r) => setTimeout(r, 2500));
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error('Le navigateur distant met trop de temps à démarrer — clique Recharger.');
+}
+
+export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
+  const [browserId, setBrowserId] = useState<string | null>(null);
+  const [mode, setMode] = useState<ViewMode>('novnc');
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const targetUrl = `http://127.0.0.1:${targetPort}`;
+  const initStarted = useRef(false);
+
+  const webrtc = useBrowserWebRtc(sessionId, browserId);
+
+  const startBrowser = useCallback(async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const created = await createBrowser(sessionId, targetUrl);
+      setBrowserId(created.id);
+      sessionStorage.setItem(browserStorageKey(sessionId), created.id);
+      await waitForBrowserStack(created.id);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setStarting(false);
+    }
+  }, [sessionId, targetUrl]);
+
+  const ensureBrowser = useCallback(async () => {
+    setStarting(true);
+    setError(null);
+    const stored = sessionStorage.getItem(browserStorageKey(sessionId));
+    if (stored) {
+      try {
+        await waitForBrowserStack(stored);
+        setBrowserId(stored);
+        setReloadKey((k) => k + 1);
+        setStarting(false);
+        return;
+      } catch {
+        sessionStorage.removeItem(browserStorageKey(sessionId));
+      }
+    }
+    await startBrowser();
+  }, [sessionId, startBrowser]);
+
+  const reloadBrowser = useCallback(async () => {
+    if (!browserId) {
+      await ensureBrowser();
+      return;
+    }
+    setStarting(true);
+    setError(null);
+    try {
+      await restartBrowser(browserId, sessionId, targetUrl);
+      await waitForBrowserStack(browserId);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setStarting(false);
+    }
+  }, [browserId, sessionId, targetUrl, ensureBrowser]);
+
+  useEffect(() => {
+    if (initStarted.current) return;
+    initStarted.current = true;
+    void ensureBrowser();
+  }, [ensureBrowser]);
+
+  const prevPort = useRef(targetPort);
+  useEffect(() => {
+    if (prevPort.current === targetPort) return;
+    prevPort.current = targetPort;
+    if (browserId) void reloadBrowser();
+  }, [targetPort, browserId, reloadBrowser]);
+
+  useEffect(() => {
+    if (mode !== 'webrtc' || !browserId || webrtc.connected || webrtc.connecting) return;
+    void webrtc.connect();
+  }, [mode, browserId, webrtc.connected, webrtc.connecting, webrtc.connect]);
+
+  return (
+    <div className="h-full flex flex-col bg-bunny-bg">
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-bunny-border bg-bunny-panel text-xs shrink-0 flex-wrap">
+        <span className="text-bunny-muted">URL</span>
+        <code className="text-gray-300">{targetUrl}</code>
+        <div className="ml-auto flex gap-1 flex-wrap">
+          <button
+            type="button"
+            onClick={() => void reloadBrowser()}
+            disabled={starting}
+            className="px-2 py-0.5 rounded border border-bunny-border text-bunny-muted hover:text-gray-200 disabled:opacity-50"
+          >
+            Recharger
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('novnc')}
+            className={`px-2 py-0.5 rounded border ${
+              mode === 'novnc'
+                ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10'
+                : 'border-bunny-border text-bunny-muted hover:text-gray-200'
+            }`}
+          >
+            Interactif
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('webrtc')}
+            className={`px-2 py-0.5 rounded border ${
+              mode === 'webrtc'
+                ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10'
+                : 'border-bunny-border text-bunny-muted hover:text-gray-200'
+            }`}
+          >
+            Stream
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 relative bg-black">
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-sm text-red-400 max-w-md">{error}</p>
+            <p className="text-xs text-bunny-muted max-w-md">
+              Vérifie que ton serveur écoute sur le port {targetPort}, puis clique Recharger.
+            </p>
+            <button
+              type="button"
+              onClick={() => void reloadBrowser()}
+              disabled={starting}
+              className="text-xs px-3 py-1.5 border border-bunny-border rounded hover:bg-bunny-panel disabled:opacity-50"
+            >
+              Réessayer
+            </button>
+          </div>
+        )}
+
+        {!error && (starting || !browserId) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-bunny-muted text-sm px-6 text-center">
+            <p>Démarrage de Chromium sur le serveur…</p>
+            <p className="text-xs text-bunny-muted/80">
+              Premier lancement : ~5 s (Xvfb + Chromium + noVNC). Ensuite c’est plus rapide.
+            </p>
+          </div>
+        )}
+
+        {!error && browserId && mode === 'novnc' && (
+          <iframe
+            key={reloadKey}
+            title="Navigateur distant (noVNC)"
+            src={browserNovncUrl(browserId)}
+            className="absolute inset-0 w-full h-full border-0"
+          />
+        )}
+
+        {!error && browserId && mode === 'webrtc' && (
+          <>
+            <video
+              ref={webrtc.videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-contain"
+            />
+            {!webrtc.connected && !webrtc.connecting && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => void webrtc.connect()}
+                  className="text-xs px-3 py-1.5 border border-bunny-border rounded bg-bunny-panel hover:bg-bunny-bg"
+                >
+                  Connecter le flux
+                </button>
+              </div>
+            )}
+            {webrtc.error && (
+              <div className="absolute bottom-2 left-2 right-2 text-xs text-red-400 bg-bunny-panel/90 p-2 rounded">
+                {webrtc.error}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="px-2 py-1.5 text-[11px] text-bunny-muted border-t border-bunny-border shrink-0 leading-snug space-y-1">
+        <p>
+          <strong className="text-gray-300">Browser</strong> lance Chromium <em>sur le serveur</em>{' '}
+          (dans Docker) et affiche son écran via noVNC — utile pour voir exactement ce que le
+          serveur rend.
+        </p>
+        <p>
+          « Échec de connexion » au premier essai ? Attends la fin du démarrage ou clique{' '}
+          <strong className="text-gray-300">Recharger</strong> une fois. Pour le dev quotidien,
+          l’onglet <strong className="text-gray-300">Preview</strong> est plus instantané (même
+          port).
+        </p>
+      </div>
+    </div>
+  );
+}

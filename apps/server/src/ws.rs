@@ -6,6 +6,7 @@ use bunny_pty::{scrollback, tmux};
 use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio_tungstenite::{connect_async, tungstenite::Message as UpstreamMessage};
 use uuid::Uuid;
 
 pub async fn handle_terminal_ws(
@@ -283,6 +284,79 @@ fn fetch_timeline_since(
             })
         })
         .collect()
+}
+
+/// Bidirectional proxy: browser noVNC client ↔ local websockify (Chromium desktop).
+pub async fn handle_novnc_proxy(socket: WebSocket, novnc_port: u16) {
+    let upstream_url = format!("ws://127.0.0.1:{novnc_port}/");
+    proxy_websocket(socket, upstream_url).await;
+}
+
+pub async fn proxy_websocket(socket: WebSocket, upstream_url: String) {
+    let Ok((upstream, _)) = connect_async(&upstream_url).await else {
+        return;
+    };
+
+    let (mut client_tx, mut client_rx) = socket.split();
+    let (mut upstream_tx, mut upstream_rx) = upstream.split();
+
+    let client_to_upstream = async {
+        while let Some(msg) = client_rx.next().await {
+            let Ok(msg) = msg else { break };
+            let upstream_msg = match msg {
+                Message::Text(text) => UpstreamMessage::Text(text),
+                Message::Binary(data) => UpstreamMessage::Binary(data),
+                Message::Ping(data) => UpstreamMessage::Ping(data),
+                Message::Pong(data) => UpstreamMessage::Pong(data),
+                Message::Close(frame) => {
+                    let close = frame.map(|f| UpstreamMessage::Close(Some(
+                        tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                            code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::from(f.code),
+                            reason: f.reason,
+                        },
+                    )));
+                    let _ = upstream_tx.send(close.unwrap_or(UpstreamMessage::Close(None))).await;
+                    break;
+                }
+            };
+            if upstream_tx.send(upstream_msg).await.is_err() {
+                break;
+            }
+        }
+    };
+
+    let upstream_to_client = async {
+        while let Some(msg) = upstream_rx.next().await {
+            let Ok(msg) = msg else { break };
+            let client_msg = match msg {
+                UpstreamMessage::Text(text) => Message::Text(text),
+                UpstreamMessage::Binary(data) => Message::Binary(data),
+                UpstreamMessage::Ping(data) => Message::Ping(data),
+                UpstreamMessage::Pong(data) => Message::Pong(data),
+                UpstreamMessage::Close(frame) => {
+                    let close = frame.map(|f| Message::Close(Some(
+                        axum::extract::ws::CloseFrame {
+                            code: f.code.into(),
+                            reason: f.reason,
+                        },
+                    )));
+                    let _ = client_tx
+                        .send(close.unwrap_or(Message::Close(None)))
+                        .await;
+                    break;
+                }
+                UpstreamMessage::Frame(_) => continue,
+            };
+            if client_tx.send(client_msg).await.is_err() {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        () = client_to_upstream => {}
+        () = upstream_to_client => {}
+    }
 }
 
 pub async fn handle_browser_events(socket: WebSocket, state: Arc<AppState>, browser_id: Uuid) {

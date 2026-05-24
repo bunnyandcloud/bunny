@@ -7,10 +7,21 @@ Remote development and debugging tool for Linux servers: PTY terminals, port pre
 | Tool | Version | Used for |
 |------|---------|----------|
 | **Rust** (rustup) | stable, ≥ 1.86 | Agent + CLI (`bunny-server`) |
-| **Node.js** + **npm** | 20+ | First build of the web UI (`apps/web`) |
+| **Node.js** + **npm** | 20+ | Web UI (`apps/web`) + WebRTC/CDP sidecars |
 | **Git** | any | Clone |
+| **tmux** | any | Persistent terminals |
 
-Optional later: Chromium, Xvfb, tmux, websockify (`bunny doctor`).
+**Browser preview & streaming** (installed by `./scripts/install-prerequisites.sh`; skip with `--minimal`):
+
+| Tool | Used for |
+|------|----------|
+| **Chromium** | Remote desktop browser (via **Playwright** on Ubuntu 24.04+ Docker — apt packages are snap stubs) |
+| **Xvfb** | Virtual display for headless Chromium |
+| **x11vnc** | VNC server on the virtual display |
+| **websockify** | noVNC WebSocket bridge (interactive browser tab) |
+| **Sidecar npm deps** | `apps/server/webrtc-sidecar`, `apps/server/cdp-sidecar` (WebRTC stream + CDP capture) |
+
+Port **Preview** (iframe proxy to e.g. `:3000`) works without the browser stack. The **Browser** tab (noVNC / WebRTC) needs the packages above — run `bunny doctor` to verify.
 
 ### Linux (Ubuntu / Debian / Docker)
 
@@ -18,7 +29,20 @@ Inside the container or VM:
 
 ```bash
 apt-get update
-apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git
+apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux
+
+# Browser stack (Preview tab works without this; Browser tab needs it)
+apt-get install -y xvfb x11vnc websockify
+
+# Chromium — use Playwright on Ubuntu 24.04+ (apt `chromium-browser` is a snap stub)
+cd /path/to/bunny/apps/server/webrtc-sidecar
+npm install
+npx playwright install chromium
+npx playwright install-deps chromium
+ln -sf "$(find ~/.cache/ms-playwright -path '*/chromium-*/chrome-linux*/chrome' -type f | sort -V | tail -1)" /usr/local/bin/chromium
+
+# CDP sidecar
+cd ../cdp-sidecar && npm install
 
 # Rust
 curl -fsSL https://sh.rustup.rs | sh -s -- -y
@@ -33,10 +57,18 @@ node --version
 npm --version
 ```
 
-Or run the helper script from the repo:
+Or run the helper script from the repo (core + browser stack + sidecar npm by default):
 
 ```bash
 ./scripts/install-prerequisites.sh
+source "$HOME/.cargo/env"
+bunny doctor
+```
+
+Minimal install (no Chromium / noVNC / sidecars):
+
+```bash
+./scripts/install-prerequisites.sh --minimal
 source "$HOME/.cargo/env"
 ```
 
@@ -95,10 +127,11 @@ Inside the container:
 ```bash
 docker exec -it bunny-dev bash
 cd /opt/bunny
-./scripts/install-prerequisites.sh
+./scripts/install-prerequisites.sh   # required for Browser tab (Xvfb, Chromium, noVNC)
 source "$HOME/.cargo/env"
 ./bunny setup
 bunny configure
+bunny doctor                         # must show ✓ Xvfb and ✓ Chromium
 bunny run --web-ui
 ```
 

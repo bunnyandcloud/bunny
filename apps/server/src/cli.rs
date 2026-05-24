@@ -332,11 +332,28 @@ pub async fn run_doctor() -> Result<()> {
     println!("bunny doctor — checking capabilities\n");
     check_cmd("PTY", native_pty_check);
     check_cmd("WebSocket", || Ok(()));
-    check_optional("Chromium", "chromium", &["--version"]);
-    check_optional("Google Chrome", "google-chrome", &["--version"]);
-    check_optional("Xvfb", "Xvfb", &["-help"]);
+    if let Some(path) = bunny_browser::resolve_chromium_binary() {
+        println!("  ✓ Chromium ({})", path.display());
+    } else {
+        println!("  ✗ Chromium missing — run ./scripts/install-prerequisites.sh (Playwright in Docker)");
+        check_optional("Chromium (legacy)", "chromium-browser", &["--version"]);
+        check_optional("Google Chrome", "google-chrome", &["--version"]);
+    }
+    let xvfb_ok = command_works("Xvfb", &["-help"]);
+    if xvfb_ok {
+        println!("  ✓ Xvfb");
+    } else {
+        println!("  ✗ Xvfb missing — Browser tab needs it (./scripts/install-prerequisites.sh)");
+    }
     check_optional("x11vnc", "x11vnc", &["-help"]);
     check_optional("websockify", "websockify", &["--help"]);
+    if std::path::Path::new("/usr/share/novnc/vnc.html").is_file()
+        || std::path::Path::new("/usr/local/share/novnc/vnc.html").is_file()
+    {
+        println!("  ✓ noVNC static UI (vnc.html)");
+    } else {
+        println!("  ⚠ noVNC UI missing — apt install novnc (Browser tab needs vnc.html)");
+    }
     check_optional("Node.js", "node", &["--version"]);
     check_optional("npm", "npm", &["--version"]);
     if crate::web_ui::find_repo_root().is_some() {
@@ -475,9 +492,17 @@ fn check_cmd(name: &str, f: impl FnOnce() -> Result<()>) {
 }
 
 fn check_optional(name: &str, cmd: &str, args: &[&str]) {
+    if command_works(cmd, args) {
+        println!("  ✓ {name}");
+    } else {
+        println!("  ⚠ {name} not found ({cmd})");
+    }
+}
+
+fn command_works(cmd: &str, args: &[&str]) -> bool {
     match std::process::Command::new(cmd).args(args).output() {
-        Ok(o) if o.status.success() || !o.stdout.is_empty() => println!("  ✓ {name}"),
-        _ => println!("  ⚠ {name} not found ({cmd})"),
+        Ok(o) if o.status.success() || !o.stdout.is_empty() => true,
+        _ => false,
     }
 }
 

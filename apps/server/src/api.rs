@@ -1,4 +1,5 @@
 use crate::middleware;
+use crate::novnc_proxy;
 use crate::preview;
 use crate::secrets_ops::{
     self, ensure_secrets_access, init_vault, list_secrets, lock_vault, reveal_secret, remove_secret,
@@ -68,6 +69,9 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/browser-sessions/:id/webrtc/offer", post(browser_webrtc_offer))
         .route("/browser-sessions/:id/webrtc/candidate", post(browser_webrtc_candidate))
         .route("/browser-sessions/:id/webrtc/stop", post(browser_webrtc_stop))
+        .route("/browser-sessions/:id/vnc/ws", get(browser_novnc_ws))
+        .route("/browser-sessions/:id/vnc/*path", get(novnc_proxy::http_proxy))
+        .route("/browser-sessions/:id/vnc", get(novnc_proxy::http_proxy_root))
         .route("/timeline", get(get_timeline))
         .route("/audit-logs", get(get_audit_logs))
         .route("/secrets/status", get(secrets_status))
@@ -89,6 +93,8 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
     let api = public.merge(protected).with_state(state.clone());
 
     let preview_routes = preview::router(state.clone())
+        .merge(preview::root_dev_assets_router(state.clone()))
+        .merge(preview::root_public_assets_router(state.clone()))
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     let static_files = if let Some(dist) = web_dist.filter(|d| d.join("index.html").is_file()) {
@@ -790,6 +796,21 @@ async fn browser_webrtc_candidate(
         .await
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn browser_novnc_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let session_id = browser_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::BrowserView)?;
+    let novnc_port = state
+        .browsers
+        .get_novnc_port(id)
+        .ok_or_else(|| ApiError::not_found("browser session"))?;
+    Ok(ws.on_upgrade(move |socket| ws::handle_novnc_proxy(socket, novnc_port)))
 }
 
 async fn browser_webrtc_stop(

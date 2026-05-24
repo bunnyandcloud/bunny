@@ -188,3 +188,101 @@ export function revealSecret(name: string, scope: string, sessionId?: string) {
   if (sessionId) params.set('session_id', sessionId);
   return api<{ value: string }>(`/secrets/${encodeURIComponent(name)}/reveal?${params}`);
 }
+
+export function createPreview(sessionId: string, localPort: number) {
+  return api<{ id: string; public_path: string }>('/previews', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, local_port: localPort }),
+  });
+}
+
+export function listPreviews() {
+  return api<Array<{ id: string; public_path: string }>>('/previews');
+}
+
+export function createBrowser(sessionId: string, targetUrl?: string) {
+  return api<{
+    id: string;
+    stream_path: string;
+    events_path: string;
+    webrtc_offer_path: string;
+  }>('/browser-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sessionId,
+      ...(targetUrl ? { target_url: targetUrl } : {}),
+    }),
+  });
+}
+
+export function getBrowser(browserId: string) {
+  return api<{
+    id: string;
+    novncPort: number | null;
+    cdpPort: number | null;
+    webrtcOfferPath: string;
+  }>(`/browser-sessions/${browserId}`);
+}
+
+export function browserWebrtcStop(browserId: string) {
+  return api<void>(`/browser-sessions/${browserId}/webrtc/stop`, { method: 'POST' });
+}
+
+export function restartBrowser(browserId: string, sessionId: string, targetUrl?: string) {
+  return api<{ restarted: boolean }>(`/browser-sessions/${browserId}/restart`, {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sessionId,
+      ...(targetUrl ? { target_url: targetUrl } : {}),
+    }),
+  });
+}
+
+export function getWebRtcConfig() {
+  return api<{
+    enabled: boolean;
+    ice_servers: Array<{
+      urls: string[];
+      username?: string;
+      credential?: string;
+    }>;
+    sidecar_port: number;
+  }>('/webrtc/config');
+}
+
+export function browserWebrtcOffer(
+  browserId: string,
+  offer: { type: string; sdp: string },
+) {
+  return api<{ type: string; sdp: string }>(
+    `/browser-sessions/${browserId}/webrtc/offer`,
+    {
+      method: 'POST',
+      body: JSON.stringify(offer),
+    },
+  );
+}
+
+export function browserWebrtcCandidate(
+  browserId: string,
+  candidate: Record<string, unknown>,
+) {
+  return api<void>(`/browser-sessions/${browserId}/webrtc/candidate`, {
+    method: 'POST',
+    body: JSON.stringify({ candidate }),
+  });
+}
+
+export function sessionRealtimeWsUrl(sessionId: string) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/api/v1/sessions/${sessionId}/realtime`;
+}
+
+export function previewUrl(sessionId: string, port: number) {
+  return `/s/${sessionId}/ports/${port}/`;
+}
+
+export function browserNovncUrl(browserId: string) {
+  const path = `api/v1/browser-sessions/${browserId}/vnc/ws`;
+  return `/api/v1/browser-sessions/${browserId}/vnc/vnc.html?autoconnect=1&reconnect=1&reconnect_delay=2000&resize=scale&path=${path}`;
+}
