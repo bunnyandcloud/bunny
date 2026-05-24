@@ -35,7 +35,8 @@ pub fn root_dev_assets_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 /// `public/` assets (e.g. `/next.svg`) requested at the Bunny origin without the preview prefix.
 pub fn root_public_assets_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/:file", any(root_public_file_proxy))
+        // Require a dot so SPA paths like `/secrets` fall through to the web UI shell.
+        .route("/{file:[^/]+\\.[^/]+}", any(root_public_file_proxy))
         .with_state(state)
 }
 
