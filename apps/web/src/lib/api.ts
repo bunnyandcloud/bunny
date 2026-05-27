@@ -1,4 +1,16 @@
 const API = '/api/v1';
+const REQUEST_TIMEOUT_MS = 30_000;
+
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return 'Request timed out. Please try again.';
+    }
+    const msg = err.message.trim();
+    if (msg) return msg;
+  }
+  return fallback;
+}
 
 export async function api<T>(
   path: string,
@@ -7,6 +19,7 @@ export async function api<T>(
   const res = await fetch(`${API}${path}`, {
     ...options,
     credentials: 'include',
+    signal: options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -14,21 +27,95 @@ export async function api<T>(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || res.statusText);
+    const msg =
+      (typeof err?.error?.message === 'string' && err.error.message.trim()) ||
+      res.statusText.trim() ||
+      `Request failed (${res.status})`;
+    throw new Error(msg);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
 }
 
+export type LoginResponse =
+  | {
+      mfa_required: false;
+      user_id: string;
+      email: string;
+      session_token: string;
+      expires_at: string;
+    }
+  | {
+      mfa_required: true;
+      mfa_challenge_token: string;
+      user_id: string;
+      email: string;
+    };
+
 export function login(email: string, password: string) {
-  return api<{ user_id: string; email: string }>('/auth/login', {
+  return api<LoginResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
 }
 
+export function verifyMfa(
+  code: string,
+  mfaChallengeToken?: string,
+) {
+  return api<{
+    user_id: string;
+    email: string;
+    session_token: string;
+    expires_at: string;
+  }>('/auth/mfa/verify', {
+    method: 'POST',
+    body: JSON.stringify({
+      code,
+      ...(mfaChallengeToken ? { mfa_challenge_token: mfaChallengeToken } : {}),
+    }),
+  });
+}
+
 export function me() {
-  return api<{ user_id: string; email: string; is_owner: boolean }>('/auth/me');
+  return api<{
+    user_id: string;
+    email: string;
+    is_owner: boolean;
+    mfa_enabled: boolean;
+  }>('/auth/me');
+}
+
+export function mfaStatus() {
+  return api<{ enabled: boolean; recovery_remaining: number }>('/auth/mfa/status');
+}
+
+export function mfaSetup(password?: string) {
+  return api<{ otpauth_uri: string; secret_base32: string }>('/auth/mfa/setup', {
+    method: 'POST',
+    body: JSON.stringify(password ? { password } : {}),
+  });
+}
+
+export function mfaEnable(code: string, password?: string) {
+  return api<{ recovery_codes: string[] }>('/auth/mfa/enable', {
+    method: 'POST',
+    body: JSON.stringify({ code, ...(password ? { password } : {}) }),
+  });
+}
+
+export function mfaDisable(code: string, password?: string) {
+  return api<{ ok: boolean }>('/auth/mfa/disable', {
+    method: 'POST',
+    body: JSON.stringify({ code, ...(password ? { password } : {}) }),
+  });
+}
+
+export function mfaRegenerateRecovery(code: string, password?: string) {
+  return api<{ recovery_codes: string[] }>('/auth/mfa/recovery/regenerate', {
+    method: 'POST',
+    body: JSON.stringify({ code, ...(password ? { password } : {}) }),
+  });
 }
 
 export function listSessions() {

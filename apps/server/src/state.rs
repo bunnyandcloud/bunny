@@ -52,7 +52,11 @@ impl AppState {
         let data_dir = config.expand_data_dir();
         std::fs::create_dir_all(&data_dir)?;
         let db_path = format!("{data_dir}/bunny.db");
-        let auth = AuthService::new(&db_path, config.security.session_ttl_minutes as i64)?;
+        let auth = AuthService::new(
+            &db_path,
+            &data_dir,
+            config.security.session_ttl_minutes as i64,
+        )?;
         let secrets_path = std::path::Path::new(&data_dir).join("secrets.enc");
         let secrets = SecretsVault::new(secrets_path);
         let fcm_key = config.push.fcm_server_key.clone().or_else(|| {

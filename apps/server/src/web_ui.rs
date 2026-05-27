@@ -76,16 +76,69 @@ fn web_ui_stale(web_dir: &Path, dist: &Path) -> bool {
     dir_max_mtime(&src).is_some_and(|src_mtime| src_mtime > dist_mtime)
 }
 
+/// Rollup ships platform-specific optional packages; `node_modules` from another OS breaks Vite builds.
+fn rollup_native_pkg() -> Option<&'static str> {
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        return Some("@rollup/rollup-linux-arm64-gnu");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        return Some("@rollup/rollup-linux-x64-gnu");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        return Some("@rollup/rollup-darwin-arm64");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        return Some("@rollup/rollup-darwin-x64");
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        return Some("@rollup/rollup-win32-x64-msvc");
+    }
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    {
+        return Some("@rollup/rollup-win32-arm64-msvc");
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn web_deps_need_install(web_dir: &Path) -> bool {
+    if !web_dir.join("node_modules").is_dir() {
+        return true;
+    }
+    let Some(pkg) = rollup_native_pkg() else {
+        return false;
+    };
+    !web_dir.join("node_modules").join(pkg).is_dir()
+}
+
+fn install_web_deps(web_dir: &Path) -> Result<()> {
+    println!("→ Installing web UI dependencies…");
+    if web_dir.join("package-lock.json").is_file() {
+        run_npm(web_dir, &["ci", "--no-fund", "--no-audit"])?;
+    } else {
+        run_npm(web_dir, &["install", "--no-fund", "--no-audit"])?;
+    }
+    Ok(())
+}
+
 pub fn ensure_web_ui_built(repo_root: &Path) -> Result<PathBuf> {
     let web_dir = repo_root.join("apps/web");
     let dist = web_dir.join("dist");
-    if dist.join("index.html").is_file() {
-        if web_ui_stale(&web_dir, &dist) {
-            println!("→ Web UI sources changed — rebuilding (apps/web)…");
-        } else {
-            println!("✓ Web UI already built ({})", dist.display());
-            return Ok(dist);
-        }
+    let dist_ready = dist.join("index.html").is_file();
+    let stale = dist_ready && web_ui_stale(&web_dir, &dist);
+
+    if dist_ready && !stale {
+        println!("✓ Web UI already built ({})", dist.display());
+        return Ok(dist);
+    }
+
+    if stale {
+        println!("→ Web UI sources changed — rebuilding (apps/web)…");
     }
 
     if !Command::new("npm")
@@ -96,14 +149,19 @@ pub fn ensure_web_ui_built(repo_root: &Path) -> Result<PathBuf> {
     {
         bail!(
             "Node.js/npm required to build the web UI. Install Node 20+, then run:\n  \
-             cd {} && npm install && npm run build",
+             cd {} && npm ci && npm run build",
             web_dir.display()
         );
     }
 
-    if !web_dir.join("node_modules").is_dir() {
-        println!("→ Installing web UI dependencies…");
-        run_npm(&web_dir, &["install"])?;
+    if web_deps_need_install(&web_dir) {
+        if web_dir.join("node_modules").is_dir() {
+            eprintln!(
+                "  (rollup native module missing for this platform — reinstalling deps; \
+                 do not reuse node_modules from macOS on Linux/Docker)"
+            );
+        }
+        install_web_deps(&web_dir)?;
     }
 
     println!("→ Building web UI (apps/web)…");

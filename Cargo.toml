@@ -52,3 +52,5 @@ http-body-util = "0.1"
 bytes = "1"
 time = { version = "=0.3.36" }
 aes-gcm = "0.10"
+data-encoding = "2.6"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }

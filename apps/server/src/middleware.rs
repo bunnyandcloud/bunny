@@ -6,6 +6,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use bunny_auth::AuthenticatedSession;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -24,9 +25,10 @@ pub async fn require_auth(
         return (StatusCode::UNAUTHORIZED, "authentication required").into_response();
     };
 
-    match state.auth.authenticate(&token) {
-        Ok(user_id) => {
-            req.extensions_mut().insert(user_id);
+    match state.auth.authenticate_session(&token) {
+        Ok(session) => {
+            req.extensions_mut().insert(session.user_id);
+            req.extensions_mut().insert(session);
             next.run(req).await
         }
         Err(_) => (StatusCode::UNAUTHORIZED, "invalid session").into_response(),
@@ -54,4 +56,8 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
 
 pub fn user_from_extensions(req: &Request<Body>) -> Option<Uuid> {
     req.extensions().get::<Uuid>().copied()
+}
+
+pub fn auth_session_from_extensions(req: &Request<Body>) -> Option<AuthenticatedSession> {
+    req.extensions().get::<AuthenticatedSession>().cloned()
 }

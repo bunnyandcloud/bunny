@@ -4,11 +4,43 @@
 
 - Owner bootstrap via `bunny configure` (first run only).
 - Email + password with Argon2id hashing.
+- Optional **TOTP MFA** (RFC 6238, 6 digits / 30 s) — compatible with Google Authenticator, Microsoft Authenticator, GitHub Mobile, and other standard TOTP apps.
 - Session tokens stored as SHA-256 hashes in SQLite.
 - Web: `HttpOnly` cookie `bunny_session`.
-- Mobile: Bearer token in secure storage (Keychain / Keystore).
+- Mobile: `session_token` in login JSON, sent as `Authorization: Bearer …` (Keychain / Keystore).
 
 **URLs are never credentials.** `/s/:sessionId` requires a valid session.
+
+### MFA login flow
+
+1. `POST /api/v1/auth/login` with email + password.
+2. If MFA is enabled: response includes `mfa_required: true` and `mfa_challenge_token` (plus cookie `bunny_mfa_challenge` for the web UI). **No full session is created yet.**
+3. `POST /api/v1/auth/mfa/verify` with TOTP or recovery code → `bunny_session` cookie and `session_token` in JSON.
+
+Rate limiting: 5 failed attempts per challenge, then 15-minute lock.
+
+### Enabling MFA
+
+From the web UI: **Security** (`/security`) while signed in. Scan the QR code or enter the manual secret once. Save the **recovery codes** immediately — they are shown only once.
+
+Sensitive actions (setup, disable, regenerate recovery codes) require **recent authentication**: password re-entry or a session where the password was verified within the last 5 minutes.
+
+### Recovery codes
+
+Ten one-time codes (format `bunny-XXXX-XXXX-XXXX-XXXX`, ~80 bits entropy). Stored hashed in SQLite. Use instead of TOTP if you lose your phone.
+
+### TOTP secret storage
+
+TOTP secrets are encrypted at rest (AES-256-GCM). Encryption key:
+
+- Prefer `BUNNY_MFA_ENCRYPTION_KEY` (32 bytes, hex or base64) from Docker secrets, systemd, K8s, etc.
+- Fallback: `{data_dir}/mfa.key` (auto-generated, mode `0600`).
+
+**Threat model:** if an attacker reads both the database and the encryption key, TOTP secrets can be recovered. This is acceptable for self-hosted deployments but means server compromise can bypass MFA — rotate MFA and invalidate sessions after incident response.
+
+### MFA audit events
+
+Logged to `audit_logs`: `auth.login.mfa_required`, `auth.login.success`, `auth.mfa.challenge_created`, `auth.mfa.challenge_locked`, `auth.mfa.failed`, `auth.mfa.enabled`, `auth.mfa.disabled`, `auth.mfa.recovery_code_used`, `auth.mfa.recovery_regenerated`, `auth.mfa.setup_started`.
 
 ## Secrets
 

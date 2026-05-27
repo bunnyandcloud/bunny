@@ -10,6 +10,7 @@ import {
   type ClaudeStatus,
 } from '../lib/api';
 import InlineRename from './InlineRename';
+import LogoutButton from './LogoutButton';
 
 interface SessionItem {
   id: string;
@@ -132,6 +133,9 @@ export default function HomePage({ email, isOwner }: Props) {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-6">
+      <div className="w-full max-w-lg flex justify-end">
+        <LogoutButton />
+      </div>
       <div className="text-center space-y-1">
         <h1 className="text-xl text-bunny-accent">Welcome, {email}</h1>
         <p className="text-bunny-muted text-sm">Start or resume a remote dev session.</p>
@@ -145,6 +149,13 @@ export default function HomePage({ email, isOwner }: Props) {
           className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
         >
           {creating ? 'Creating…' : 'New session'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { location.href = '/security'; }}
+          className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
+        >
+          Security
         </button>
         {isOwner && (
           <button

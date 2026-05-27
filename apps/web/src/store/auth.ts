@@ -2,10 +2,11 @@ import { create } from 'zustand';
 import * as api from '../lib/api';
 
 interface AuthState {
-  user: { id: string; email: string; isOwner: boolean } | null;
+  user: { id: string; email: string; isOwner: boolean; mfaEnabled: boolean } | null;
   loading: boolean;
   check: () => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<api.LoginResponse>;
+  completeMfa: (code: string, mfaChallengeToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -16,7 +17,12 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const u = await api.me();
       set({
-        user: { id: u.user_id, email: u.email, isOwner: u.is_owner },
+        user: {
+          id: u.user_id,
+          email: u.email,
+          isOwner: u.is_owner,
+          mfaEnabled: u.mfa_enabled,
+        },
         loading: false,
       });
     } catch {
@@ -24,14 +30,50 @@ export const useAuth = create<AuthState>((set) => ({
     }
   },
   login: async (email, password) => {
-    const u = await api.login(email, password);
-    const me = await api.me();
+    const result = await api.login(email, password);
+    if (!result.mfa_required) {
+      const me = await api.me();
+      set({
+        user: {
+          id: result.user_id,
+          email: result.email,
+          isOwner: me.is_owner,
+          mfaEnabled: me.mfa_enabled,
+        },
+      });
+    }
+    return result;
+  },
+  completeMfa: async (code, mfaChallengeToken) => {
+    const result = await api.verifyMfa(code, mfaChallengeToken);
+    // Establish session immediately from verify response (do not block on /auth/me).
     set({
-      user: { id: u.user_id, email: u.email, isOwner: me.is_owner },
+      user: {
+        id: result.user_id,
+        email: result.email,
+        isOwner: false,
+        mfaEnabled: true,
+      },
     });
+    try {
+      const me = await api.me();
+      set({
+        user: {
+          id: me.user_id,
+          email: me.email,
+          isOwner: me.is_owner,
+          mfaEnabled: me.mfa_enabled,
+        },
+      });
+    } catch {
+      // Cookie may lag in rare cases; user can still proceed.
+    }
   },
   logout: async () => {
-    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' });
-    set({ user: null });
+    await fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    set({ user: null, loading: false });
   },
 }));

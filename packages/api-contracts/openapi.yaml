@@ -24,7 +24,7 @@ paths:
           description: Owner created
   /auth/login:
     post:
-      summary: Login
+      summary: Login (password; may require MFA second step)
       security: []
       requestBody:
         required: true
@@ -34,7 +34,37 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Authenticated
+          description: Session created, or MFA challenge issued
+  /auth/mfa/verify:
+    post:
+      summary: Complete login with TOTP or recovery code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+      responses:
+        '200':
+          description: Session created
+        '429':
+          description: Challenge locked (too many failures)
+  /auth/mfa/status:
+    get:
+      summary: MFA status for current user
+  /auth/mfa/setup:
+    post:
+      summary: Start MFA enrollment (returns otpauth URI and manual secret)
+  /auth/mfa/enable:
+    post:
+      summary: Confirm MFA with first TOTP code; returns recovery codes once
+  /auth/mfa/disable:
+    post:
+      summary: Disable MFA (recent auth + TOTP code)
+  /auth/mfa/recovery/regenerate:
+    post:
+      summary: Regenerate recovery codes (recent auth + TOTP code)
   /auth/logout:
     post:
       summary: Logout
@@ -151,6 +181,23 @@ components:
         email: { type: string }
         password: { type: string }
         device_id: { type: string }
+    MfaVerifyRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        mfa_challenge_token: { type: string }
+        device_id: { type: string }
+    RecentAuthRequest:
+      type: object
+      properties:
+        password: { type: string }
+    MfaEnableRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        password: { type: string }
     SessionResponse:
       type: object
       properties:

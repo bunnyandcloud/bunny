@@ -23,6 +23,7 @@ import VaultUnlockModal from './VaultUnlockModal';
 import PreviewPanel from './PreviewPanel';
 import BrowserPanel from './BrowserPanel';
 import ClaudeSetupPanel from './ClaudeSetupPanel';
+import LogoutButton from './LogoutButton';
 
 function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
@@ -296,7 +297,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
           )}
           <span className="text-bunny-muted truncate">— {status}</span>
         </div>
-        <div className="w-20 flex justify-end shrink-0">
+        <div className="flex items-center justify-end gap-2 shrink-0 min-w-[5rem]">
           {user?.isOwner && (
             <button
               type="button"
@@ -319,6 +320,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
               Vault{vaultLocked ? ' 🔒' : ''}
             </button>
           )}
+          <LogoutButton className="text-xs text-bunny-muted hover:text-gray-200 disabled:opacity-50" />
         </div>
       </header>
       {showVaultBanner && (

@@ -5,6 +5,7 @@ import { useAuth } from './store/auth';
 
 const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
 const SecretsPage = lazy(() => import('./components/SecretsPage'));
+const SecurityPage = lazy(() => import('./components/SecurityPage'));
 
 function parseSessionFromPath(): string | null {
   const m = location.pathname.match(/^\/s\/([^/]+)/);
@@ -41,6 +42,20 @@ export default function App() {
         }
       >
         <SessionWorkspace sessionId={sessionId} />
+      </Suspense>
+    );
+  }
+
+  if (location.pathname === '/security') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+            Loading…
+          </div>
+        }
+      >
+        <SecurityPage email={user.email} />
       </Suspense>
     );
   }

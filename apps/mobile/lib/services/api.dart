@@ -59,7 +59,7 @@ class BunnyApi {
     return AgentInfo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  Future<Map<String, dynamic>> login(String email, String password) async {
+  Future<LoginStepResult> login(String email, String password) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/v1/auth/login'),
       headers: _headers,
@@ -72,17 +72,40 @@ class BunnyApi {
     if (res.statusCode != 200) {
       throw Exception(_errorMessage(res));
     }
-    final cookies = res.headers['set-cookie'];
-    if (cookies != null && cookies.contains('bunny_session=')) {
-      final token = cookies.split('bunny_session=')[1].split(';').first;
-      await saveToken(token);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (body['mfa_required'] == true) {
+      return LoginStepResult(
+        mfaRequired: true,
+        mfaChallengeToken: body['mfa_challenge_token'] as String?,
+        email: body['email'] as String?,
+      );
+    }
+    final sessionToken = body['session_token'] as String?;
+    if (sessionToken != null) {
+      await saveToken(sessionToken);
+    }
+    return LoginStepResult(mfaRequired: false);
+  }
+
+  Future<void> verifyMfa(String code, String mfaChallengeToken) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/v1/auth/mfa/verify'),
+      headers: _headers,
+      body: jsonEncode({
+        'code': code,
+        'mfa_challenge_token': mfaChallengeToken,
+        'device_id': 'mobile',
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(_errorMessage(res));
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final tokenHeader = res.headers['x-bunny-token'];
-    if (tokenHeader != null) {
-      await saveToken(tokenHeader);
+    final sessionToken = body['session_token'] as String?;
+    if (sessionToken == null) {
+      throw Exception('missing session_token in response');
     }
-    return body;
+    await saveToken(sessionToken);
   }
 
   Future<Map<String, dynamic>> me() async {
@@ -315,6 +338,18 @@ class SdpAnswer {
   SdpAnswer({required this.type, required this.sdp});
   final String type;
   final String sdp;
+}
+
+class LoginStepResult {
+  LoginStepResult({
+    required this.mfaRequired,
+    this.mfaChallengeToken,
+    this.email,
+  });
+
+  final bool mfaRequired;
+  final String? mfaChallengeToken;
+  final String? email;
 }
 
 class AgentInfo {

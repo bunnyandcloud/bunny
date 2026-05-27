@@ -21,6 +21,7 @@ use axum::{
     Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use bunny_auth::{AuthenticatedSession, LoginStep};
 use bunny_core::permissions::{role_can, Action};
 use bunny_core::types::{ApiErrorResponse, Role};
 use bunny_core::API_VERSION;
@@ -35,12 +36,18 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
     let public = Router::new()
         .route("/auth/bootstrap", post(auth_bootstrap))
         .route("/auth/login", post(auth_login))
+        .route("/auth/mfa/verify", post(auth_mfa_verify))
         .route("/agent/info", get(agent_info))
         .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect));
 
     let protected = Router::new()
         .route("/auth/logout", post(auth_logout))
         .route("/auth/me", get(auth_me))
+        .route("/auth/mfa/status", get(auth_mfa_status))
+        .route("/auth/mfa/setup", post(auth_mfa_setup))
+        .route("/auth/mfa/enable", post(auth_mfa_enable))
+        .route("/auth/mfa/disable", post(auth_mfa_disable))
+        .route("/auth/mfa/recovery/regenerate", post(auth_mfa_recovery_regenerate))
         .route("/sessions", post(create_session).get(list_sessions))
         .route(
             "/sessions/:id",
@@ -153,24 +160,181 @@ async fn auth_bootstrap(
     }))
 }
 
-async fn auth_login(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<LoginRequest>,
-) -> Result<(CookieJar, Json<LoginResponse>), ApiError> {
-    let result = state.auth.login(&body.email, &body.password, body.device_id.as_deref())?;
-    let mut cookie = Cookie::new("bunny_session", result.session_token.clone());
+fn session_cookie(token: &str) -> Cookie<'static> {
+    let mut cookie = Cookie::new("bunny_session", token.to_string());
     cookie.set_http_only(true);
     cookie.set_path("/");
     cookie.set_same_site(SameSite::Lax);
-    let jar = CookieJar::new().add(cookie);
+    cookie
+}
+
+fn mfa_challenge_cookie(token: &str) -> Cookie<'static> {
+    let mut cookie = Cookie::new("bunny_mfa_challenge", token.to_string());
+    cookie.set_http_only(true);
+    cookie.set_path("/");
+    cookie.set_same_site(SameSite::Lax);
+    cookie
+}
+
+async fn auth_login(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LoginRequest>,
+) -> Result<(CookieJar, Json<serde_json::Value>), ApiError> {
+    match state
+        .auth
+        .login(&body.email, &body.password, body.device_id.as_deref())
+        .map_err(map_auth_error)?
+    {
+        LoginStep::Complete(result) => {
+            let jar = CookieJar::new().add(session_cookie(&result.session_token));
+            Ok((
+                jar,
+                Json(serde_json::json!({
+                    "user_id": result.user_id.to_string(),
+                    "email": result.email,
+                    "session_token": result.session_token,
+                    "expires_at": result.expires_at.to_rfc3339(),
+                    "mfa_required": false,
+                })),
+            ))
+        }
+        LoginStep::MfaRequired {
+            challenge_token,
+            user_id,
+            email,
+        } => {
+            let jar = CookieJar::new().add(mfa_challenge_cookie(&challenge_token));
+            Ok((
+                jar,
+                Json(serde_json::json!({
+                    "mfa_required": true,
+                    "mfa_challenge_token": challenge_token,
+                    "user_id": user_id.to_string(),
+                    "email": email,
+                })),
+            ))
+        }
+    }
+}
+
+async fn auth_mfa_verify(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Json(body): Json<MfaVerifyRequest>,
+) -> Result<(CookieJar, Json<serde_json::Value>), ApiError> {
+    let challenge = body
+        .mfa_challenge_token
+        .as_deref()
+        .or_else(|| jar.get("bunny_mfa_challenge").map(|c| c.value()))
+        .ok_or_else(|| ApiError::validation("mfa challenge required"))?;
+    let result = state
+        .auth
+        .verify_mfa_login_with_failure(challenge, &body.code, body.device_id.as_deref())
+        .map_err(map_auth_error)?;
+    let mut out_jar = CookieJar::new()
+        .add(session_cookie(&result.session_token))
+        .remove(Cookie::from("bunny_mfa_challenge"));
     Ok((
-        jar,
-        Json(LoginResponse {
-            user_id: result.user_id.to_string(),
-            email: result.email,
-            expires_at: result.expires_at.to_rfc3339(),
-        }),
+        out_jar,
+        Json(serde_json::json!({
+            "user_id": result.user_id.to_string(),
+            "email": result.email,
+            "session_token": result.session_token,
+            "expires_at": result.expires_at.to_rfc3339(),
+        })),
     ))
+}
+
+async fn auth_mfa_status(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<MfaStatusResponse>, ApiError> {
+    let status = state.auth.mfa_status(user).map_err(map_auth_error)?;
+    Ok(Json(MfaStatusResponse {
+        enabled: status.enabled,
+        recovery_remaining: status.recovery_remaining,
+    }))
+}
+
+async fn auth_mfa_setup(
+    State(state): State<Arc<AppState>>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<RecentAuthRequest>,
+) -> Result<Json<MfaSetupResponse>, ApiError> {
+    state
+        .auth
+        .assert_recent_auth(&session, body.password.as_deref())
+        .map_err(map_auth_error)?;
+    let setup = state.auth.mfa_setup_begin(session.user_id).map_err(map_auth_error)?;
+    Ok(Json(MfaSetupResponse {
+        otpauth_uri: setup.otpauth_uri,
+        secret_base32: setup.secret_base32,
+    }))
+}
+
+async fn auth_mfa_enable(
+    State(state): State<Arc<AppState>>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<MfaEnableRequest>,
+) -> Result<Json<MfaEnableResponse>, ApiError> {
+    state
+        .auth
+        .assert_recent_auth(&session, body.password.as_deref())
+        .map_err(map_auth_error)?;
+    let codes = state
+        .auth
+        .mfa_setup_confirm(session.user_id, &body.code)
+        .map_err(map_auth_error)?;
+    Ok(Json(MfaEnableResponse { recovery_codes: codes }))
+}
+
+async fn auth_mfa_disable(
+    State(state): State<Arc<AppState>>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<MfaDisableRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    state
+        .auth
+        .assert_recent_auth(&session, body.password.as_deref())
+        .map_err(map_auth_error)?;
+    state
+        .auth
+        .mfa_disable(session.user_id, &body.code)
+        .map_err(map_auth_error)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn auth_mfa_recovery_regenerate(
+    State(state): State<Arc<AppState>>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<MfaDisableRequest>,
+) -> Result<Json<MfaEnableResponse>, ApiError> {
+    state
+        .auth
+        .assert_recent_auth(&session, body.password.as_deref())
+        .map_err(map_auth_error)?;
+    let codes = state
+        .auth
+        .mfa_regenerate_recovery(session.user_id, &body.code)
+        .map_err(map_auth_error)?;
+    Ok(Json(MfaEnableResponse { recovery_codes: codes }))
+}
+
+fn map_auth_error(e: anyhow::Error) -> ApiError {
+    let msg = e.to_string();
+    if msg.contains("too many attempts") {
+        return ApiError::too_many_requests(&msg);
+    }
+    if msg.contains("recent authentication") {
+        return ApiError::forbidden(&msg);
+    }
+    if msg.contains("already enabled") || msg.contains("not enabled") {
+        return ApiError::conflict(&msg);
+    }
+    if msg.contains("invalid") || msg.contains("expired") || msg.contains("credentials") {
+        return ApiError::unauthorized_msg(&msg);
+    }
+    ApiError::validation(&msg)
 }
 
 async fn auth_logout(
@@ -180,7 +344,9 @@ async fn auth_logout(
     if let Some(c) = jar.get("bunny_session") {
         state.auth.logout(c.value())?;
     }
-    Ok(jar.remove(Cookie::from("bunny_session")))
+    Ok(jar
+        .remove(Cookie::from("bunny_session"))
+        .remove(Cookie::from("bunny_mfa_challenge")))
 }
 
 async fn auth_me(
@@ -193,11 +359,17 @@ async fn auth_me(
         .owner_id()
         .map(|owner| owner == user)
         .unwrap_or(false);
+    let mfa_enabled = state
+        .auth
+        .mfa_status(user)
+        .map(|s| s.enabled)
+        .unwrap_or(false);
     Ok(Json(MeResponse {
         user_id: user.to_string(),
         email,
         created_at: created_at.to_rfc3339(),
         is_owner,
+        mfa_enabled,
     }))
 }
 
@@ -1255,10 +1427,48 @@ pub struct AgentInfoResponse {
 pub struct BootstrapResponse { pub user_id: String, pub message: String }
 #[derive(Deserialize)]
 pub struct LoginRequest { pub email: String, pub password: String, pub device_id: Option<String> }
+#[derive(Deserialize)]
+pub struct MfaVerifyRequest {
+    pub code: String,
+    pub mfa_challenge_token: Option<String>,
+    pub device_id: Option<String>,
+}
+#[derive(Deserialize)]
+pub struct RecentAuthRequest {
+    pub password: Option<String>,
+}
+#[derive(Deserialize)]
+pub struct MfaEnableRequest {
+    pub code: String,
+    pub password: Option<String>,
+}
+#[derive(Deserialize)]
+pub struct MfaDisableRequest {
+    pub code: String,
+    pub password: Option<String>,
+}
 #[derive(Serialize)]
-pub struct LoginResponse { pub user_id: String, pub email: String, pub expires_at: String }
+pub struct MfaStatusResponse {
+    pub enabled: bool,
+    pub recovery_remaining: u64,
+}
 #[derive(Serialize)]
-pub struct MeResponse { pub user_id: String, pub email: String, pub created_at: String, pub is_owner: bool }
+pub struct MfaSetupResponse {
+    pub otpauth_uri: String,
+    pub secret_base32: String,
+}
+#[derive(Serialize)]
+pub struct MfaEnableResponse {
+    pub recovery_codes: Vec<String>,
+}
+#[derive(Serialize)]
+pub struct MeResponse {
+    pub user_id: String,
+    pub email: String,
+    pub created_at: String,
+    pub is_owner: bool,
+    pub mfa_enabled: bool,
+}
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
     pub project_path: Option<String>,
@@ -1432,6 +1642,8 @@ pub struct ApiError {
 
 impl ApiError {
     pub(crate) fn unauthorized() -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: "authentication required".into() } }
+    pub(crate) fn unauthorized_msg(msg: &str) -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: msg.into() } }
+    pub(crate) fn too_many_requests(msg: &str) -> Self { Self { status: StatusCode::TOO_MANY_REQUESTS, code: "TOO_MANY_REQUESTS".into(), message: msg.into() } }
     pub(crate) fn forbidden(msg: &str) -> Self { Self { status: StatusCode::FORBIDDEN, code: "FORBIDDEN".into(), message: msg.into() } }
     pub(crate) fn not_found(r: &str) -> Self { Self { status: StatusCode::NOT_FOUND, code: "NOT_FOUND".into(), message: format!("{r} not found") } }
     pub(crate) fn conflict(msg: &str) -> Self { Self { status: StatusCode::CONFLICT, code: "CONFLICT".into(), message: msg.into() } }

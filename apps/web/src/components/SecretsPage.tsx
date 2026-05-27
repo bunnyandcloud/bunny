@@ -13,6 +13,7 @@ import {
   type VaultStatus,
 } from '../lib/api';
 import { copyToClipboard } from '../lib/copyToClipboard';
+import LogoutButton from './LogoutButton';
 
 interface Props {
   email: string;
@@ -234,13 +235,16 @@ export default function SecretsPage({ email }: Props) {
             env vars in terminals.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => { location.href = '/'; }}
-          className="text-sm text-bunny-muted hover:text-bunny-accent shrink-0"
-        >
-          ← Sessions
-        </button>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => { location.href = '/'; }}
+            className="text-sm text-bunny-muted hover:text-bunny-accent"
+          >
+            ← Sessions
+          </button>
+          <LogoutButton />
+        </div>
       </header>
 
       {error && (

@@ -149,6 +149,49 @@ impl AuthDb {
             "ALTER TABLE stream_sessions ADD COLUMN name TEXT",
             [],
         );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN totp_secret_enc TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN totp_enabled_at TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE auth_sessions ADD COLUMN password_verified_at TEXT",
+            [],
+        );
+        self.conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS mfa_pending_setups (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL UNIQUE,
+                secret_enc TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                used_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS mfa_challenges (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_mfa_recovery_user ON mfa_recovery_codes(user_id);
+            CREATE INDEX IF NOT EXISTS idx_mfa_challenges_hash ON mfa_challenges(token_hash);
+            "#,
+        )?;
         Ok(())
     }
 
@@ -217,34 +260,246 @@ impl AuthDb {
         token_hash: &str,
         device_id: Option<&str>,
         expires_at: DateTime<Utc>,
+        password_verified_at: Option<DateTime<Utc>>,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO auth_sessions (id, user_id, token_hash, device_id, expires_at) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT INTO auth_sessions (id, user_id, token_hash, device_id, expires_at, password_verified_at) VALUES (?1,?2,?3,?4,?5,?6)",
             params![
                 id.to_string(),
                 user_id.to_string(),
                 token_hash,
                 device_id,
-                expires_at.to_rfc3339()
+                expires_at.to_rfc3339(),
+                password_verified_at.map(|t| t.to_rfc3339()),
             ],
         )?;
         Ok(())
     }
 
-    pub fn find_session_by_token_hash(&self, token_hash: &str) -> Result<Option<(Uuid, Uuid)>> {
+    pub fn find_session_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<(Uuid, Uuid, Option<DateTime<Utc>>)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, user_id FROM auth_sessions WHERE token_hash = ?1 AND revoked_at IS NULL AND expires_at > ?2",
+            "SELECT id, user_id, password_verified_at FROM auth_sessions WHERE token_hash = ?1 AND revoked_at IS NULL AND expires_at > ?2",
         )?;
         let now = Utc::now().to_rfc3339();
         let mut rows = stmt.query(params![token_hash, now])?;
         if let Some(row) = rows.next()? {
+            let pva: Option<String> = row.get(2)?;
+            let pva = match pva {
+                Some(s) => Some(s.parse()?),
+                None => None,
+            };
             Ok(Some((
                 Uuid::parse_str(&row.get::<_, String>(0)?)?,
                 Uuid::parse_str(&row.get::<_, String>(1)?)?,
+                pva,
             )))
         } else {
             Ok(None)
         }
+    }
+
+    pub fn touch_password_verified(&self, session_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE auth_sessions SET password_verified_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn user_mfa_enabled(&self, user_id: Uuid) -> Result<bool> {
+        let enabled: Option<String> = self.conn.query_row(
+            "SELECT totp_enabled_at FROM users WHERE id = ?1",
+            params![user_id.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(enabled.is_some())
+    }
+
+    pub fn get_user_totp_secret_enc(&self, user_id: Uuid) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT totp_secret_enc FROM users WHERE id = ?1",
+                params![user_id.to_string()],
+                |r| r.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn set_user_totp_active(&self, user_id: Uuid, secret_enc: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE users SET totp_secret_enc = ?1, totp_enabled_at = ?2 WHERE id = ?3",
+            params![secret_enc, now, user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_user_totp(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL WHERE id = ?1",
+            params![user_id.to_string()],
+        )?;
+        self.delete_recovery_codes_for_user(user_id)?;
+        Ok(())
+    }
+
+    pub fn delete_expired_mfa_pending(&self) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "DELETE FROM mfa_pending_setups WHERE expires_at <= ?1",
+            params![now],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_mfa_pending_for_user(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM mfa_pending_setups WHERE user_id = ?1",
+            params![user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_mfa_pending(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        secret_enc: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO mfa_pending_setups (id, user_id, secret_enc, expires_at, created_at) VALUES (?1,?2,?3,?4,?5)",
+            params![
+                id.to_string(),
+                user_id.to_string(),
+                secret_enc,
+                expires_at.to_rfc3339(),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_mfa_pending_secret_enc(&self, user_id: Uuid) -> Result<Option<String>> {
+        let now = Utc::now().to_rfc3339();
+        let mut stmt = self.conn.prepare(
+            "SELECT secret_enc FROM mfa_pending_setups WHERE user_id = ?1 AND expires_at > ?2",
+        )?;
+        let mut rows = stmt.query(params![user_id.to_string(), now])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn insert_mfa_challenge(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO mfa_challenges (id, user_id, token_hash, expires_at, failed_attempts, created_at) VALUES (?1,?2,?3,?4,0,?5)",
+            params![
+                id.to_string(),
+                user_id.to_string(),
+                token_hash,
+                expires_at.to_rfc3339(),
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_mfa_challenge_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<MfaChallengeRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, user_id, expires_at, failed_attempts, locked_until FROM mfa_challenges WHERE token_hash = ?1",
+        )?;
+        let mut rows = stmt.query(params![token_hash])?;
+        if let Some(row) = rows.next()? {
+            let locked: Option<String> = row.get(4)?;
+            let locked_until = locked.map(|s| s.parse()).transpose()?;
+            Ok(Some(MfaChallengeRow {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?)?,
+                user_id: Uuid::parse_str(&row.get::<_, String>(1)?)?,
+                expires_at: row.get::<_, String>(2)?.parse()?,
+                failed_attempts: row.get(3)?,
+                locked_until,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn increment_mfa_challenge_failure(
+        &self,
+        id: Uuid,
+        failed_attempts: i64,
+        locked_until: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE mfa_challenges SET failed_attempts = ?1, locked_until = ?2 WHERE id = ?3",
+            params![
+                failed_attempts,
+                locked_until.map(|t| t.to_rfc3339()),
+                id.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_mfa_challenge(&self, id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM mfa_challenges WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_recovery_code(&self, id: Uuid, user_id: Uuid, code_hash: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO mfa_recovery_codes (id, user_id, code_hash, created_at) VALUES (?1,?2,?3,?4)",
+            params![
+                id.to_string(),
+                user_id.to_string(),
+                code_hash,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_recovery_codes_for_user(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM mfa_recovery_codes WHERE user_id = ?1",
+            params![user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_unused_recovery_codes(&self, user_id: Uuid) -> Result<u64> {
+        let count: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM mfa_recovery_codes WHERE user_id = ?1 AND used_at IS NULL",
+            params![user_id.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn consume_recovery_code(&self, user_id: Uuid, code_hash: &str) -> Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE mfa_recovery_codes SET used_at = ?1 WHERE user_id = ?2 AND code_hash = ?3 AND used_at IS NULL",
+            params![Utc::now().to_rfc3339(), user_id.to_string(), code_hash],
+        )?;
+        Ok(updated > 0)
     }
 
     pub fn revoke_session(&self, token_hash: &str) -> Result<()> {
@@ -693,6 +948,14 @@ impl AuthDb {
         let rows = stmt.query_map(params![status], map_terminal_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+}
+
+pub struct MfaChallengeRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub failed_attempts: i64,
+    pub locked_until: Option<DateTime<Utc>>,
 }
 
 pub type TerminalRow = (
