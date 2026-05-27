@@ -4,6 +4,8 @@ use crate::terminals::{default_shell_cwd, persist_terminal};
 use anyhow::Result;
 use axum::Router;
 use clap::{Parser, Subcommand};
+use qrcode::render::unicode;
+use qrcode::QrCode;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
@@ -140,11 +142,63 @@ pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> 
     if password != confirm {
         anyhow::bail!("passwords do not match");
     }
-    state.auth.bootstrap_owner(&email, &password)?;
+    let owner_id = state.auth.bootstrap_owner(&email, &password)?;
     println!("✓ Owner account created");
     println!("✓ Local auth enabled");
     println!("✓ Anonymous access disabled");
     println!("✓ Secure session cookies enabled");
+
+    // Optional: enable MFA during initial bootstrap.
+    if prompt_yes_no("Enable TOTP MFA now? [y/N]: ", false) {
+        println!("\nMFA setup (TOTP)");
+        println!("1) Scan the QR code in the web UI later, or add this secret manually now.");
+        println!("2) Then enter a 6-digit code to confirm.\n");
+
+        let setup = state.auth.mfa_setup_begin(owner_id)?;
+        println!("Issuer: bunny");
+        println!("Account: {email}");
+        println!("otpauth URI (QR payload):\n{}\n", setup.otpauth_uri);
+        if let Ok(code) = QrCode::new(setup.otpauth_uri.as_bytes()) {
+            // Dense1x2 renders nicely in most terminals (2 vertical pixels per char).
+            let qr = code
+                .render::<unicode::Dense1x2>()
+                .quiet_zone(true)
+                .build();
+            println!("Scan this QR code with your authenticator app:\n{qr}\n");
+        } else {
+            println!("(QR rendering failed in this terminal; use the otpauth URI above.)\n");
+        }
+        println!("Manual secret (base32) — show once:\n{}\n", setup.secret_base32);
+
+        let mut attempts = 0;
+        loop {
+            let code = prompt("TOTP code (or empty to cancel): ");
+            if code.trim().is_empty() {
+                state.auth.mfa_setup_cancel(owner_id)?;
+                println!("✓ MFA setup cancelled");
+                break;
+            }
+            match state.auth.mfa_setup_confirm(owner_id, &code) {
+                Ok(recovery) => {
+                    println!("✓ MFA enabled");
+                    println!("\nRecovery codes — save these now (shown only once):");
+                    for c in recovery {
+                        println!("  {c}");
+                    }
+                    println!();
+                    break;
+                }
+                Err(e) => {
+                    attempts += 1;
+                    eprintln!("✗ Invalid code: {e}");
+                    if attempts >= 3 {
+                        state.auth.mfa_setup_cancel(owner_id)?;
+                        anyhow::bail!("MFA setup failed (too many attempts); setup cancelled");
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -491,6 +545,15 @@ fn prompt(label: &str) -> String {
 
 fn prompt_password(label: &str) -> String {
     prompt(label)
+}
+
+fn prompt_yes_no(label: &str, default: bool) -> bool {
+    let s = prompt(label);
+    let s = s.trim().to_lowercase();
+    if s.is_empty() {
+        return default;
+    }
+    matches!(s.as_str(), "y" | "yes" | "o" | "oui")
 }
 
 fn check_cmd(name: &str, f: impl FnOnce() -> Result<()>) {

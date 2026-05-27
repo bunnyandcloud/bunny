@@ -435,6 +435,12 @@ impl AuthService {
         Ok(codes)
     }
 
+    pub fn mfa_setup_cancel(&self, user_id: Uuid) -> Result<()> {
+        let db = self.db.lock();
+        db.delete_mfa_pending_for_user(user_id)?;
+        Ok(())
+    }
+
     pub fn mfa_disable(&self, user_id: Uuid, code: &str) -> Result<()> {
         let db = self.db.lock();
         if !db.user_mfa_enabled(user_id)? {

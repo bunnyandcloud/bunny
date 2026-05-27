@@ -40,3 +40,4 @@ time.workspace = true
 regex.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio-tungstenite.workspace = true
+qrcode.workspace = true
