@@ -17,7 +17,7 @@ use axum::{
     http::StatusCode,
     middleware::from_fn_with_state,
     response::{IntoResponse, Redirect, Response},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, get_service, patch, post},
     Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -37,6 +37,7 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/auth/bootstrap", post(auth_bootstrap))
         .route("/auth/login", post(auth_login))
         .route("/auth/mfa/verify", post(auth_mfa_verify))
+        .route("/invitations/accept", post(invitation_accept))
         .route("/agent/info", get(agent_info))
         .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect));
 
@@ -54,6 +55,12 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
             get(get_session).patch(patch_session).delete(delete_session),
         )
         .route("/sessions/:id/join", post(join_session))
+        .route("/sessions/:id/invitations", post(create_invitation))
+        .route("/sessions/:id/members", get(list_session_members))
+        .route(
+            "/sessions/:id/members/:user_id",
+            patch(update_session_member).delete(remove_session_member),
+        )
         .route("/sessions/:id/stop", post(stop_session))
         .route("/sessions/:id/reset", post(reset_session))
         .route("/sessions/:id/realtime", get(session_realtime))
@@ -98,6 +105,8 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/claude/auth/start", post(claude_auth_start))
         .route("/claude/auth/code", post(claude_auth_code))
         .route("/claude/auth/detect-code", post(claude_auth_detect_code))
+        .route("/users", get(list_users).post(create_user).patch(update_user))
+        .route("/users/:user_id", delete(revoke_user))
         .route("/webrtc/config", get(webrtc_config))
         .route("/sessions/:id/webrtc/offer", post(webrtc_offer))
         .route("/sessions/:id/webrtc/candidate", post(webrtc_candidate))
@@ -111,9 +120,12 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     let static_files = if let Some(dist) = web_dist.filter(|d| d.join("index.html").is_file()) {
+        let index_html = dist.join("index.html");
         Router::new()
+            // Serve SPA directly (preserve ?invite=…&email=… query string).
+            .route("/login", get_service(ServeFile::new(index_html.clone())))
             .nest_service("/assets", ServeDir::new(dist.join("assets")))
-            .fallback_service(ServeFile::new(dist.join("index.html")))
+            .fallback_service(ServeFile::new(index_html))
     } else {
         Router::new().route(
             "/",
@@ -127,7 +139,6 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .nest(&format!("/api/{API_VERSION}"), api)
         .merge(preview_routes)
         .merge(static_files)
-        .route("/login", get(|| async { Redirect::temporary("/") }))
         .layer(cors_layer())
         .with_state(state)
 }
@@ -364,13 +375,139 @@ async fn auth_me(
         .mfa_status(user)
         .map(|s| s.enabled)
         .unwrap_or(false);
+    let profile = state
+        .auth
+        .db()
+        .lock()
+        .get_user_profile(user)
+        .ok()
+        .flatten();
+    let (can_install_claude, can_manage_vault, can_create_sessions, default_session_role) =
+        if is_owner {
+            (true, true, true, "owner".to_string())
+        } else if let Some(p) = profile {
+            (
+                p.can_install_claude,
+                p.can_manage_vault,
+                p.can_create_sessions,
+                format!("{:?}", p.default_session_role).to_lowercase(),
+            )
+        } else {
+            (false, false, false, "viewer".to_string())
+        };
     Ok(Json(MeResponse {
         user_id: user.to_string(),
         email,
         created_at: created_at.to_rfc3339(),
         is_owner,
         mfa_enabled,
+        can_install_claude,
+        can_manage_vault,
+        can_create_sessions,
+        default_session_role,
     }))
+}
+
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<Vec<UserAdminItem>>, ApiError> {
+    ensure_system_owner(&state, user)?;
+    let owner_id = state.auth.owner_id().map_err(|_| ApiError::forbidden("permission denied"))?;
+    let users = state
+        .auth
+        .db()
+        .lock()
+        .list_users()
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(
+        users
+            .into_iter()
+            .map(|row| UserAdminItem {
+                id: row.id.to_string(),
+                email: row.email,
+                disabled: row.disabled_at.is_some(),
+                is_system_owner: row.id == owner_id,
+                can_install_claude: row.can_install_claude,
+                can_manage_vault: row.can_manage_vault,
+                can_create_sessions: row.can_create_sessions,
+                default_session_role: format!("{:?}", row.default_session_role).to_lowercase(),
+            })
+            .collect(),
+    ))
+}
+
+async fn create_user(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<CreateUserRequest>,
+) -> Result<Json<CreateUserResponse>, ApiError> {
+    ensure_system_owner(&state, user)?;
+    let role = bunny_core::permissions::parse_role(&body.default_session_role)
+        .ok_or_else(|| ApiError::validation("invalid default_session_role"))?;
+    if matches!(role, bunny_core::types::Role::Owner | bunny_core::types::Role::Agent) {
+        return Err(ApiError::validation(
+            "default_session_role must be admin, editor, or viewer",
+        ));
+    }
+    let token = state
+        .auth
+        .invite_team_user(
+            &body.email,
+            role,
+            body.can_install_claude,
+            body.can_manage_vault,
+            body.can_create_sessions,
+            user,
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(CreateUserResponse { token }))
+}
+
+async fn update_user(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<UserAdminUpdateRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_system_owner(&state, user)?;
+    let user_id = Uuid::parse_str(&body.user_id).map_err(|_| ApiError::validation("user_id"))?;
+    let owner_id = state.auth.owner_id().map_err(|_| ApiError::forbidden("permission denied"))?;
+    if user_id == owner_id {
+        return Err(ApiError::forbidden("cannot change system owner permissions"));
+    }
+    let role = bunny_core::permissions::parse_role(&body.default_session_role)
+        .ok_or_else(|| ApiError::validation("invalid default_session_role"))?;
+    if matches!(role, bunny_core::types::Role::Owner | bunny_core::types::Role::Agent) {
+        return Err(ApiError::validation(
+            "default_session_role must be admin, editor, or viewer",
+        ));
+    }
+    state
+        .auth
+        .db()
+        .lock()
+        .set_user_team_settings(
+            user_id,
+            body.can_install_claude,
+            body.can_manage_vault,
+            body.can_create_sessions,
+            role,
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn revoke_user(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(user_id): Path<Uuid>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_system_owner(&state, user)?;
+    state
+        .auth
+        .revoke_user_by_id(user_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(OkResponse { ok: true }))
 }
 
 fn normalize_label(name: &str, field: &str) -> Result<String, ApiError> {
@@ -399,6 +536,7 @@ async fn create_session(
     Extension(user): Extension<Uuid>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, ApiError> {
+    ensure_can_create_sessions(&state, user)?;
     let path = body
         .project_path
         .unwrap_or_else(default_session_path_label);
@@ -446,7 +584,7 @@ async fn get_session(
     Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<SessionListItem>, ApiError> {
-    ensure_session_access(&state, user, id, Action::TerminalRead)?;
+    ensure_session_access(&state, user, id, Action::SessionRead)?;
     let sessions = state.auth.db().lock().list_stream_sessions(user)?;
     sessions
         .into_iter()
@@ -467,7 +605,7 @@ async fn patch_session(
     Path(id): Path<Uuid>,
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<SessionListItem>, ApiError> {
-    ensure_session_access(&state, user, id, Action::TerminalWrite)?;
+    ensure_session_access(&state, user, id, Action::SessionUpdate)?;
     let name = normalize_label(&body.name, "name")?;
     state
         .auth
@@ -494,8 +632,107 @@ async fn join_session(
     Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    ensure_session_access(&state, user, id, Action::TerminalRead)?;
+    ensure_session_access(&state, user, id, Action::SessionRead)?;
     Ok(Json(serde_json::json!({ "joined": true, "sessionId": id })))
+}
+
+async fn create_invitation(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreateInvitationRequest>,
+) -> Result<Json<CreateInvitationResponse>, ApiError> {
+    ensure_session_access(&state, user, id, Action::UsersManage)?;
+    let role = bunny_core::permissions::parse_role(&body.role)
+        .ok_or_else(|| ApiError::validation("invalid role"))?;
+    let token = state
+        .auth
+        .invite_user(id, &body.email, role, user)
+        .map_err(|e| ApiError::forbidden(&e.to_string()))?;
+    Ok(Json(CreateInvitationResponse { token }))
+}
+
+async fn invitation_accept(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<InvitationAcceptRequest>,
+) -> Result<(CookieJar, Json<InvitationAcceptResponse>), ApiError> {
+    let result = state
+        .auth
+        .accept_invitation(
+            &body.token,
+            &body.email,
+            &body.password,
+            body.device_id.as_deref(),
+        )
+        .map_err(map_auth_error)?;
+    let jar = CookieJar::new().add(session_cookie(&result.session_token));
+    Ok((
+        jar,
+        Json(InvitationAcceptResponse {
+            user_id: result.user_id.to_string(),
+            email: result.email,
+            session_id: result.session_id.map(|id| id.to_string()),
+            role: format!("{:?}", result.role).to_lowercase(),
+            expires_at: result.expires_at.to_rfc3339(),
+        }),
+    ))
+}
+
+async fn list_session_members(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<SessionMemberResponse>>, ApiError> {
+    ensure_session_access(&state, user, id, Action::UsersManage)?;
+    let members = state
+        .auth
+        .db()
+        .lock()
+        .list_session_members(id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(
+        members
+            .into_iter()
+            .map(|(user_id, email, role)| SessionMemberResponse {
+                user_id: user_id.to_string(),
+                email,
+                role: format!("{:?}", role).to_lowercase(),
+            })
+            .collect(),
+    ))
+}
+
+async fn update_session_member(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path((id, user_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateSessionMemberRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_session_access(&state, user, id, Action::UsersManage)?;
+    let role = bunny_core::permissions::parse_role(&body.role)
+        .ok_or_else(|| ApiError::validation("invalid role"))?;
+    state
+        .auth
+        .db()
+        .lock()
+        .add_session_member(id, user_id, role)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+async fn remove_session_member(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path((id, user_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<OkResponse>, ApiError> {
+    ensure_session_access(&state, user, id, Action::UsersManage)?;
+    state
+        .auth
+        .db()
+        .lock()
+        .remove_session_member(id, user_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(OkResponse { ok: true }))
 }
 
 async fn stop_session(
@@ -518,7 +755,7 @@ async fn delete_session(
     Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    ensure_session_access(&state, user, id, Action::SessionStop)?;
+    ensure_session_access(&state, user, id, Action::SessionDelete)?;
     teardown_session(&state, id).map_err(|e| ApiError::validation(&e.to_string()))?;
     let auth_db = state.auth.db();
     auth_db
@@ -543,7 +780,7 @@ async fn session_realtime(
     Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
-    ensure_session_access(&state, user, id, Action::TerminalRead)?;
+    ensure_session_access(&state, user, id, Action::SessionRead)?;
     Ok(ws.on_upgrade(move |socket| ws::handle_session_realtime(socket, state, id)))
 }
 
@@ -1066,8 +1303,9 @@ async fn claude_status(
 
 async fn claude_install(
     State(state): State<Arc<AppState>>,
-    Extension(_user): Extension<Uuid>,
+    Extension(user): Extension<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    ensure_global_access(&state, user, Action::ClaudeInstall)?;
     if crate::claude::is_installed() {
         let mut install = state.claude_install.lock();
         install.state = "ready".into();
@@ -1242,6 +1480,64 @@ fn ensure_session_access(
     } else {
         Err(ApiError::forbidden("permission denied"))
     }
+}
+
+fn ensure_system_owner(state: &AppState, user_id: Uuid) -> Result<(), ApiError> {
+    let owner = state
+        .auth
+        .owner_id()
+        .map_err(|_| ApiError::forbidden("permission denied"))?;
+    if user_id == owner {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("permission denied"))
+    }
+}
+
+fn ensure_can_create_sessions(state: &AppState, user_id: Uuid) -> Result<(), ApiError> {
+    if ensure_system_owner(state, user_id).is_ok() {
+        return Ok(());
+    }
+    let profile = state
+        .auth
+        .db()
+        .lock()
+        .get_user_profile(user_id)
+        .map_err(|_| ApiError::forbidden("permission denied"))?;
+    if let Some(p) = profile {
+        if p.disabled_at.is_none() && p.can_create_sessions {
+            return Ok(());
+        }
+    }
+    Err(ApiError::forbidden("permission denied"))
+}
+
+fn ensure_global_access(state: &AppState, user_id: Uuid, action: Action) -> Result<(), ApiError> {
+    if ensure_system_owner(state, user_id).is_ok() {
+        return Ok(());
+    }
+    if let Ok(profile) = state.auth.db().lock().get_user_profile(user_id) {
+        if let Some(p) = profile {
+            if p.disabled_at.is_none() {
+                match action {
+                    Action::ClaudeInstall if p.can_install_claude => return Ok(()),
+                    Action::VaultManage if p.can_manage_vault => return Ok(()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    // Global access is granted to users who are Admin in any session.
+    let is_admin_anywhere = state
+        .auth
+        .db()
+        .lock()
+        .has_any_session_role(user_id, Role::Admin)
+        .map_err(|_| ApiError::forbidden("permission denied"))?;
+    if is_admin_anywhere && role_can(Role::Admin, action) {
+        return Ok(());
+    }
+    Err(ApiError::forbidden("permission denied"))
 }
 
 fn get_role(state: &AppState, user_id: Uuid, session_id: Uuid) -> Result<Role, ApiError> {
@@ -1468,11 +1764,90 @@ pub struct MeResponse {
     pub created_at: String,
     pub is_owner: bool,
     pub mfa_enabled: bool,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+    pub default_session_role: String,
 }
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
     pub project_path: Option<String>,
     pub name: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserAdminItem {
+    pub id: String,
+    pub email: String,
+    pub disabled: bool,
+    pub is_system_owner: bool,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+    pub default_session_role: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateUserRequest {
+    pub email: String,
+    pub default_session_role: String,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+}
+
+#[derive(Serialize)]
+pub struct CreateUserResponse {
+    pub token: String,
+}
+
+#[derive(Deserialize)]
+pub struct UserAdminUpdateRequest {
+    pub user_id: String,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+    pub default_session_role: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateInvitationRequest {
+    pub email: String,
+    pub role: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateInvitationResponse {
+    pub token: String,
+}
+
+#[derive(Deserialize)]
+pub struct InvitationAcceptRequest {
+    pub token: String,
+    pub email: String,
+    pub password: String,
+    pub device_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct InvitationAcceptResponse {
+    pub user_id: String,
+    pub email: String,
+    pub session_id: Option<String>,
+    pub role: String,
+    pub expires_at: String,
+}
+
+#[derive(Serialize)]
+pub struct SessionMemberResponse {
+    pub user_id: String,
+    pub email: String,
+    pub role: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateSessionMemberRequest {
+    pub role: String,
 }
 #[derive(Serialize)]
 pub struct SessionResponse {

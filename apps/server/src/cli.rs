@@ -244,7 +244,8 @@ pub async fn run_user(state: &AppState, command: UserCommands) -> Result<()> {
             println!("✓ Invitation created (token for recipient): {token}");
         }
         UserCommands::Revoke { email } => {
-            println!("✓ Revoked access for {email} (stub — implement revoke in DB)");
+            state.auth.revoke_user_by_email(&email)?;
+            println!("✓ Revoked access for {email}");
         }
     }
     Ok(())

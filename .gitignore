@@ -38,3 +38,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Project specific
+target/
+target-macos/

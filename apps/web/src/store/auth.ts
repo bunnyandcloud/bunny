@@ -2,7 +2,13 @@ import { create } from 'zustand';
 import * as api from '../lib/api';
 
 interface AuthState {
-  user: { id: string; email: string; isOwner: boolean; mfaEnabled: boolean } | null;
+  user: {
+    id: string;
+    email: string;
+    isOwner: boolean;
+    mfaEnabled: boolean;
+    canCreateSessions: boolean;
+  } | null;
   loading: boolean;
   check: () => Promise<void>;
   login: (email: string, password: string) => Promise<api.LoginResponse>;
@@ -22,6 +28,7 @@ export const useAuth = create<AuthState>((set) => ({
           email: u.email,
           isOwner: u.is_owner,
           mfaEnabled: u.mfa_enabled,
+          canCreateSessions: u.can_create_sessions,
         },
         loading: false,
       });
@@ -39,6 +46,7 @@ export const useAuth = create<AuthState>((set) => ({
           email: result.email,
           isOwner: me.is_owner,
           mfaEnabled: me.mfa_enabled,
+          canCreateSessions: me.can_create_sessions,
         },
       });
     }
@@ -53,6 +61,7 @@ export const useAuth = create<AuthState>((set) => ({
         email: result.email,
         isOwner: false,
         mfaEnabled: true,
+        canCreateSessions: false,
       },
     });
     try {
@@ -63,6 +72,7 @@ export const useAuth = create<AuthState>((set) => ({
           email: me.email,
           isOwner: me.is_owner,
           mfaEnabled: me.mfa_enabled,
+          canCreateSessions: me.can_create_sessions,
         },
       });
     } catch {

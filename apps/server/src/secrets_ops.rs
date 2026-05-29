@@ -1,18 +1,39 @@
 use crate::api::ApiError;
 use crate::state::AppState;
+use bunny_core::permissions::{role_can, Action};
 use bunny_secrets::{parse_scope, SecretEntry, SecretScope, SecretsError, VaultStatus};
 use serde::Serialize;
 use uuid::Uuid;
 
 pub fn ensure_secrets_access(state: &AppState, user_id: Uuid) -> Result<(), ApiError> {
+    // Vault is global, but we gate it by "global" access:
+    // - owner always allowed
+    // - any user who is Admin in at least one session is allowed
+    // - or any user granted explicit global permission
     let owner = state
         .auth
         .owner_id()
         .map_err(|_| ApiError::forbidden("permission denied"))?;
-    if user_id != owner {
-        return Err(ApiError::forbidden("permission denied"));
+    if user_id == owner {
+        return Ok(());
     }
-    Ok(())
+    if let Ok(profile) = state.auth.db().lock().get_user_profile(user_id) {
+        if let Some(p) = profile {
+            if p.disabled_at.is_none() && p.can_manage_vault {
+                return Ok(());
+            }
+        }
+    }
+    let is_admin_anywhere = state
+        .auth
+        .db()
+        .lock()
+        .has_any_session_role(user_id, bunny_core::types::Role::Admin)
+        .map_err(|_| ApiError::forbidden("permission denied"))?;
+    if is_admin_anywhere && role_can(bunny_core::types::Role::Admin, Action::VaultManage) {
+        return Ok(());
+    }
+    Err(ApiError::forbidden("permission denied"))
 }
 
 fn map_secrets_err(e: SecretsError) -> ApiError {

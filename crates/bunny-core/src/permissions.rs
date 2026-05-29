@@ -2,6 +2,10 @@ use crate::types::Role;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
+    SessionCreate,
+    SessionRead,
+    SessionUpdate,
+    SessionDelete,
     TerminalRead,
     TerminalWrite,
     TerminalRestart,
@@ -14,6 +18,8 @@ pub enum Action {
     SessionShare,
     SessionStop,
     SessionReset,
+    ClaudeInstall,
+    VaultManage,
     SecretsInject,
     VoiceUse,
     VoiceRun,
@@ -29,7 +35,11 @@ pub fn role_can(role: Role, action: Action) -> bool {
         (Admin, SecretsInject | NetworkBody) => false,
         (Admin, action) => matches!(
             action,
-            TerminalRead
+            SessionCreate
+                | SessionRead
+                | SessionUpdate
+                | SessionDelete
+                | TerminalRead
                 | TerminalWrite
                 | TerminalRestart
                 | BrowserView
@@ -40,15 +50,19 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | SessionShare
                 | SessionStop
                 | SessionReset
+                | ClaudeInstall
+                | VaultManage
                 | VoiceUse
                 | VoiceRun
                 | UsersManage
                 | AuditView
         ),
-        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody) => false,
+        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody | SessionDelete | ClaudeInstall | VaultManage) => false,
         (Editor, action) => matches!(
             action,
-            TerminalRead
+            SessionRead
+                | SessionUpdate
+                | TerminalRead
                 | TerminalWrite
                 | TerminalRestart
                 | BrowserView
@@ -59,9 +73,9 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | VoiceUse
                 | VoiceRun
         ),
-        (Viewer, TerminalRead | BrowserView | ConsoleView | NetworkView | PreviewView) => true,
+        (Viewer, SessionRead | TerminalRead | BrowserView | ConsoleView | NetworkView | PreviewView) => true,
         (Viewer, _) => false,
-        (Agent, TerminalRead | ConsoleView | NetworkView) => true,
+        (Agent, SessionRead | TerminalRead | ConsoleView | NetworkView) => true,
         (Agent, _) => false,
     }
 }

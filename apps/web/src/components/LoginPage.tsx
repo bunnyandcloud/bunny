@@ -1,12 +1,27 @@
-import { FormEvent, useState } from 'react';
-import { apiErrorMessage, type LoginResponse } from '../lib/api';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { acceptInvitation, apiErrorMessage, type LoginResponse } from '../lib/api';
 import { useAuth } from '../store/auth';
+
+function readInviteParams() {
+  const params = new URLSearchParams(location.search);
+  return {
+    inviteToken: params.get('invite'),
+    inviteEmail: params.get('email') ?? '',
+    next: params.get('next'),
+  };
+}
 
 export default function LoginPage() {
   const login = useAuth((s) => s.login);
   const completeMfa = useAuth((s) => s.completeMfa);
-  const [email, setEmail] = useState('');
+  const check = useAuth((s) => s.check);
+
+  const inviteParams = useMemo(readInviteParams, []);
+  const inviteToken = inviteParams.inviteToken;
+
+  const [email, setEmail] = useState(inviteParams.inviteEmail);
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [mfaChallenge, setMfaChallenge] = useState<{
     token: string;
     email: string;
@@ -16,9 +31,45 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const { inviteEmail } = readInviteParams();
+    if (inviteEmail) {
+      setEmail(inviteEmail);
+    }
+  }, []);
+
   function redirectAfterAuth() {
-    const next = new URLSearchParams(location.search).get('next');
+    const next = readInviteParams().next;
     if (next) location.href = next;
+  }
+
+  async function onAcceptInviteSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!inviteToken || loading) return;
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await acceptInvitation({
+        token: inviteToken,
+        email: email.trim(),
+        password,
+      });
+      await check();
+      const next = readInviteParams().next;
+      location.href = next || (res.session_id ? `/s/${res.session_id}` : '/');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Invitation acceptance failed'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function onPasswordSubmit(e: FormEvent) {
@@ -119,6 +170,80 @@ export default function LoginPage() {
           >
             Back to sign in
           </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (inviteToken) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <form
+          onSubmit={onAcceptInviteSubmit}
+          className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
+        >
+          <h1 className="text-2xl font-bold text-bunny-accent">Accept invitation</h1>
+          <p className="text-bunny-muted text-sm">
+            Create your account to join the session. You do not need an existing password.
+          </p>
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+          <label className="block text-xs text-bunny-muted">
+            Email
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              readOnly={Boolean(inviteParams.inviteEmail)}
+              className="mt-1 w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded disabled:opacity-70"
+              required
+            />
+          </label>
+          <label className="block text-xs text-bunny-muted">
+            Choose a password
+            <input
+              type="password"
+              placeholder="New password (min. 8 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              className="mt-1 w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
+              required
+              minLength={8}
+            />
+          </label>
+          <label className="block text-xs text-bunny-muted">
+            Confirm password
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              className="mt-1 w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
+              required
+              minLength={8}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? 'Creating account…' : 'Create account & join'}
+          </button>
+          <p className="text-xs text-bunny-muted text-center">
+            Already have an account?{' '}
+            <button
+              type="button"
+              className="text-bunny-accent hover:underline"
+              onClick={() => {
+                location.href = '/';
+              }}
+            >
+              Sign in instead
+            </button>
+          </p>
         </form>
       </div>
     );

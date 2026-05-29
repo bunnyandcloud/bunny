@@ -22,9 +22,10 @@ interface SessionItem {
 interface Props {
   email: string;
   isOwner: boolean;
+  canCreateSessions: boolean;
 }
 
-export default function HomePage({ email, isOwner }: Props) {
+export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -142,14 +143,16 @@ export default function HomePage({ email, isOwner }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <button
-          type="button"
-          onClick={handleNewSession}
-          disabled={creating}
-          className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
-        >
-          {creating ? 'Creating…' : 'New session'}
-        </button>
+        {canCreateSessions ? (
+          <button
+            type="button"
+            onClick={handleNewSession}
+            disabled={creating}
+            className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {creating ? 'Creating…' : 'New session'}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => { location.href = '/security'; }}
@@ -157,6 +160,17 @@ export default function HomePage({ email, isOwner }: Props) {
         >
           Security
         </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={() => {
+              location.href = '/team';
+            }}
+            className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
+          >
+            Team
+          </button>
+        )}
         {isOwner && (
           <button
             type="button"

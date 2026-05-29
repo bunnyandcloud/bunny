@@ -1,11 +1,44 @@
 use anyhow::Result;
 use bunny_core::types::Role;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
 pub struct AuthDb {
     conn: Connection,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvitationRow {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub email: String,
+    pub role: Role,
+    pub expires_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TeamInvitationRow {
+    pub id: Uuid,
+    pub email: String,
+    pub default_session_role: Role,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+    pub expires_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserProfileRow {
+    pub id: Uuid,
+    pub email: String,
+    pub disabled_at: Option<DateTime<Utc>>,
+    pub can_install_claude: bool,
+    pub can_manage_vault: bool,
+    pub can_create_sessions: bool,
+    pub default_session_role: Role,
 }
 
 impl AuthDb {
@@ -158,6 +191,22 @@ impl AuthDb {
             [],
         );
         let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN can_install_claude INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN can_manage_vault INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN can_create_sessions INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN default_session_role TEXT NOT NULL DEFAULT 'viewer'",
+            [],
+        );
+        let _ = self.conn.execute(
             "ALTER TABLE auth_sessions ADD COLUMN password_verified_at TEXT",
             [],
         );
@@ -190,19 +239,110 @@ impl AuthDb {
             );
             CREATE INDEX IF NOT EXISTS idx_mfa_recovery_user ON mfa_recovery_codes(user_id);
             CREATE INDEX IF NOT EXISTS idx_mfa_challenges_hash ON mfa_challenges(token_hash);
+            CREATE TABLE IF NOT EXISTS app_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS team_invitations (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                default_session_role TEXT NOT NULL DEFAULT 'viewer',
+                can_install_claude INTEGER NOT NULL DEFAULT 0,
+                can_manage_vault INTEGER NOT NULL DEFAULT 0,
+                can_create_sessions INTEGER NOT NULL DEFAULT 0,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                accepted_at TEXT,
+                invited_by TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_team_invitations_hash ON team_invitations(token_hash);
             "#,
+        )?;
+        self.ensure_system_owner_id()?;
+        self.backfill_missing_team_memberships()?;
+        Ok(())
+    }
+
+    /// One-time-safe: add users to sessions they are not yet a member of (default role).
+    fn backfill_missing_team_memberships(&self) -> Result<()> {
+        let sessions = self.list_stream_session_ids()?;
+        if sessions.is_empty() {
+            return Ok(());
+        }
+        let users = self.list_users()?;
+        for session_id in sessions {
+            for user in &users {
+                if user.disabled_at.is_some() {
+                    continue;
+                }
+                if self.get_member_role(session_id, user.id)?.is_some() {
+                    continue;
+                }
+                let role = Self::auto_membership_role(user.default_session_role);
+                self.add_session_member(session_id, user.id, role)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_meta WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
+    fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
         )?;
         Ok(())
     }
 
-    pub fn first_user_id(&self) -> Result<Option<Uuid>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM users LIMIT 1")?;
+    fn earliest_user_id(&self) -> Result<Option<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM users ORDER BY created_at ASC LIMIT 1")?;
         let mut rows = stmt.query([])?;
         if let Some(row) = rows.next()? {
             Ok(Some(Uuid::parse_str(&row.get::<_, String>(0)?)?))
         } else {
             Ok(None)
         }
+    }
+
+    /// Ensures `app_meta.owner_user_id` points at the bootstrap account (earliest `created_at`).
+    pub fn ensure_system_owner_id(&self) -> Result<()> {
+        if self.get_meta("owner_user_id")?.is_some() {
+            return Ok(());
+        }
+        if let Some(id) = self.earliest_user_id()? {
+            self.set_meta("owner_user_id", &id.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn set_system_owner_id(&self, id: Uuid) -> Result<()> {
+        self.set_meta("owner_user_id", &id.to_string())
+    }
+
+    pub fn system_owner_id(&self) -> Result<Option<Uuid>> {
+        self.ensure_system_owner_id()?;
+        let Some(raw) = self.get_meta("owner_user_id")? else {
+            return Ok(None);
+        };
+        Ok(Some(Uuid::parse_str(&raw)?))
+    }
+
+    pub fn first_user_id(&self) -> Result<Option<Uuid>> {
+        self.system_owner_id()
     }
 
     pub fn user_count(&self) -> Result<u64> {
@@ -237,6 +377,184 @@ impl AuthDb {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn find_user_id_by_email_any_status(&self, email: &str) -> Result<Option<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM users WHERE email = ?1")?;
+        let mut rows = stmt.query(params![email])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Uuid::parse_str(&row.get::<_, String>(0)?)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn disable_user(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE users SET disabled_at = ?1 WHERE id = ?2 AND disabled_at IS NULL",
+            params![Utc::now().to_rfc3339(), user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_users(&self) -> Result<Vec<UserProfileRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
+                    can_create_sessions, default_session_role
+             FROM users
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| map_user_profile_row(row))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn get_user_profile(&self, user_id: Uuid) -> Result<Option<UserProfileRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
+                    can_create_sessions, default_session_role
+             FROM users
+             WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![user_id.to_string()])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(map_user_profile_row(&row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_user_team_settings(
+        &self,
+        user_id: Uuid,
+        can_install_claude: bool,
+        can_manage_vault: bool,
+        can_create_sessions: bool,
+        default_session_role: Role,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE users
+             SET can_install_claude = ?1,
+                 can_manage_vault = ?2,
+                 can_create_sessions = ?3,
+                 default_session_role = ?4
+             WHERE id = ?5",
+            params![
+                if can_install_claude { 1 } else { 0 },
+                if can_manage_vault { 1 } else { 0 },
+                if can_create_sessions { 1 } else { 0 },
+                role_to_str(default_session_role),
+                user_id.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn apply_user_team_profile_on_create(
+        &self,
+        user_id: Uuid,
+        can_install_claude: bool,
+        can_manage_vault: bool,
+        can_create_sessions: bool,
+        default_session_role: Role,
+    ) -> Result<()> {
+        self.set_user_team_settings(
+            user_id,
+            can_install_claude,
+            can_manage_vault,
+            can_create_sessions,
+            default_session_role,
+        )
+    }
+
+    pub fn insert_team_invitation(
+        &self,
+        id: Uuid,
+        email: &str,
+        default_session_role: Role,
+        can_install_claude: bool,
+        can_manage_vault: bool,
+        can_create_sessions: bool,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+        invited_by: Uuid,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO team_invitations (
+                id, email, default_session_role, can_install_claude, can_manage_vault,
+                can_create_sessions, token_hash, expires_at, invited_by
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                id.to_string(),
+                email,
+                role_to_str(default_session_role),
+                if can_install_claude { 1 } else { 0 },
+                if can_manage_vault { 1 } else { 0 },
+                if can_create_sessions { 1 } else { 0 },
+                token_hash,
+                expires_at.to_rfc3339(),
+                invited_by.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_team_invitation_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<TeamInvitationRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, email, default_session_role, can_install_claude, can_manage_vault,
+                    can_create_sessions, expires_at, accepted_at
+             FROM team_invitations
+             WHERE token_hash = ?1",
+        )?;
+        let mut rows = stmt.query(params![token_hash])?;
+        if let Some(row) = rows.next()? {
+            let role_str: String = row.get(2)?;
+            let role = bunny_core::permissions::parse_role(&role_str)
+                .ok_or_else(|| anyhow::anyhow!("invalid role in team invitation"))?;
+            let expires_at: String = row.get(6)?;
+            let accepted_at: Option<String> = row.get(7)?;
+            Ok(Some(TeamInvitationRow {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?)?,
+                email: row.get(1)?,
+                default_session_role: role,
+                can_install_claude: row.get::<_, i64>(3)? != 0,
+                can_manage_vault: row.get::<_, i64>(4)? != 0,
+                can_create_sessions: row.get::<_, i64>(5)? != 0,
+                expires_at: expires_at.parse()?,
+                accepted_at: accepted_at.map(|s| s.parse()).transpose()?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn mark_team_invitation_accepted(&self, invitation_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE team_invitations SET accepted_at = ?1 WHERE id = ?2 AND accepted_at IS NULL",
+            params![Utc::now().to_rfc3339(), invitation_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn revoke_all_sessions_for_user(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE auth_sessions SET revoked_at = ?1 WHERE user_id = ?2 AND revoked_at IS NULL",
+            params![Utc::now().to_rfc3339(), user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_all_session_memberships_for_user(&self, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM session_members WHERE user_id = ?1",
+            params![user_id.to_string()],
+        )?;
+        Ok(())
     }
 
     pub fn find_user_by_id(&self, id: Uuid) -> Result<Option<(String, DateTime<Utc>)>> {
@@ -523,6 +841,53 @@ impl AuthDb {
         }
     }
 
+    pub fn list_stream_session_ids(&self) -> Result<Vec<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM stream_sessions ORDER BY created_at ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Uuid::parse_str(&row.get::<_, String>(0)?).unwrap())
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Role used when auto-adding a user to sessions (never grants Owner except the creator).
+    fn auto_membership_role(default: Role) -> Role {
+        match default {
+            Role::Admin | Role::Editor | Role::Viewer => default,
+            Role::Owner | Role::Agent => Role::Viewer,
+        }
+    }
+
+    /// Add every active team user to a new session using their `default_session_role`.
+    pub fn provision_team_members_for_session(
+        &self,
+        session_id: Uuid,
+        creator_id: Uuid,
+    ) -> Result<()> {
+        for user in self.list_users()? {
+            if user.id == creator_id || user.disabled_at.is_some() {
+                continue;
+            }
+            let role = Self::auto_membership_role(user.default_session_role);
+            self.add_session_member(session_id, user.id, role)?;
+        }
+        Ok(())
+    }
+
+    /// Add a new team member to all existing sessions (e.g. after platform invite accept).
+    pub fn add_user_to_all_stream_sessions(
+        &self,
+        user_id: Uuid,
+        default_session_role: Role,
+    ) -> Result<()> {
+        let role = Self::auto_membership_role(default_session_role);
+        for session_id in self.list_stream_session_ids()? {
+            self.add_session_member(session_id, user_id, role)?;
+        }
+        Ok(())
+    }
+
     pub fn add_session_member(
         &self,
         session_id: Uuid,
@@ -535,6 +900,16 @@ impl AuthDb {
             params![session_id.to_string(), user_id.to_string(), role_str],
         )?;
         Ok(())
+    }
+
+    pub fn has_any_session_role(&self, user_id: Uuid, role: Role) -> Result<bool> {
+        let role_str = role_to_str(role);
+        let count: u64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM session_members WHERE user_id = ?1 AND role = ?2",
+            params![user_id.to_string(), role_str],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn create_stream_session(
@@ -699,6 +1074,71 @@ impl AuthDb {
                 token_hash,
                 expires_at.to_rfc3339()
             ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_invitation_by_token_hash(&self, token_hash: &str) -> Result<Option<InvitationRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, session_id, email, role, expires_at, accepted_at
+             FROM invitations
+             WHERE token_hash = ?1",
+        )?;
+        let mut rows = stmt.query(params![token_hash])?;
+        if let Some(row) = rows.next()? {
+            let role_str: String = row.get(3)?;
+            let role = bunny_core::permissions::parse_role(&role_str)
+                .ok_or_else(|| anyhow::anyhow!("invalid role in invitation"))?;
+            let expires_at: String = row.get(4)?;
+            let accepted_at: Option<String> = row.get(5)?;
+            Ok(Some(InvitationRow {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?)?,
+                session_id: Uuid::parse_str(&row.get::<_, String>(1)?)?,
+                email: row.get(2)?,
+                role,
+                expires_at: expires_at.parse()?,
+                accepted_at: accepted_at.map(|s| s.parse()).transpose()?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn mark_invitation_accepted(&self, invitation_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE invitations SET accepted_at = ?1 WHERE id = ?2 AND accepted_at IS NULL",
+            params![Utc::now().to_rfc3339(), invitation_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_session_members(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<(Uuid, String, Role)>> {
+        let mut stmt = self.conn.prepare(
+            r#"SELECT u.id, u.email, m.role
+               FROM session_members m
+               INNER JOIN users u ON u.id = m.user_id
+               WHERE m.session_id = ?1
+               ORDER BY u.email ASC"#,
+        )?;
+        let rows = stmt.query_map(params![session_id.to_string()], |row| {
+            let id: String = row.get(0)?;
+            let email: String = row.get(1)?;
+            let role_str: String = row.get(2)?;
+            let role = bunny_core::permissions::parse_role(&role_str)
+                .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+            Ok((Uuid::parse_str(&id).unwrap(), email, role))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn remove_session_member(&self, session_id: Uuid, user_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM session_members WHERE session_id = ?1 AND user_id = ?2",
+            params![session_id.to_string(), user_id.to_string()],
         )?;
         Ok(())
     }
@@ -984,6 +1424,21 @@ fn map_terminal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TerminalRow> {
         row.get(8)?,
         row.get(9)?,
     ))
+}
+
+fn map_user_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserProfileRow> {
+    let role_str: String = row.get(6)?;
+    let default_session_role = bunny_core::permissions::parse_role(&role_str).unwrap_or(Role::Viewer);
+    let disabled_at: Option<String> = row.get(2)?;
+    Ok(UserProfileRow {
+        id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+        email: row.get(1)?,
+        disabled_at: disabled_at.map(|s| s.parse()).transpose().unwrap(),
+        can_install_claude: row.get::<_, i64>(3)? != 0,
+        can_manage_vault: row.get::<_, i64>(4)? != 0,
+        can_create_sessions: row.get::<_, i64>(5)? != 0,
+        default_session_role,
+    })
 }
 
 fn role_to_str(role: Role) -> &'static str {

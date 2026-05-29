@@ -24,6 +24,7 @@ import PreviewPanel from './PreviewPanel';
 import BrowserPanel from './BrowserPanel';
 import ClaudeSetupPanel from './ClaudeSetupPanel';
 import LogoutButton from './LogoutButton';
+import SessionMembersModal from './SessionMembersModal';
 
 function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
@@ -72,6 +73,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [claudeBrowserId, setClaudeBrowserId] = useState<string | null>(() =>
     sessionStorage.getItem(browserStorageKey(sessionId)),
   );
+  const [membersOpen, setMembersOpen] = useState(false);
   const claudeSetup = isClaudeSetupMode();
   const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
 
@@ -265,6 +267,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
 
   return (
     <div className="h-screen flex flex-col">
+      <SessionMembersModal
+        open={membersOpen}
+        sessionId={sessionId}
+        onClose={() => setMembersOpen(false)}
+      />
       <VaultUnlockModal
         open={unlockOpen}
         onClose={() => setUnlockOpen(false)}
@@ -298,6 +305,14 @@ export default function SessionWorkspace({ sessionId }: Props) {
           <span className="text-bunny-muted truncate">— {status}</span>
         </div>
         <div className="flex items-center justify-end gap-2 shrink-0 min-w-[5rem]">
+          <button
+            type="button"
+            onClick={() => setMembersOpen(true)}
+            className="text-xs px-2.5 py-1 rounded border border-bunny-border text-bunny-muted hover:text-gray-200 hover:bg-bunny-bg"
+            title="Manage session members"
+          >
+            Members
+          </button>
           {user?.isOwner && (
             <button
               type="button"

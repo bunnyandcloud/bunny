@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect } from 'react';
 import HomePage from './components/HomePage';
+import InviteAcceptPage from './components/InviteAcceptPage';
 import LoginPage from './components/LoginPage';
 import { useAuth } from './store/auth';
 
 const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
 const SecretsPage = lazy(() => import('./components/SecretsPage'));
 const SecurityPage = lazy(() => import('./components/SecurityPage'));
+const TeamPage = lazy(() => import('./components/TeamPage'));
 
 function parseSessionFromPath(): string | null {
   const m = location.pathname.match(/^\/s\/([^/]+)/);
@@ -13,8 +15,10 @@ function parseSessionFromPath(): string | null {
 }
 
 export default function App() {
-  const { user, loading, check } = useAuth();
+  const { user, loading, check, logout } = useAuth();
   const sessionId = parseSessionFromPath();
+  const inviteToken = new URLSearchParams(location.search).get('invite');
+  const inviteEmail = new URLSearchParams(location.search).get('email');
 
   useEffect(() => {
     check();
@@ -25,6 +29,16 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center text-bunny-muted">
         Loading…
       </div>
+    );
+  }
+
+  if (inviteToken && user) {
+    return (
+      <InviteAcceptPage
+        currentEmail={user.email}
+        inviteEmail={inviteEmail}
+        onSignOut={logout}
+      />
     );
   }
 
@@ -78,5 +92,29 @@ export default function App() {
     );
   }
 
-  return <HomePage email={user.email} isOwner={user.isOwner} />;
+  if (location.pathname === '/team') {
+    if (!user.isOwner) {
+      location.href = '/';
+      return null;
+    }
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+            Loading…
+          </div>
+        }
+      >
+        <TeamPage email={user.email} />
+      </Suspense>
+    );
+  }
+
+  return (
+    <HomePage
+      email={user.email}
+      isOwner={user.isOwner}
+      canCreateSessions={user.canCreateSessions}
+    />
+  );
 }

@@ -59,6 +59,24 @@ export function login(email: string, password: string) {
   });
 }
 
+export function acceptInvitation(body: {
+  token: string;
+  email: string;
+  password: string;
+  device_id?: string;
+}) {
+  return api<{
+    user_id: string;
+    email: string;
+    session_id: string | null;
+    role: string;
+    expires_at: string;
+  }>('/invitations/accept', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function verifyMfa(
   code: string,
   mfaChallengeToken?: string,
@@ -83,7 +101,58 @@ export function me() {
     email: string;
     is_owner: boolean;
     mfa_enabled: boolean;
+    can_install_claude: boolean;
+    can_manage_vault: boolean;
+    can_create_sessions: boolean;
+    default_session_role: string;
   }>('/auth/me');
+}
+
+export type TeamUser = {
+  id: string;
+  email: string;
+  disabled: boolean;
+  is_system_owner: boolean;
+  can_install_claude: boolean;
+  can_manage_vault: boolean;
+  can_create_sessions: boolean;
+  default_session_role: string;
+};
+
+export function listUsersAdmin() {
+  return api<TeamUser[]>('/users');
+}
+
+export function createTeamUser(body: {
+  email: string;
+  default_session_role: string;
+  can_install_claude: boolean;
+  can_manage_vault: boolean;
+  can_create_sessions: boolean;
+}) {
+  return api<{ token: string }>('/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateUserAdmin(body: {
+  user_id: string;
+  can_install_claude: boolean;
+  can_manage_vault: boolean;
+  can_create_sessions: boolean;
+  default_session_role: string;
+}) {
+  return api<{ ok: boolean }>('/users', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function revokeTeamUser(userId: string) {
+  return api<{ ok: boolean }>(`/users/${userId}`, {
+    method: 'DELETE',
+  });
 }
 
 export function mfaStatus() {
@@ -146,6 +215,32 @@ export function createSession(projectPath?: string) {
   return api<{ id: string; login_url: string }>('/sessions', {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+}
+
+export function createInvitation(sessionId: string, email: string, role: string) {
+  return api<{ token: string }>(`/sessions/${sessionId}/invitations`, {
+    method: 'POST',
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export function listSessionMembers(sessionId: string) {
+  return api<Array<{ user_id: string; email: string; role: string }>>(
+    `/sessions/${sessionId}/members`,
+  );
+}
+
+export function updateSessionMember(sessionId: string, userId: string, role: string) {
+  return api<{ ok: boolean }>(`/sessions/${sessionId}/members/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function removeSessionMember(sessionId: string, userId: string) {
+  return api<{ ok: boolean }>(`/sessions/${sessionId}/members/${userId}`, {
+    method: 'DELETE',
   });
 }
 

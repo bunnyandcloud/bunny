@@ -45,6 +45,15 @@ pub enum LoginStep {
     },
 }
 
+pub struct InvitationAcceptResult {
+    pub user_id: Uuid,
+    pub email: String,
+    pub session_id: Option<Uuid>,
+    pub role: Role,
+    pub session_token: String,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct AuthenticatedSession {
     pub user_id: Uuid,
@@ -84,6 +93,7 @@ impl AuthService {
         let id = Uuid::new_v4();
         let hash = hash_password(password)?;
         db.create_user(id, email, &hash)?;
+        db.set_system_owner_id(id)?;
         db.insert_audit(
             Uuid::new_v4(),
             Some(id),
@@ -499,6 +509,7 @@ impl AuthService {
         let db = self.db.lock();
         db.create_stream_session(id, owner_id, project_path, name, "ready")?;
         db.add_session_member(id, owner_id, Role::Owner)?;
+        db.provision_team_members_for_session(id, owner_id)?;
         Ok(id)
     }
 
@@ -531,11 +542,181 @@ impl AuthService {
         Ok(token)
     }
 
+    pub fn invite_team_user(
+        &self,
+        email: &str,
+        default_session_role: Role,
+        can_install_claude: bool,
+        can_manage_vault: bool,
+        can_create_sessions: bool,
+        inviter: Uuid,
+    ) -> Result<String> {
+        if !matches!(
+            default_session_role,
+            Role::Admin | Role::Editor | Role::Viewer
+        ) {
+            return Err(anyhow!("invalid default session role"));
+        }
+        let db = self.db.lock();
+        if db.find_user_id_by_email_any_status(email)?.is_some() {
+            return Err(anyhow!("user already exists"));
+        }
+        let token = generate_token();
+        let token_hash = hash_token(&token);
+        db.insert_team_invitation(
+            Uuid::new_v4(),
+            email,
+            default_session_role,
+            can_install_claude,
+            can_manage_vault,
+            can_create_sessions,
+            &token_hash,
+            Utc::now() + Duration::days(7),
+            inviter,
+        )?;
+        Ok(token)
+    }
+
+    pub fn accept_invitation(
+        &self,
+        token: &str,
+        email: &str,
+        password: &str,
+        device_id: Option<&str>,
+    ) -> Result<InvitationAcceptResult> {
+        let token_hash = hash_token(token);
+        let db = self.db.lock();
+        if let Some(inv) = db.get_invitation_by_token_hash(&token_hash)? {
+            if inv.accepted_at.is_some() {
+                return Err(anyhow!("invitation already accepted"));
+            }
+            if Utc::now() > inv.expires_at {
+                return Err(anyhow!("invitation expired"));
+            }
+            if inv.email.to_lowercase() != email.to_lowercase() {
+                return Err(anyhow!("invitation email mismatch"));
+            }
+
+            let user_id = match db.find_user_by_email(email)? {
+                Some((id, _hash)) => id,
+                None => {
+                    let id = Uuid::new_v4();
+                    let hash = hash_password(password)?;
+                    db.create_user(id, email, &hash)?;
+                    id
+                }
+            };
+
+            db.add_session_member(inv.session_id, user_id, inv.role)?;
+            db.mark_invitation_accepted(inv.id)?;
+            drop(db);
+
+            let result = self.issue_session(user_id, email.to_string(), device_id, true)?;
+            self.audit(
+                Some(user_id),
+                "auth.invitation.accepted",
+                "invitations",
+                Some(&inv.session_id.to_string()),
+            )?;
+
+            return Ok(InvitationAcceptResult {
+                user_id,
+                email: email.to_string(),
+                session_id: Some(inv.session_id),
+                role: inv.role,
+                session_token: result.session_token,
+                expires_at: result.expires_at,
+            });
+        }
+
+        let inv = db
+            .get_team_invitation_by_token_hash(&token_hash)?
+            .ok_or_else(|| anyhow!("invalid invitation"))?;
+        if inv.accepted_at.is_some() {
+            return Err(anyhow!("invitation already accepted"));
+        }
+        if Utc::now() > inv.expires_at {
+            return Err(anyhow!("invitation expired"));
+        }
+        if inv.email.to_lowercase() != email.to_lowercase() {
+            return Err(anyhow!("invitation email mismatch"));
+        }
+        if db.find_user_id_by_email_any_status(email)?.is_some() {
+            return Err(anyhow!("user already exists"));
+        }
+
+        let user_id = Uuid::new_v4();
+        let hash = hash_password(password)?;
+        db.create_user(user_id, email, &hash)?;
+        db.apply_user_team_profile_on_create(
+            user_id,
+            inv.can_install_claude,
+            inv.can_manage_vault,
+            inv.can_create_sessions,
+            inv.default_session_role,
+        )?;
+        db.add_user_to_all_stream_sessions(user_id, inv.default_session_role)?;
+        db.mark_team_invitation_accepted(inv.id)?;
+        drop(db);
+
+        let result = self.issue_session(user_id, email.to_string(), device_id, true)?;
+        self.audit(
+            Some(user_id),
+            "auth.team_invitation.accepted",
+            "team_invitations",
+            None,
+        )?;
+
+        Ok(InvitationAcceptResult {
+            user_id,
+            email: email.to_string(),
+            session_id: None,
+            role: inv.default_session_role,
+            session_token: result.session_token,
+            expires_at: result.expires_at,
+        })
+    }
+
     pub fn owner_id(&self) -> Result<Uuid> {
         self.db
             .lock()
             .first_user_id()?
             .ok_or_else(|| anyhow!("no owner configured"))
+    }
+
+    pub fn revoke_user_by_id(&self, target: Uuid) -> Result<()> {
+        let db = self.db.lock();
+        let owner = db.system_owner_id()?;
+        if owner == Some(target) {
+            return Err(anyhow!("cannot revoke owner"));
+        }
+        let email = db
+            .find_user_by_id(target)?
+            .map(|(email, _)| email)
+            .ok_or_else(|| anyhow!("user not found"))?;
+        db.disable_user(target)?;
+        db.remove_all_session_memberships_for_user(target)?;
+        db.revoke_all_sessions_for_user(target)?;
+        db.insert_audit(
+            Uuid::new_v4(),
+            None,
+            "auth.user.revoked",
+            "users",
+            Some(&email),
+        )?;
+        Ok(())
+    }
+
+    pub fn revoke_user_by_email(&self, email: &str) -> Result<()> {
+        let db = self.db.lock();
+        let owner = db.system_owner_id()?;
+        let target = db.find_user_id_by_email_any_status(email)?;
+        let target = target.ok_or_else(|| anyhow!("user not found"))?;
+        if owner == Some(target) {
+            return Err(anyhow!("cannot revoke owner"));
+        }
+        drop(db);
+        self.revoke_user_by_id(target)
     }
 
     pub fn db(&self) -> Arc<Mutex<AuthDb>> {
@@ -607,5 +788,18 @@ mod tests {
         let step = auth.login("a@b.com", "pw", None).unwrap();
         assert!(matches!(step, LoginStep::MfaRequired { .. }));
         assert!(auth.authenticate("bogus").is_err());
+    }
+
+    #[test]
+    fn system_owner_is_bootstrap_user_not_lowest_uuid() {
+        let (auth, _dir) = temp_auth();
+        let bootstrap = auth.bootstrap_owner("owner@example.com", "pw").unwrap();
+        let db_arc = auth.db();
+        let db = db_arc.lock();
+        // UUID that sorts before the bootstrap id lexicographically.
+        let later = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        db.create_user(later, "invited@example.com", "hash").unwrap();
+        drop(db);
+        assert_eq!(auth.owner_id().unwrap(), bootstrap);
     }
 }
