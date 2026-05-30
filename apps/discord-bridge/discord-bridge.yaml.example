@@ -1,0 +1,7 @@
+discord:
+  application_id: 123456789012345678
+  bot_token: "REPLACE_WITH_BOT_TOKEN"
+bunny:
+  internal_url: "http://127.0.0.1:7681"
+  bridge_token: "REPLACE_WITH_PLAINTEXT_BRIDGE_TOKEN"
+  public_url: "http://127.0.0.1:7681"

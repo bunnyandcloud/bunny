@@ -112,12 +112,24 @@ impl TerminalManager {
         let Some(dir) = &self.scrollback_dir else {
             return;
         };
-        let Some(disk) = crate::scrollback::load(dir, id) else {
+        let base = crate::scrollback::load(dir, id).unwrap_or_default();
+        let discord = crate::scrollback::load_discord_sidecar(dir, id);
+        let disk = crate::scrollback::merge_discord_transcript(&base, &discord);
+        if disk.is_empty() {
             return;
-        };
+        }
         if let Some(session) = self.terminals.read().get(&id) {
             let live = session.buffer.all_content();
-            if live.len() < disk.len() / 2 {
+            let live_has_discord = live.contains("[discord] $");
+            let disk_has_discord = disk.contains("[discord] $");
+            let missing_discord = discord
+                .lines()
+                .filter(|l| l.starts_with("[discord] $"))
+                .any(|cmd_line| !live.contains(cmd_line));
+            if live.len() < disk.len()
+                || (disk_has_discord && !live_has_discord)
+                || missing_discord
+            {
                 session.buffer.replace(&disk);
             }
         }
@@ -228,12 +240,68 @@ impl TerminalManager {
             .map(|s| s.buffer.replay_from(from))
     }
 
+    /// Append read-only text to the live buffer and notify WebSocket clients.
+    pub fn inject_transcript(&self, id: Uuid, text: &str) {
+        let terminals = self.terminals.read();
+        if let Some(session) = terminals.get(&id) {
+            session.buffer.append(text);
+            let _ = session.output_tx.send(text.to_string());
+        }
+    }
+
     /// Recent scrollback (for parsing OAuth URLs during Claude setup).
     pub fn recent_output(&self, id: Uuid) -> Option<String> {
         self.terminals
             .read()
             .get(&id)
             .map(|s| s.buffer.all_content())
+    }
+
+    /// Visible terminal screen for Discord snapshots (tmux pane, no scrollback merge).
+    pub fn capture_snapshot_text(&self, id: Uuid) -> Option<String> {
+        let terminals = self.terminals.read();
+        let session = terminals.get(&id)?;
+        if let Some(ref target) = session.tmux_target {
+            if tmux::target_alive(target) {
+                if let Ok(cap) = tmux::capture_pane_visible(target) {
+                    if !cap.trim().is_empty() {
+                        return Some(cap);
+                    }
+                }
+            }
+        }
+        let content = session.buffer.all_content();
+        if !content.trim().is_empty() {
+            return Some(content);
+        }
+        if let Some(dir) = &self.scrollback_dir {
+            return crate::scrollback::load(dir, id);
+        }
+        None
+    }
+
+    /// Best-effort visible terminal text (tmux pane + live buffer + disk scrollback).
+    pub fn capture_display_text(&self, id: Uuid) -> Option<String> {
+        let terminals = self.terminals.read();
+        let session = terminals.get(&id)?;
+        let mut content = session.buffer.all_content();
+        if let Some(ref target) = session.tmux_target {
+            if tmux::target_alive(target) {
+                if let Ok(cap) = tmux::capture_pane(target) {
+                    content = crate::scrollback::merge(Some(content), cap);
+                }
+            }
+        }
+        if content.trim().is_empty() {
+            if let Some(dir) = &self.scrollback_dir {
+                content = crate::scrollback::load(dir, id).unwrap_or_default();
+            }
+        }
+        if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        }
     }
 
     /// Stop attach client and kill tmux window if applicable.
@@ -297,6 +365,9 @@ impl TerminalManager {
 
 fn build_allowlisted_env(cwd: &Path) -> HashMap<String, String> {
     let mut env = HashMap::new();
+    for (key, value) in crate::locale::utf8_locale_vars() {
+        env.insert(key.into(), value.into());
+    }
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     env.insert("PWD".into(), cwd.display().to_string());

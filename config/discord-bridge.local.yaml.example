@@ -1,0 +1,13 @@
+# Copy to your Mac (NOT in the container):
+#   cp config/discord-bridge.local.yaml.example ~/.config/bunny/discord-bridge.yaml
+# Fill secrets, then: ./scripts/run-discord-bridge.sh
+#
+# internal_url = port published from docker-compose (7681 on the host)
+
+discord:
+  application_id: 123456789012345678
+  bot_token: "YOUR_DISCORD_BOT_TOKEN"
+bunny:
+  internal_url: "http://127.0.0.1:7681"
+  bridge_token: "PASTE_PLAINTEXT_FROM_bunny_discord_token"
+  public_url: "http://127.0.0.1:7681"

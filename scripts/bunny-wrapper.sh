@@ -173,12 +173,67 @@ if [[ "${1:-}" == "setup" ]]; then
   exit 0
 fi
 
+cli_supports_discord() {
+  local bin="$1"
+  [[ -x "$bin" ]] && "$bin" --help 2>&1 | grep -q 'discord'
+}
+
+bunny_docker_dev() {
+  [[ "${BUNNY_DOCKER_DEV:-}" == 1 ]] || [[ -f /.dockerenv ]]
+}
+
+# Fresh Docker dev containers start without Rust; install on first `bunny` use.
+ensure_docker_toolchain() {
+  if ! bunny_docker_dev; then
+    return 0
+  fi
+  source_cargo_env
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+  if runnable "$RELEASE" && cli_supports_discord "$RELEASE"; then
+    return 0
+  fi
+  if [[ ! -f "$ROOT/scripts/install-prerequisites.sh" ]]; then
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "→ Docker: installing Rust and build tools (first time, several minutes)…" >&2
+  "$ROOT/scripts/install-prerequisites.sh" --minimal
+  source_cargo_env
+}
+
+ensure_docker_toolchain
+
+# Use an existing build without Rust (e.g. after `./bunny setup` in another shell, or Docker init).
+if runnable "$RELEASE"; then
+  # Docker dev: sources on the mount may be newer than target/release — still run the binary if we cannot rebuild.
+  if bunny_docker_dev && ! command -v cargo >/dev/null 2>&1; then
+    exec_bunny "$RELEASE" "$@"
+  fi
+  if ! server_sources_newer_than_release && cli_supports_discord "$RELEASE"; then
+    exec_bunny "$RELEASE" "$@"
+  fi
+  if ! cli_supports_discord "$RELEASE"; then
+    echo "→ Rebuilding bunny (CLI missing discord commands)…" >&2
+  fi
+fi
+
+if runnable "$DEBUG" && cli_supports_discord "$DEBUG"; then
+  exec_bunny "$DEBUG" "$@"
+fi
+
 if ! command -v cargo >/dev/null 2>&1; then
-  echo "bunny: Rust toolchain required — run: ./scripts/install-prerequisites.sh" >&2
+  ensure_docker_toolchain
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "bunny: Rust toolchain required — run: ./bunny setup (or ./scripts/install-prerequisites.sh)" >&2
   exit 1
 fi
 
-if ! runnable "$RELEASE" || server_sources_newer_than_release; then
+if ! runnable "$RELEASE" || server_sources_newer_than_release || ! cli_supports_discord "$RELEASE"; then
   build_release_binary
 fi
 

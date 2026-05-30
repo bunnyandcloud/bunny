@@ -101,6 +101,9 @@ impl PtySession {
         cmd.arg("attach");
         cmd.arg("-t");
         cmd.arg(tmux_target);
+        for (key, value) in crate::locale::utf8_locale_vars() {
+            cmd.env(key, value);
+        }
         cmd.env("TERM", "tmux-256color");
         cmd.env("COLORTERM", "truecolor");
 

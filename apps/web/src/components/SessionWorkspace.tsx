@@ -25,6 +25,7 @@ import BrowserPanel from './BrowserPanel';
 import ClaudeSetupPanel from './ClaudeSetupPanel';
 import LogoutButton from './LogoutButton';
 import SessionMembersModal from './SessionMembersModal';
+import SessionDiscordModal from './SessionDiscordModal';
 
 function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
@@ -74,6 +75,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
     sessionStorage.getItem(browserStorageKey(sessionId)),
   );
   const [membersOpen, setMembersOpen] = useState(false);
+  const [discordOpen, setDiscordOpen] = useState(false);
   const claudeSetup = isClaudeSetupMode();
   const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
 
@@ -272,6 +274,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
         sessionId={sessionId}
         onClose={() => setMembersOpen(false)}
       />
+      <SessionDiscordModal
+        open={discordOpen}
+        sessionId={sessionId}
+        onClose={() => setDiscordOpen(false)}
+      />
       <VaultUnlockModal
         open={unlockOpen}
         onClose={() => setUnlockOpen(false)}
@@ -305,6 +312,14 @@ export default function SessionWorkspace({ sessionId }: Props) {
           <span className="text-bunny-muted truncate">— {status}</span>
         </div>
         <div className="flex items-center justify-end gap-2 shrink-0 min-w-[5rem]">
+          <button
+            type="button"
+            onClick={() => setDiscordOpen(true)}
+            className="text-xs px-2.5 py-1 rounded border border-bunny-border text-bunny-muted hover:text-gray-200 hover:bg-bunny-bg"
+            title="Link Discord channel to this session"
+          >
+            Discord
+          </button>
           <button
             type="button"
             onClick={() => setMembersOpen(true)}

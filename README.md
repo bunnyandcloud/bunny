@@ -103,15 +103,22 @@ docker run -dit --name bunny-dev \
   ubuntu:24.04 sleep infinity
 ```
 
-Inside the container:
+Inside the container (or use the helper script from the host):
+
+```bash
+./scripts/docker-dev.sh up
+./scripts/docker-dev.sh init
+./scripts/docker-dev.sh shell
+bunny run
+```
+
+`init` creates `~/.config/bunny/config.yaml` automatically. For **Discord**, see [docs/integrations/discord-docker-dev.md](docs/integrations/discord-docker-dev.md).
+
+Legacy manual flow:
 
 ```bash
 docker exec -it bunny-dev bash
-cd /opt/bunny
-./bunny setup
-bunny configure
-bunny doctor
-bunny run
+cd /opt/bunny && ./bunny setup && bunny configure && bunny run
 ```
 
 In Docker, the launcher and agent bind **`0.0.0.0:7681`** automatically so port publishing works. Confirm you see:

@@ -25,6 +25,11 @@ pub enum Action {
     VoiceRun,
     UsersManage,
     AuditView,
+    DiscordLink,
+    DiscordControl,
+    DiscordAgentRun,
+    DiscordApprove,
+    DiscordWatch,
 }
 
 pub fn role_can(role: Role, action: Action) -> bool {
@@ -56,8 +61,12 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | VoiceRun
                 | UsersManage
                 | AuditView
+                | DiscordLink
+                | DiscordControl
+                | DiscordAgentRun
+                | DiscordApprove
         ),
-        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody | SessionDelete | ClaudeInstall | VaultManage) => false,
+        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody | SessionDelete | ClaudeInstall | VaultManage | DiscordLink | DiscordApprove) => false,
         (Editor, action) => matches!(
             action,
             SessionRead
@@ -72,8 +81,10 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | PreviewView
                 | VoiceUse
                 | VoiceRun
+                | DiscordControl
+                | DiscordAgentRun
         ),
-        (Viewer, SessionRead | TerminalRead | BrowserView | ConsoleView | NetworkView | PreviewView) => true,
+        (Viewer, SessionRead | TerminalRead | BrowserView | ConsoleView | NetworkView | PreviewView | DiscordWatch) => true,
         (Viewer, _) => false,
         (Agent, SessionRead | TerminalRead | ConsoleView | NetworkView) => true,
         (Agent, _) => false,

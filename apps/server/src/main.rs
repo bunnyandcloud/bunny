@@ -2,6 +2,10 @@ mod api;
 mod cdp_collector;
 mod claude;
 mod cli;
+mod config_init;
+mod compositor;
+mod discord_follow;
+mod discord_ops;
 mod middleware;
 mod novnc_proxy;
 mod preview;
@@ -10,7 +14,9 @@ mod recovery;
 mod secrets_cli;
 mod secrets_ops;
 mod state;
+mod task_runner;
 mod terminals;
+mod watch;
 mod web_ui;
 mod webrtc;
 mod ws;
@@ -48,6 +54,8 @@ async fn main() -> Result<()> {
         cli::Commands::Reset { session_id } => cli::run_reset(&state, session_id).await,
         cli::Commands::Service { command } => cli::run_service(command).await,
         cli::Commands::Secrets(opts) => secrets_cli::run_secrets(&state, opts).await,
+        cli::Commands::ConfigInit => cli::run_config_init(&state).await,
+        cli::Commands::Discord { command } => cli::run_discord(&state, command).await,
     }
 }
 

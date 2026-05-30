@@ -238,6 +238,60 @@ export function updateSessionMember(sessionId: string, userId: string, role: str
   });
 }
 
+export function createDiscordLinkCode(sessionId: string, password?: string) {
+  return api<{
+    code: string;
+    expires_in_minutes: number;
+    instructions: string;
+  }>(`/sessions/${sessionId}/discord/link-codes`, {
+    method: 'POST',
+    body: JSON.stringify({ password: password ?? null }),
+  });
+}
+
+export function listDiscordLinks(sessionId: string) {
+  return api<
+    Array<{
+      guild_id: string;
+      channel_id: string;
+      session_id: string;
+      status: string;
+      created_at: string;
+    }>
+  >(`/sessions/${sessionId}/discord/links`);
+}
+
+export function revokeDiscordLinks(sessionId: string) {
+  return api<{ ok: boolean }>(`/sessions/${sessionId}/discord/links`, {
+    method: 'DELETE',
+  });
+}
+
+export function getWatchMeta(token: string) {
+  return api<{
+    session_id: string;
+    layout: string;
+    mode: string;
+    visibility: string;
+    browser_ids: string[];
+    expires_at: string;
+  }>(`/watch/${token}`);
+}
+
+export function grantWatchAccess(
+  token: string,
+  body: { discord_user_id?: string; bunny_session_token?: string },
+) {
+  return api<{
+    access_token: string;
+    session_id: string;
+    expires_in_secs: number;
+  }>(`/watch/${token}/access`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function removeSessionMember(sessionId: string, userId: string) {
   return api<{ ok: boolean }>(`/sessions/${sessionId}/members/${userId}`, {
     method: 'DELETE',

@@ -3,6 +3,8 @@ use crate::claude::{AuthFlow, InstallState};
 use crate::realtime::RealtimeHub;
 use anyhow::Result;
 use bunny_auth::AuthService;
+use bunny_discord::DiscordDb;
+use parking_lot::Mutex as ParkingMutex;
 use bunny_browser::BrowserManager;
 use bunny_core::config::BunnyConfig;
 use bunny_core::redaction::Redactor;
@@ -38,6 +40,7 @@ pub struct AppState {
     pub webrtc_sidecar: RwLock<Option<crate::webrtc::WebRtcSidecar>>,
     pub claude_install: Mutex<InstallState>,
     pub claude_auth: Mutex<AuthFlow>,
+    pub discord: ParkingMutex<DiscordDb>,
 }
 
 pub struct PreviewState {
@@ -52,6 +55,7 @@ impl AppState {
         let data_dir = config.expand_data_dir();
         std::fs::create_dir_all(&data_dir)?;
         let db_path = format!("{data_dir}/bunny.db");
+        let discord = DiscordDb::open(&db_path)?;
         let auth = AuthService::new(
             &db_path,
             &data_dir,
@@ -71,16 +75,17 @@ impl AppState {
                     stored_pass = Some(pass);
                 }
             }
-            return Self::from_parts(config, data_dir, auth, vault, fcm, stored_pass);
+            return Self::from_parts(config, data_dir, auth, discord, vault, fcm, stored_pass);
         }
 
-        Self::from_parts(config, data_dir, auth, secrets, fcm, None)
+        Self::from_parts(config, data_dir, auth, discord, secrets, fcm, None)
     }
 
     fn from_parts(
         config: BunnyConfig,
         data_dir: String,
         auth: AuthService,
+        discord: DiscordDb,
         secrets: SecretsVault,
         fcm: FcmClient,
         secrets_passphrase: Option<String>,
@@ -108,6 +113,7 @@ impl AppState {
             webrtc_sidecar: RwLock::new(None),
             claude_install: Mutex::new(InstallState::default()),
             claude_auth: Mutex::new(AuthFlow::default()),
+            discord: ParkingMutex::new(discord),
             supervisor: RwLock::new(ProcessSupervisor::new(
                 config.recovery.process_supervisor.max_restarts,
                 config.recovery.process_supervisor.restart_window_seconds,

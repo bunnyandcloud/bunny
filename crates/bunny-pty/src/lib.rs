@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod locale;
 pub mod manager;
 pub mod scrollback;
 pub mod protocol;

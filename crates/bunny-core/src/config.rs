@@ -15,6 +15,36 @@ pub struct BunnyConfig {
     pub push: PushConfig,
     #[serde(default)]
     pub webrtc: WebRtcConfig,
+    #[serde(default)]
+    pub discord: DiscordConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// SHA-256 hex of bridge bearer token (set via `bunny discord token`).
+    #[serde(default)]
+    pub bridge_token_hash: Option<String>,
+    /// Public base URL for watch links (e.g. https://bunny.example.com).
+    #[serde(default)]
+    pub public_url: Option<String>,
+    #[serde(default = "default_discord_link_ttl")]
+    pub link_code_ttl_minutes: u64,
+    #[serde(default = "default_discord_oauth_client_id")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default)]
+    pub oauth_client_secret: Option<String>,
+    #[serde(default)]
+    pub oauth_redirect_uri: Option<String>,
+}
+
+fn default_discord_oauth_client_id() -> Option<String> {
+    None
+}
+
+fn default_discord_link_ttl() -> u64 {
+    15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +338,7 @@ impl Default for BunnyConfig {
                 turn_username: None,
                 turn_credential: None,
             },
+            discord: DiscordConfig::default(),
         }
     }
 }

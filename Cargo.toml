@@ -9,6 +9,8 @@ members = [
     "crates/bunny-relay",
     "crates/bunny-secrets",
     "crates/bunny-push",
+    "crates/bunny-discord",
+    "apps/discord-bridge",
 ]
 
 [workspace.package]

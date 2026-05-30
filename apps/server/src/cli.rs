@@ -61,6 +61,42 @@ pub enum Commands {
     },
     /// Encrypted secrets vault (~/.config/bunny/secrets.enc)
     Secrets(crate::secrets_cli::SecretsOpts),
+    /// Write default config.yaml if missing (Docker-friendly)
+    #[command(name = "config-init")]
+    ConfigInit,
+    /// Discord bridge helpers
+    Discord {
+        #[command(subcommand)]
+        command: DiscordCommands,
+    },
+}
+
+#[derive(clap::Subcommand)]
+pub enum DiscordCommands {
+    /// Generate tokens and write agent + bridge dev config files
+    Setup {
+        /// Path for bridge YAML (repo volume: .discord/bridge.yaml on the host)
+        #[arg(long, default_value = ".discord/bridge.yaml")]
+        bridge_out: String,
+        /// Discord application id (or DISCORD_APPLICATION_ID env)
+        #[arg(long, env = "DISCORD_APPLICATION_ID")]
+        application_id: Option<u64>,
+        /// Bot token (or DISCORD_BOT_TOKEN env)
+        #[arg(long, env = "DISCORD_BOT_TOKEN")]
+        bot_token: Option<String>,
+    },
+    /// Run the Discord bot (requires a running agent: bunny run)
+    Bridge {
+        /// Bridge YAML (default: .discord/bridge.yaml or BUNNY_DISCORD_BRIDGE_CONFIG)
+        #[arg(long, env = "BUNNY_DISCORD_BRIDGE_CONFIG")]
+        config: Option<std::path::PathBuf>,
+    },
+    /// Sync agent config.yaml from an existing bridge YAML (fixes token mismatch)
+    Sync {
+        /// Bridge YAML (default: .discord/bridge.yaml)
+        #[arg(long, default_value = ".discord/bridge.yaml")]
+        bridge_config: String,
+    },
 }
 
 #[derive(Parser)]
@@ -130,8 +166,12 @@ pub enum ServiceCommands {
 }
 
 pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> {
+    if let Some(path) = crate::config_init::ensure_user_config()? {
+        println!("✓ Created {}", path.display());
+    }
     if !state.auth.needs_bootstrap()? {
         println!("✓ Owner account already exists");
+        maybe_configure_discord_interactive(state).await?;
         return Ok(());
     }
     let email = opts
@@ -199,7 +239,61 @@ pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> 
             }
         }
     }
+
+    maybe_configure_discord_interactive(state).await?;
     Ok(())
+}
+
+async fn maybe_configure_discord_interactive(state: &AppState) -> Result<()> {
+    let bridge = std::env::current_dir()?.join(".discord/bridge.yaml");
+    let can_prompt = stdin_is_tty() || std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1");
+
+    if bridge.is_file() {
+        if crate::config_init::sync_agent_from_bridge_file(&bridge)? {
+            println!("\n✓ Agent config synced from {}", bridge.display());
+            println!("  Restart bunny run if it is already running.");
+        }
+        println!("\n✓ Discord bridge already configured ({})", bridge.display());
+        print_discord_run_hints();
+        if can_prompt
+            && prompt_yes_no("Reconfigure Discord bridge? [y/N]: ", false)
+        {
+            // fall through to setup (overwrites bridge.yaml + agent config)
+        } else {
+            return Ok(());
+        }
+    } else if !can_prompt {
+        println!("\nDiscord bridge not configured.");
+        print_discord_run_hints();
+        println!("  Or: bunny discord setup");
+        return Ok(());
+    } else if !prompt_yes_no("Configure Discord bridge now? [y/N]: ", false) {
+        println!("\nSkipped Discord setup.");
+        print_discord_run_hints();
+        return Ok(());
+    }
+    let app_id: u64 = loop {
+        let s = prompt("Discord Application ID: ");
+        match s.trim().parse::<u64>() {
+            Ok(v) => break v,
+            Err(_) => eprintln!("✗ Invalid number, try again."),
+        }
+    };
+    let token = prompt_password("Discord Bot Token: ");
+    run_discord(
+        state,
+        DiscordCommands::Setup {
+            bridge_out: ".discord/bridge.yaml".into(),
+            application_id: Some(app_id),
+            bot_token: Some(token),
+        },
+    )
+    .await
+}
+
+fn stdin_is_tty() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
 }
 
 pub async fn run_init_auth(state: &AppState) -> Result<()> {
@@ -462,6 +556,187 @@ pub async fn run_reset(state: &AppState, session_id: String) -> Result<()> {
     Ok(())
 }
 
+pub async fn run_config_init(_state: &AppState) -> Result<()> {
+    match crate::config_init::ensure_user_config()? {
+        Some(path) => println!("✓ Created {}", path.display()),
+        None => println!("✓ Config already exists at {}", crate::config_init::config_path().display()),
+    }
+    Ok(())
+}
+
+pub async fn run_discord(state: &AppState, command: DiscordCommands) -> Result<()> {
+    match command {
+        DiscordCommands::Bridge { config } => run_discord_bridge(config),
+        DiscordCommands::Sync { bridge_config } => {
+            let bridge_path = std::path::Path::new(&bridge_config);
+            let bridge_path = if bridge_path.is_absolute() {
+                bridge_path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(bridge_path)
+            };
+            if crate::config_init::sync_agent_from_bridge_file(&bridge_path)? {
+                println!("✓ Agent config synced from {}", bridge_path.display());
+                println!("  Restart bunny run, then retry /bunny link.");
+            } else {
+                println!("✓ Agent config already matches {}", bridge_path.display());
+            }
+            Ok(())
+        }
+        DiscordCommands::Setup {
+            bridge_out,
+            application_id,
+            bot_token,
+        } => {
+            let app_id = application_id
+                .ok_or_else(|| anyhow::anyhow!("set --application-id or DISCORD_APPLICATION_ID"))?;
+            let token = bot_token
+                .ok_or_else(|| anyhow::anyhow!("set --bot-token or DISCORD_BOT_TOKEN"))?;
+            let public_url = state
+                .config
+                .discord
+                .public_url
+                .clone()
+                .unwrap_or_else(|| "http://127.0.0.1:7681".into());
+            let (plain, hash) = crate::config_init::generate_bridge_credentials();
+            let agent_path =
+                crate::config_init::apply_discord_to_config(&hash, &public_url)?;
+            println!("✓ Agent config: {}", agent_path.display());
+            let bridge_path = std::path::Path::new(&bridge_out);
+            let bridge_path = if bridge_path.is_absolute() {
+                bridge_path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(bridge_path)
+            };
+            crate::config_init::write_bridge_dev_file(
+                &bridge_path,
+                app_id,
+                &token,
+                &plain,
+                "http://127.0.0.1:7681",
+                &public_url,
+            )?;
+            println!("✓ Bridge config: {}", bridge_path.display());
+            print_discord_run_hints();
+            Ok(())
+        }
+    }
+}
+
+fn print_discord_run_hints() {
+    println!("\nNext (two terminals in the same environment — e.g. Docker shell):");
+    println!("  Terminal 1:  bunny run");
+    println!("  Terminal 2:  bunny discord bridge");
+}
+
+fn resolve_bridge_config_path(explicit: Option<std::path::PathBuf>) -> Result<std::path::PathBuf> {
+    if let Some(p) = explicit {
+        return Ok(p);
+    }
+    if let Ok(env) = std::env::var("BUNNY_DISCORD_BRIDGE_CONFIG") {
+        if !env.is_empty() {
+            return Ok(std::path::PathBuf::from(env));
+        }
+    }
+    let local = std::env::current_dir()?.join(".discord/bridge.yaml");
+    if local.is_file() {
+        return Ok(local);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    Ok(std::path::Path::new(&home)
+        .join(".config/bunny/discord-bridge.yaml"))
+}
+
+fn workspace_root() -> Result<std::path::PathBuf> {
+    let mut dir = std::env::current_dir()?;
+    loop {
+        let manifest = dir.join("Cargo.toml");
+        if manifest.is_file() {
+            let text = std::fs::read_to_string(&manifest)?;
+            if text.contains("[workspace]") {
+                return Ok(dir);
+            }
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    anyhow::bail!("run from the bunny repo root (workspace Cargo.toml not found)")
+}
+
+fn agent_info_reachable() -> bool {
+    std::process::Command::new("curl")
+        .args(["-sf", "http://127.0.0.1:7681/api/v1/agent/info"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn resolve_bridge_binary(root: &std::path::Path) -> std::path::PathBuf {
+    let debug = root.join("target/debug/bunny-discord-bridge");
+    let release = root.join("target/release/bunny-discord-bridge");
+    if let Ok(path) = std::env::var("BUNNY_DISCORD_BRIDGE_BIN") {
+        if !path.is_empty() {
+            return std::path::PathBuf::from(path);
+        }
+    }
+    // `cargo build -p bunny-discord-bridge` writes debug; prefer it when newer than release.
+    if debug.is_file() {
+        if !release.is_file() {
+            return debug;
+        }
+        let debug_mtime = debug.metadata().and_then(|m| m.modified()).ok();
+        let release_mtime = release.metadata().and_then(|m| m.modified()).ok();
+        if debug_mtime >= release_mtime {
+            return debug;
+        }
+    }
+    release
+}
+
+fn run_discord_bridge(config: Option<std::path::PathBuf>) -> Result<()> {
+    let cfg = resolve_bridge_config_path(config)?;
+    if !cfg.is_file() {
+        anyhow::bail!(
+            "bridge config not found at {}\n  run: bunny discord setup",
+            cfg.display()
+        );
+    }
+    if !agent_info_reachable() {
+        eprintln!("⚠ Agent not running — start it first: bunny run");
+    }
+    if crate::config_init::sync_agent_from_bridge_file(&cfg)? {
+        eprintln!(
+            "→ Agent config synced from {} — restart bunny run if it is already running",
+            cfg.display()
+        );
+    }
+    let root = workspace_root()?;
+    let bridge_bin = resolve_bridge_binary(&root);
+    if !bridge_bin.is_file() {
+        eprintln!("→ Building discord bridge (first time)…");
+        let status = std::process::Command::new("cargo")
+            .current_dir(&root)
+            .args(["build", "--release", "-p", "bunny-discord-bridge", "-q"])
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("failed to build bunny-discord-bridge");
+        }
+    }
+    eprintln!("→ Discord bridge ({}, {})", cfg.display(), bridge_bin.display());
+    let status = std::process::Command::new(&bridge_bin)
+        .env("BUNNY_DISCORD_BRIDGE_CONFIG", &cfg)
+        .env(
+            "RUST_LOG",
+            std::env::var("RUST_LOG")
+                .unwrap_or_else(|_| "bunny_discord_bridge=info,serenity=warn".into()),
+        )
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("discord bridge exited with {status}");
+    }
+    Ok(())
+}
+
 pub async fn run_service(command: ServiceCommands) -> Result<()> {
     match command {
         ServiceCommands::Install => {
@@ -484,6 +759,7 @@ async fn serve(
     crate::recovery::restore_sessions(&state);
     crate::recovery::spawn_relay_if_enabled(state.clone());
     crate::recovery::spawn_health_checks(state.clone());
+    crate::discord_follow::spawn_follow_worker(state.clone());
     let prefetch = state.clone();
     tokio::spawn(async move {
         if let Err(e) = crate::claude::ensure_install_script(&prefetch.data_dir).await {

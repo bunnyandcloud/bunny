@@ -39,7 +39,12 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/auth/mfa/verify", post(auth_mfa_verify))
         .route("/invitations/accept", post(invitation_accept))
         .route("/agent/info", get(agent_info))
-        .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect));
+        .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect))
+        .route("/auth/discord/start", get(crate::discord_ops::discord_oauth_start))
+        .route(
+            "/auth/discord/callback",
+            get(crate::discord_ops::discord_oauth_callback),
+        );
 
     let protected = Router::new()
         .route("/auth/logout", post(auth_logout))
@@ -110,9 +115,22 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/webrtc/config", get(webrtc_config))
         .route("/sessions/:id/webrtc/offer", post(webrtc_offer))
         .route("/sessions/:id/webrtc/candidate", post(webrtc_candidate))
+        .merge(crate::discord_ops::human_router(state.clone()))
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
-    let api = public.merge(protected).with_state(state.clone());
+    let internal_discord = crate::discord_ops::internal_router(state.clone())
+        .layer(from_fn_with_state(state.clone(), middleware::require_bridge));
+
+    let watch_public = crate::discord_ops::public_watch_router(state.clone());
+
+    let api = public
+        .merge(protected)
+        .merge(
+            Router::new()
+                .nest("/internal/discord", internal_discord)
+                .merge(watch_public),
+        )
+        .with_state(state.clone());
 
     let preview_routes = preview::router(state.clone())
         .merge(preview::root_dev_assets_router(state.clone()))
@@ -1419,10 +1437,46 @@ async fn get_timeline(
 }
 
 async fn get_audit_logs(
-    State(_state): State<Arc<AppState>>,
-    Extension(_user): Extension<Uuid>,
-) -> Json<Vec<serde_json::Value>> {
-    Json(vec![])
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Query(q): Query<AuditLogsQuery>,
+) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    if let Some(sid) = q.session_id.as_ref() {
+        let session_id = Uuid::parse_str(sid).map_err(|_| ApiError::validation("session_id"))?;
+        ensure_session_access(&state, user, session_id, Action::AuditView)?;
+    } else {
+        ensure_system_owner(&state, user)?;
+    }
+    let limit = q.limit.unwrap_or(100).min(500) as usize;
+    let entries = state
+        .discord
+        .lock()
+        .list_audit(
+            q.session_id
+                .as_ref()
+                .and_then(|s| Uuid::parse_str(s).ok()),
+            limit,
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let out: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id,
+                "discord_user_id": e.discord_user_id,
+                "bunny_user_id": e.bunny_user_id,
+                "guild_id": e.guild_id,
+                "channel_id": e.channel_id,
+                "thread_id": e.thread_id,
+                "session_id": e.session_id,
+                "command": e.command,
+                "action_executed": e.action_executed,
+                "result": e.result,
+                "created_at": e.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(out))
 }
 
 async fn voice_intent(
@@ -1468,7 +1522,7 @@ async fn voice_confirm(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-fn ensure_session_access(
+pub fn ensure_session_access(
     state: &AppState,
     user_id: Uuid,
     session_id: Uuid,
@@ -1540,7 +1594,7 @@ fn ensure_global_access(state: &AppState, user_id: Uuid, action: Action) -> Resu
     Err(ApiError::forbidden("permission denied"))
 }
 
-fn get_role(state: &AppState, user_id: Uuid, session_id: Uuid) -> Result<Role, ApiError> {
+pub fn get_role(state: &AppState, user_id: Uuid, session_id: Uuid) -> Result<Role, ApiError> {
     state
         .auth
         .member_role(session_id, user_id)?
@@ -1902,6 +1956,12 @@ pub struct BrowserResponse {
     pub events_path: String,
     pub webrtc_offer_path: String,
 }
+#[derive(Deserialize)]
+pub struct AuditLogsQuery {
+    pub session_id: Option<String>,
+    pub limit: Option<u64>,
+}
+
 #[derive(Deserialize)]
 pub struct TimelineQuery {
     pub session_id: String,

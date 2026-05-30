@@ -1,0 +1,15 @@
+# Optional: merge into the container config after `bunny configure`
+#   docker compose -f docker-compose.dev.yml exec bunny-dev bash
+#   cat /opt/bunny/config/bunny.docker.yaml.example >> ~/.config/bunny/config.yaml
+#
+# Or set bind via env (docker-compose.dev.yml already sets BUNNY_SERVER__BIND_HOST).
+
+server:
+  bind_host: 0.0.0.0
+  port: 7681
+
+discord:
+  enabled: true
+  bridge_token_hash: "PASTE_SHA256_FROM_bunny_discord_token"
+  public_url: "http://127.0.0.1:7681"
+  link_code_ttl_minutes: 15

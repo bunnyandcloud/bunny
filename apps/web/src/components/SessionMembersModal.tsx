@@ -43,7 +43,7 @@ export default function SessionMembersModal(props: {
     setError('');
     setLoading(true);
     listSessionMembers(sessionId)
-      .then((m) => setMembers(m))
+      .then(setMembers)
       .catch((e) => setError(apiErrorMessage(e, 'Cannot load members')))
       .finally(() => setLoading(false));
   }, [open, sessionId]);

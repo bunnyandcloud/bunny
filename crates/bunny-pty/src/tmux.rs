@@ -73,6 +73,7 @@ pub fn has_window(session: &str, window: &str) -> bool {
 
 /// Hide tmux status bar / messages for embedded web UI; keep sessions alive across attach clients.
 pub fn configure_session_for_web(session: &str) {
+    apply_utf8_locale_global();
     for args in [
         vec!["set-option", "-t", session, "-g", "status", "off"],
         vec!["set-option", "-t", session, "-g", "status-position", "off"],
@@ -86,6 +87,19 @@ pub fn configure_session_for_web(session: &str) {
         vec!["set-option", "-t", session, "-g", "remain-on-exit", "off"],
     ] {
         let _ = run(&args);
+    }
+    apply_utf8_locale(session);
+}
+
+pub fn apply_utf8_locale_global() {
+    for (key, value) in crate::locale::utf8_locale_vars() {
+        let _ = run(&["set-environment", "-g", key, value]);
+    }
+}
+
+pub fn apply_utf8_locale(session: &str) {
+    for (key, value) in crate::locale::utf8_locale_vars() {
+        let _ = run(&["set-environment", "-t", session, key, value]);
     }
 }
 
@@ -207,6 +221,19 @@ pub fn capture_pane(target: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// Visible pane only (no scrollback) — matches what you see on screen (vim, htop, etc.).
+pub fn capture_pane_visible(target: &str) -> Result<String> {
+    let out = Command::new("tmux")
+        .args(["capture-pane", "-p", "-t", target])
+        .output()
+        .with_context(|| format!("capture-pane (visible) -t {target}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("tmux capture-pane failed: {stderr}");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 /// True when the pane process has exited (scrollback may still show `logout`, etc.).
 pub fn pane_is_dead(target: &str) -> bool {
     let Ok(out) = Command::new("tmux")
@@ -315,6 +342,10 @@ pub fn target_alive(target: &str) -> bool {
 }
 
 fn append_env_flags(args: &mut Vec<String>, secret_env: &HashMap<String, String>) {
+    for (key, value) in crate::locale::utf8_locale_vars() {
+        args.push("-e".to_string());
+        args.push(format!("{key}={value}"));
+    }
     for (key, value) in secret_env {
         if key.starts_with("BUNNY_SECRET_") {
             args.push("-e".to_string());

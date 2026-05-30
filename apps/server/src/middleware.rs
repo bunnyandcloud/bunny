@@ -61,3 +61,14 @@ pub fn user_from_extensions(req: &Request<Body>) -> Option<Uuid> {
 pub fn auth_session_from_extensions(req: &Request<Body>) -> Option<AuthenticatedSession> {
     req.extensions().get::<AuthenticatedSession>().cloned()
 }
+
+pub async fn require_bridge(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if crate::discord_ops::verify_bridge_token(&state, req.headers()).is_ok() {
+        return next.run(req).await;
+    }
+    (StatusCode::UNAUTHORIZED, "invalid bridge token").into_response()
+}

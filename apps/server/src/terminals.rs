@@ -64,6 +64,8 @@ fn collect_persisted_scrollback(state: &AppState, record: &TerminalRecord) -> (S
         }
     }
     let text = hist.unwrap_or_default();
+    let discord = scrollback::load_discord_sidecar(&dir, record.id);
+    let text = scrollback::merge_discord_transcript(&text, &discord);
     let cwd_for_save = cwd
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
@@ -505,6 +507,195 @@ pub fn ensure_session_terminals_live(state: &Arc<AppState>, session_id: Uuid) {
             tracing::warn!(%record.id, error = %e, "failed to re-attach terminal");
             let _ = auth_db.lock().update_terminal_status(record.id, "exited");
         }
+    }
+}
+
+/// Run a command for Discord without typing into the interactive shell (keeps tmux pane clean).
+/// Uses the pane's current working directory and session vault secrets.
+pub fn exec_discord_shell_command(
+    state: &AppState,
+    term_id: Uuid,
+    session_id: Uuid,
+    command: &str,
+) -> Result<(String, i32)> {
+    use bunny_pty::locale;
+    use std::process::Command;
+
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    let cwd = if state.terminals.uses_tmux() {
+        resolve_tmux_target(state, &record)?
+            .and_then(|t| tmux::pane_cwd(&t))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&record.cwd))
+    } else {
+        PathBuf::from(&record.cwd)
+    };
+
+    let shell = if record.shell.is_empty() {
+        state.config.terminal.shell.clone()
+    } else {
+        record.shell.clone()
+    };
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    let mut cmd = Command::new(&shell);
+    cmd.arg("-lc").arg(command).current_dir(&cwd);
+    for (k, v) in locale::utf8_locale_vars() {
+        cmd.env(k, v);
+    }
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("HOME", &home);
+    cmd.env("PWD", cwd.display().to_string());
+    cmd.env(
+        "PATH",
+        format!("{home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+    );
+    for (k, v) in state.secret_env_for_session(session_id) {
+        cmd.env(k, v);
+    }
+
+    let out = cmd.output()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.trim_end().to_string(),
+        (true, false) => stderr.trim_end().to_string(),
+        (false, false) => format!("{stdout}{stderr}").trim_end().to_string(),
+    };
+    append_discord_transcript(state, term_id, command, &text);
+    Ok((text, out.status.code().unwrap_or(1)))
+}
+
+fn discord_transcript_entry(command: &str, output: &str) -> String {
+    let display = mirror_output_for_display(output);
+    format!("[discord] $ {command}\n{display}\n")
+}
+
+fn discord_transcript_entry_terminal(command: &str, output: &str) -> String {
+    let display = mirror_output_for_display(output);
+    format!("\r\n[discord] $ {command}\r\n{display}\r\n")
+}
+
+/// Record Discord runs for Web UI scrollback and snapshot overlay (target shell only).
+fn append_discord_transcript(state: &AppState, term_id: Uuid, command: &str, output: &str) {
+    let dir = scrollback_dir(state);
+    let _ = std::fs::create_dir_all(&dir);
+    let entry = discord_transcript_entry(command, output);
+    let mut entry_terminal = discord_transcript_entry_terminal(command, output);
+    if let Some(prompt) = terminal_prompt_line(state, term_id) {
+        entry_terminal.push_str("\r\n");
+        entry_terminal.push_str(&prompt);
+    }
+
+    let path = discord_transcript_path(state, term_id);
+    let mut discord_only = std::fs::read_to_string(&path).unwrap_or_default();
+    discord_only.push_str(&entry);
+    const MAX_BYTES: usize = 32_768;
+    if discord_only.len() > MAX_BYTES {
+        let keep = &discord_only[discord_only.len() - MAX_BYTES..];
+        discord_only = keep[keep.find('\n').map(|i| i + 1).unwrap_or(0)..].to_string();
+    }
+    let _ = std::fs::write(&path, discord_only);
+
+    let scroll = scrollback::load(&dir, term_id).unwrap_or_default();
+    scrollback::save(&dir, term_id, &format!("{scroll}{entry_terminal}"));
+
+    state.terminals.inject_transcript(term_id, &entry_terminal);
+}
+
+fn terminal_prompt_line(state: &AppState, term_id: Uuid) -> Option<String> {
+    let target = state.terminals.tmux_target(term_id)?;
+    if !tmux::target_alive(&target) {
+        return None;
+    }
+    let cap = tmux::capture_pane_visible(&target).ok()?;
+    cap.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|s| s.to_string())
+}
+
+fn discord_transcript_path(state: &AppState, term_id: Uuid) -> PathBuf {
+    scrollback_dir(state).join(format!("{}.discord", term_id.as_simple()))
+}
+
+/// Main scrollback + persisted Discord transcript (PTY saves tmux-only and would drop [discord] lines).
+pub fn load_scrollback_for_replay(state: &AppState, term_id: Uuid) -> String {
+    let dir = scrollback_dir(state);
+    let base = scrollback::load(&dir, term_id).unwrap_or_default();
+    let discord = scrollback::load_discord_sidecar(&dir, term_id);
+    scrollback::merge_discord_transcript(&base, &discord)
+}
+
+/// WebSocket full replay: keep the longer tmux history, always append missing Discord sidecar lines.
+pub fn build_terminal_replay(state: &AppState, term_id: Uuid, live_buffer: &str) -> String {
+    let dir = scrollback_dir(state);
+    let disk = load_scrollback_for_replay(state, term_id);
+    let sidecar = scrollback::load_discord_sidecar(&dir, term_id);
+    let base = if live_buffer.len() > disk.len() {
+        live_buffer
+    } else {
+        &disk
+    };
+    scrollback::merge_discord_transcript(base, &sidecar)
+}
+
+/// Recent Discord transcript tail merged into shell snapshots only.
+pub fn discord_transcript_for_snapshot(state: &AppState, term_id: Uuid) -> String {
+    let path = discord_transcript_path(state, term_id);
+    let full = std::fs::read_to_string(&path).unwrap_or_default();
+    const TAIL: usize = 1500;
+    if full.len() <= TAIL {
+        full
+    } else {
+        full[full.len() - TAIL..].to_string()
+    }
+}
+
+/// Insert Discord transcript above the shell prompt line for PNG snapshots.
+pub fn merge_discord_transcript_into_pane(pane: &str, discord: &str) -> String {
+    let discord = discord.trim();
+    if discord.is_empty() {
+        return pane.to_string();
+    }
+    let pane = pane.trim_end();
+    if pane.contains("[discord] $") {
+        return format!("{pane}\n");
+    }
+    match pane.rfind('\n') {
+        Some(i) => {
+            let (head, prompt) = pane.split_at(i);
+            format!("{head}\n{discord}\n{}", prompt.trim_start_matches('\n'))
+        }
+        None => format!("{discord}\n{pane}\n"),
+    }
+}
+
+fn mirror_output_for_display(output: &str) -> String {
+    const MAX_CHARS: usize = 2000;
+    const MAX_LINES: usize = 24;
+    if output.trim().is_empty() {
+        return "(no output)".into();
+    }
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.len() > MAX_LINES {
+        format!(
+            "{}\n… ({} more lines)",
+            lines[..MAX_LINES].join("\n"),
+            lines.len() - MAX_LINES
+        )
+    } else if output.len() > MAX_CHARS {
+        format!("{}…", &output[..MAX_CHARS])
+    } else {
+        output.to_string()
     }
 }
 

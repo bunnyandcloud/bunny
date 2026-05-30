@@ -1,8 +1,7 @@
 use crate::state::AppState;
-use crate::terminals::scrollback_dir;
 use axum::extract::ws::{Message, WebSocket};
 use bunny_pty::protocol::{ReplayChunk, TerminalClientMsg, TerminalServerMsg};
-use bunny_pty::{scrollback, tmux};
+use bunny_pty::tmux;
 use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -136,13 +135,6 @@ async fn send_replay(
     terminal_id: Uuid,
     from_offset: u64,
 ) -> bool {
-    let dir = scrollback_dir(state);
-    let disk = if from_offset == 0 {
-        scrollback::load(&dir, terminal_id)
-    } else {
-        None
-    };
-
     state.terminals.hydrate_scrollback_from_disk(terminal_id);
 
     let mut chunks: Vec<ReplayChunk> = state
@@ -155,33 +147,30 @@ async fn send_replay(
         })
         .unwrap_or_default();
 
-    let mut total: usize = chunks.iter().map(|c| c.data.len()).sum();
-
     if from_offset == 0 {
-        if let Some(disk_text) = disk.clone() {
-            if total < disk_text.len() / 2 {
-                chunks = vec![ReplayChunk {
-                    offset: 1,
-                    data: disk_text,
-                }];
-                total = chunks.first().map(|c| c.data.len()).unwrap_or(0);
-            }
+        let buffer_text: String = chunks.iter().map(|c| c.data.clone()).collect();
+        let replay_text =
+            crate::terminals::build_terminal_replay(state, terminal_id, &buffer_text);
+        if !replay_text.is_empty() {
+            chunks = vec![ReplayChunk {
+                offset: 1,
+                data: replay_text,
+            }];
         }
     }
 
+    let total: usize = chunks.iter().map(|c| c.data.len()).sum();
     let has_history = total > 80;
 
     if has_history {
         tracing::info!(
             terminal = %terminal_id,
             bytes = total,
-            disk_bytes = disk.as_ref().map(|d| d.len()).unwrap_or(0),
             "sending terminal history replay"
         );
     } else if from_offset == 0 {
         tracing::debug!(
             terminal = %terminal_id,
-            disk_bytes = disk.as_ref().map(|d| d.len()).unwrap_or(0),
             buffer_bytes = total,
             "no terminal history to replay"
         );

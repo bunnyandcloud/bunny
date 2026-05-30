@@ -1,0 +1,40 @@
+# Dev stack: Bunny agent in Ubuntu (same as README Docker flow).
+# Discord bridge runs on the Mac host — see scripts/run-discord-bridge.sh
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml exec bunny-dev bash
+#   bunny setup && bunny configure && bunny run
+
+services:
+  bunny-dev:
+    image: ubuntu:24.04
+    container_name: bunny-dev
+    working_dir: /opt/bunny
+    entrypoint: ["/opt/bunny/scripts/docker-dev-entrypoint.sh"]
+    volumes:
+      - .:/opt/bunny
+      # Persist auth DB, config, secrets between container restarts
+      - bunny-config:/root/.config/bunny
+    ports:
+      - "127.0.0.1:7681:7681"
+    shm_size: "2gb"
+    # Agent must listen on 0.0.0.0 inside the container for port publish
+    environment:
+      - BUNNY_DOCKER_DEV=1
+      - BUNNY_SERVER__BIND_HOST=0.0.0.0
+      - PATH=/opt/bunny:/root/.cargo/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    command: ["sleep", "infinity"]
+    # Fallback when Docker Desktop’s embedded resolver (127.0.0.11) flakes — discord bridge needs outbound DNS
+    dns:
+      - 127.0.0.11
+      - 8.8.8.8
+      - 1.1.1.1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:7681/api/v1/agent/info || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  bunny-config:

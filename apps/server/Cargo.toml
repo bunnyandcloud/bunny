@@ -19,6 +19,11 @@ bunny-pty = { path = "../../crates/bunny-pty" }
 bunny-relay = { path = "../../crates/bunny-relay" }
 bunny-secrets = { path = "../../crates/bunny-secrets" }
 bunny-push = { path = "../../crates/bunny-push" }
+bunny-discord = { path = "../../crates/bunny-discord" }
+image = { version = "0.24", default-features = false, features = ["png"] }
+font8x8 = "0.3"
+rand.workspace = true
+urlencoding = "2"
 bytes.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -30,6 +35,7 @@ hyper-util.workspace = true
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tokio.workspace = true
 tower.workspace = true
 tower-http.workspace = true

@@ -8,15 +8,22 @@ const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
 const SecretsPage = lazy(() => import('./components/SecretsPage'));
 const SecurityPage = lazy(() => import('./components/SecurityPage'));
 const TeamPage = lazy(() => import('./components/TeamPage'));
+const WatchPage = lazy(() => import('./components/WatchPage'));
 
 function parseSessionFromPath(): string | null {
   const m = location.pathname.match(/^\/s\/([^/]+)/);
   return m ? m[1] : null;
 }
 
+function parseWatchToken(): string | null {
+  const m = location.pathname.match(/^\/watch\/([^/]+)/);
+  return m ? m[1] : null;
+}
+
 export default function App() {
   const { user, loading, check, logout } = useAuth();
   const sessionId = parseSessionFromPath();
+  const watchToken = parseWatchToken();
   const inviteToken = new URLSearchParams(location.search).get('invite');
   const inviteEmail = new URLSearchParams(location.search).get('email');
 
@@ -39,6 +46,20 @@ export default function App() {
         inviteEmail={inviteEmail}
         onSignOut={logout}
       />
+    );
+  }
+
+  if (watchToken) {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+            Loading watch…
+          </div>
+        }
+      >
+        <WatchPage token={watchToken} />
+      </Suspense>
     );
   }
 
