@@ -41,6 +41,7 @@ pub async fn handle_terminal_ws(
     if !has_history {
         state.terminals.refresh_display(terminal_id);
     }
+    let mut pending_refresh_after_resize = !has_history;
 
     loop {
         tokio::select! {
@@ -54,6 +55,10 @@ pub async fn handle_terminal_ws(
                                 }
                                 TerminalClientMsg::Resize { cols, rows } if can_write => {
                                     let _ = state.terminals.resize(terminal_id, cols, rows);
+                                    if pending_refresh_after_resize {
+                                        pending_refresh_after_resize = false;
+                                        state.terminals.refresh_display(terminal_id);
+                                    }
                                 }
                                 TerminalClientMsg::Ping { id } => {
                                     let pong = TerminalServerMsg::Pong { id };

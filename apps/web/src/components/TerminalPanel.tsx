@@ -73,6 +73,8 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, Consolas, monospace',
+      convertEol: true,
+      scrollback: 10000,
       theme: {
         background: '#0d1117',
         foreground: '#c9d1d9',
@@ -116,19 +118,21 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
     }
 
     function sendResize() {
-      if (!activeRef.current) return;
-      fit.fit();
+      try {
+        fit.fit();
+      } catch {
+        /* container may not be laid out yet */
+      }
+      const cols = Math.max(term.cols, 80);
+      const rows = Math.max(term.rows, 24);
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }),
-        );
+        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
     }
 
     function sendResizeDeferred() {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => sendResize());
-      });
+      sendResize();
+      requestAnimationFrame(() => sendResize());
     }
 
     function connect() {
@@ -141,10 +145,10 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       ws.onopen = () => {
         opened = true;
         reconnectAttempts = 0;
+        sendResize();
         ws.send(JSON.stringify({ type: 'subscribe', from_offset: offsetRef.current }));
-        resizeAfterReplayTimer = setTimeout(() => {
-          if (!replaySeen) sendResizeDeferred();
-        }, 150);
+        sendResizeDeferred();
+        resizeAfterReplayTimer = setTimeout(sendResizeDeferred, 100);
       };
 
       ws.onmessage = (ev) => {
@@ -226,11 +230,19 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
     const onResize = () => sendResizeDeferred();
     window.addEventListener('resize', onResize);
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        sendResize();
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+
     return () => {
       disposed = true;
       clearTimeout(reconnectTimer);
       clearTimeout(resizeAfterReplayTimer);
       window.removeEventListener('resize', onResize);
+      resizeObserver.disconnect();
       wsRef.current?.close();
       fitRef.current = null;
       termRef.current = null;
