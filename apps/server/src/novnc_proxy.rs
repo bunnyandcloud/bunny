@@ -64,7 +64,7 @@ async fn proxy_request(
     Err(StatusCode::NOT_FOUND)
 }
 
-fn resolve_novnc_file(path: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_novnc_file(path: &str) -> Option<PathBuf> {
     let web = novnc_web_dir()?;
     let rel = if path.is_empty() || path == "vnc.html" {
         "vnc.html"
@@ -99,7 +99,7 @@ fn novnc_web_dir() -> Option<PathBuf> {
     None
 }
 
-async fn serve_novnc_file(path: PathBuf) -> Result<Response, StatusCode> {
+pub(crate) async fn serve_novnc_file(path: PathBuf) -> Result<Response, StatusCode> {
     let bytes = fs::read(&path)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;

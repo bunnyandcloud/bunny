@@ -102,6 +102,7 @@ pub struct WatchSession {
     pub mode: String,
     pub status: String,
     pub required_role_ids: Vec<String>,
+    pub browser_id: Option<Uuid>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }

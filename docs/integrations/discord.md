@@ -63,13 +63,13 @@ cargo run -p bunny-discord-bridge
 | `/bunny shell_new` | Create shell (`name:` optional — auto `shell N`) |
 | `/bunny shell_close` | Close shell (`shell:` required if multiple) |
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) |
-| `/bunny stream_start` | Post read-only watch URL |
+| `/bunny stream_browser_start` | Start browser + post read-only watch URL (optional `url:`) |
 | `/bunny ask/plan/do` | Claude agent task |
 | `/bunny stop` | Cancel task |
 
 ## Watch links
 
-`/bunny stream_start` returns a URL like `https://host/watch/<token>`. Opens a read-only WebRTC browser stream (same stack as the Web UI **Stream** tab).
+`/bunny stream_browser_start` starts headless Chromium if needed (same defaults as `full_snapshot`), then returns a URL like `https://host/watch/<token>`. The watch page streams the browser via **noVNC read-only** through the agent HTTP port (works in Docker). WebRTC remains for the mobile app on direct LAN/VPS installs.
 
 ## Security
 

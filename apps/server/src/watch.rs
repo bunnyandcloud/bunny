@@ -1,7 +1,11 @@
 use crate::api::ApiError;
+use crate::browser_ops;
 use crate::discord_ops::BridgeContext;
+use crate::novnc_proxy;
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use crate::ws;
+use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::response::Response;
 use axum::Json;
 use bunny_discord::WatchSession;
 use chrono::{Duration, Utc};
@@ -22,6 +26,7 @@ pub async fn create_watch_link(
     state: &AppState,
     ctx: &BridgeContext,
     session_id: Uuid,
+    browser_id: Uuid,
     layout: Option<String>,
     visibility: Option<String>,
     ttl_hours: Option<u64>,
@@ -40,6 +45,7 @@ pub async fn create_watch_link(
         mode: "read_only".into(),
         status: "active".into(),
         required_role_ids: vec![],
+        browser_id: Some(browser_id),
         expires_at: Utc::now() + Duration::hours(ttl as i64),
         created_at: Utc::now(),
     };
@@ -93,19 +99,15 @@ pub async fn get_watch_meta(
     if watch.expires_at < Utc::now() {
         return Err(ApiError::not_found("watch expired"));
     }
-    let browsers: Vec<String> = state
-        .browser_sessions
-        .read()
-        .iter()
-        .filter(|(_, sid)| **sid == watch.session_id)
-        .map(|(id, _)| id.to_string())
-        .collect();
+    let browser_id =
+        browser_ops::resolve_session_browser_id(&state, watch.session_id, None)?;
     Ok(Json(serde_json::json!({
         "session_id": watch.session_id.to_string(),
         "layout": watch.layout,
         "mode": watch.mode,
         "visibility": watch.visibility,
-        "browser_ids": browsers,
+        "browser_id": browser_id.to_string(),
+        "browser_ids": [browser_id.to_string()],
         "expires_at": watch.expires_at.to_rfc3339(),
     })))
 }
@@ -157,4 +159,56 @@ pub async fn grant_watch_access(
         "session_id": watch.session_id.to_string(),
         "expires_in_secs": (watch.expires_at - Utc::now()).num_seconds().max(0),
     })))
+}
+
+fn resolve_active_watch(state: &AppState, token: &str) -> Result<WatchSession, ApiError> {
+    let watch = state
+        .discord
+        .lock()
+        .get_watch_by_token(token)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("watch session"))?;
+    if watch.expires_at < Utc::now() {
+        return Err(ApiError::not_found("watch expired"));
+    }
+    Ok(watch)
+}
+
+fn watch_browser_id(state: &AppState, watch: &WatchSession) -> Result<Uuid, ApiError> {
+    browser_ops::resolve_session_browser_id(state, watch.session_id, None)
+}
+
+pub async fn watch_novnc_http_root(
+    State(state): State<Arc<AppState>>,
+    Path(token): Path<String>,
+) -> Result<Response, ApiError> {
+    watch_novnc_http(State(state), Path((token, String::new()))).await
+}
+
+pub async fn watch_novnc_http(
+    State(state): State<Arc<AppState>>,
+    Path((token, path)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let _watch = resolve_active_watch(&state, &token)?;
+    let path = path.trim_start_matches('/');
+    if let Some(file_path) = novnc_proxy::resolve_novnc_file(path) {
+        return novnc_proxy::serve_novnc_file(file_path)
+            .await
+            .map_err(|_| ApiError::not_found("noVNC asset"));
+    }
+    Err(ApiError::not_found("noVNC asset"))
+}
+
+pub async fn watch_novnc_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    Path(token): Path<String>,
+) -> Result<Response, ApiError> {
+    let watch = resolve_active_watch(&state, &token)?;
+    let browser_id = watch_browser_id(&state, &watch)?;
+    let novnc_port = state
+        .browsers
+        .get_novnc_port(browser_id)
+        .ok_or_else(|| ApiError::not_found("browser session"))?;
+    Ok(ws.on_upgrade(move |socket| ws::handle_novnc_proxy(socket, novnc_port)))
 }

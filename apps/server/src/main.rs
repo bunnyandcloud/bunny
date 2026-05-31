@@ -1,4 +1,5 @@
 mod api;
+mod browser_ops;
 mod cdp_collector;
 mod claude;
 mod cli;

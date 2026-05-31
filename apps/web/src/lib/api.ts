@@ -581,7 +581,32 @@ export function previewUrl(sessionId: string, port: number) {
   return `/s/${sessionId}/ports/${port}/`;
 }
 
-export function browserNovncUrl(browserId: string) {
+export function browserNovncUrl(browserId: string, opts?: { viewOnly?: boolean }) {
   const path = `api/v1/browser-sessions/${browserId}/vnc/ws`;
-  return `/api/v1/browser-sessions/${browserId}/vnc/vnc.html?autoconnect=1&reconnect=1&reconnect_delay=2000&resize=scale&path=${path}`;
+  const params = new URLSearchParams({
+    autoconnect: '1',
+    reconnect: '1',
+    reconnect_delay: '2000',
+    resize: 'scale',
+    path,
+  });
+  if (opts?.viewOnly) {
+    params.set('view_only', '1');
+    params.set('show_dot', '1');
+  }
+  return `/api/v1/browser-sessions/${browserId}/vnc/vnc.html?${params}`;
+}
+
+export function watchNovncUrl(token: string) {
+  const path = `api/v1/watch/${token}/vnc/ws`;
+  const params = new URLSearchParams({
+    autoconnect: '1',
+    reconnect: '1',
+    reconnect_delay: '2000',
+    resize: 'scale',
+    view_only: '1',
+    show_dot: '1',
+    path,
+  });
+  return `/api/v1/watch/${token}/vnc/vnc.html?${params}`;
 }

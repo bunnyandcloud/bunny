@@ -5,14 +5,13 @@ import {
   getBrowser,
   restartBrowser,
 } from '../lib/api';
-import { useBrowserWebRtc } from '../lib/useBrowserWebRtc';
 
 interface Props {
   sessionId: string;
   targetPort?: number;
 }
 
-type ViewMode = 'novnc' | 'webrtc';
+type ViewMode = 'novnc' | 'stream';
 
 function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
@@ -40,8 +39,6 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
   const [reloadKey, setReloadKey] = useState(0);
   const targetUrl = `http://127.0.0.1:${targetPort}`;
   const initStarted = useRef(false);
-
-  const webrtc = useBrowserWebRtc(sessionId, browserId);
 
   const startBrowser = useCallback(async () => {
     setStarting(true);
@@ -108,11 +105,6 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
     if (browserId) void reloadBrowser();
   }, [targetPort, browserId, reloadBrowser]);
 
-  useEffect(() => {
-    if (mode !== 'webrtc' || !browserId || webrtc.connected || webrtc.connecting) return;
-    void webrtc.connect();
-  }, [mode, browserId, webrtc.connected, webrtc.connecting, webrtc.connect]);
-
   return (
     <div className="h-full flex flex-col bg-bunny-bg">
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-bunny-border bg-bunny-panel text-xs shrink-0 flex-wrap">
@@ -140,9 +132,9 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => setMode('webrtc')}
+            onClick={() => setMode('stream')}
             className={`px-2 py-0.5 rounded border ${
-              mode === 'webrtc'
+              mode === 'stream'
                 ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10'
                 : 'border-bunny-border text-bunny-muted hover:text-gray-200'
             }`}
@@ -188,32 +180,13 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
           />
         )}
 
-        {!error && browserId && mode === 'webrtc' && (
-          <>
-            <video
-              ref={webrtc.videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-contain"
-            />
-            {!webrtc.connected && !webrtc.connecting && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => void webrtc.connect()}
-                  className="text-xs px-3 py-1.5 border border-bunny-border rounded bg-bunny-panel hover:bg-bunny-bg"
-                >
-                  Connecter le flux
-                </button>
-              </div>
-            )}
-            {webrtc.error && (
-              <div className="absolute bottom-2 left-2 right-2 text-xs text-red-400 bg-bunny-panel/90 p-2 rounded">
-                {webrtc.error}
-              </div>
-            )}
-          </>
+        {!error && browserId && mode === 'stream' && (
+          <iframe
+            key={`stream-${reloadKey}`}
+            title="Navigateur distant (stream read-only)"
+            src={browserNovncUrl(browserId, { viewOnly: true })}
+            className="absolute inset-0 w-full h-full border-0"
+          />
         )}
       </div>
 

@@ -264,11 +264,18 @@ impl EventHandler for Handler {
                             ),
                         ),
                 )
-                .add_option(CreateCommandOption::new(
-                    CommandOptionType::SubCommand,
-                    "stream_start",
-                    "Start watch link",
-                ))
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "stream_browser_start",
+                        "Start browser and post read-only watch URL",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "url",
+                        "Browser URL (default: first preview port or http://127.0.0.1:3000)",
+                    )),
+                )
                 .add_option(CreateCommandOption::new(
                     CommandOptionType::SubCommand,
                     "stream_stop",
@@ -548,10 +555,16 @@ async fn handle_command(
                 )))
             }
         }
-        "stream_start" => {
-            let res = bunny.post_json("/stream/start", bridge_ctx).await?;
+        "stream_browser_start" => {
+            let mut body = bridge_ctx.clone();
+            if let Some(url) = opt_str(&sub_opts, "url") {
+                body["browser_url"] = serde_json::json!(url);
+            }
+            let res = bunny.post_json("/stream/start", &body).await?;
             let url = res.get("watch_url").and_then(|v| v.as_str()).unwrap_or("?");
-            Ok(CommandReply::Text(format!("Live Bunny watch (read-only):\n{url}")))
+            Ok(CommandReply::Text(format!(
+                "Browser started. Live read-only watch:\n{url}"
+            )))
         }
         "stream_stop" => {
             bunny.post_json("/stream/stop", bridge_ctx).await?;

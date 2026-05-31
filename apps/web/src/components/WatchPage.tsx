@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react';
-import { apiErrorMessage, getWatchMeta, grantWatchAccess } from '../lib/api';
-import { useBrowserWebRtc } from '../lib/useBrowserWebRtc';
+import { apiErrorMessage, getWatchMeta, grantWatchAccess, watchNovncUrl } from '../lib/api';
 
 export default function WatchPage({ token }: { token: string }) {
   const [meta, setMeta] = useState<Awaited<ReturnType<typeof getWatchMeta>> | null>(null);
   const [error, setError] = useState('');
   const [browserId, setBrowserId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-
-  const webrtc = useBrowserWebRtc(sessionId ?? '', browserId);
 
   useEffect(() => {
     let cancelled = false;
@@ -17,7 +13,6 @@ export default function WatchPage({ token }: { token: string }) {
         const m = await getWatchMeta(token);
         if (cancelled) return;
         setMeta(m);
-        setSessionId(m.session_id);
         setBrowserId(m.browser_ids[0] ?? null);
         await grantWatchAccess(token, {});
       } catch (e) {
@@ -28,15 +23,6 @@ export default function WatchPage({ token }: { token: string }) {
       cancelled = true;
     };
   }, [token]);
-
-  useEffect(() => {
-    if (!browserId || !sessionId) return;
-    void webrtc.connect();
-    return () => {
-      void webrtc.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- connect when ids set
-  }, [browserId, sessionId]);
 
   if (error) {
     return (
@@ -56,7 +42,7 @@ export default function WatchPage({ token }: { token: string }) {
 
   return (
     <div className="min-h-screen bg-bunny-bg text-gray-200 flex flex-col">
-      <header className="border-b border-bunny-border px-4 py-2 flex items-center justify-between text-sm">
+      <header className="border-b border-bunny-border px-4 py-2 flex items-center justify-between text-sm shrink-0">
         <span>
           Bunny watch · layout <strong>{meta.layout}</strong> · read-only
         </span>
@@ -64,17 +50,17 @@ export default function WatchPage({ token }: { token: string }) {
           expires {new Date(meta.expires_at).toLocaleString()}
         </span>
       </header>
-      <main className="flex-1 flex items-center justify-center p-4">
+      <main className="flex-1 min-h-0 relative bg-black">
         {browserId ? (
-          <video
-            ref={webrtc.videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="max-w-full max-h-[80vh] rounded border border-bunny-border bg-black"
+          <iframe
+            title="Bunny watch"
+            src={watchNovncUrl(token)}
+            className="absolute inset-0 w-full h-full border-0"
           />
         ) : (
-          <p className="text-bunny-muted">No browser stream in this session.</p>
+          <p className="absolute inset-0 flex items-center justify-center text-bunny-muted">
+            No browser stream in this session.
+          </p>
         )}
       </main>
     </div>

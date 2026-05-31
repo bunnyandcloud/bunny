@@ -106,7 +106,7 @@ const server = http.createServer(async (req, res) => {
             emit({ type: 'webrtc.browser.error', browserId, error: String(e) });
           });
         }
-        await pc.setRemoteDescription(body);
+        await pc.setRemoteDescription({ type: body.type, sdp: body.sdp });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         return json(res, 200, { type: answer.type, sdp: answer.sdp });

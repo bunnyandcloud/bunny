@@ -62,6 +62,9 @@ pub fn public_watch_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/watch/:token", get(watch::get_watch_meta))
         .route("/watch/:token/access", post(watch::grant_watch_access))
+        .route("/watch/:token/vnc/ws", get(watch::watch_novnc_ws))
+        .route("/watch/:token/vnc", get(watch::watch_novnc_http_root))
+        .route("/watch/:token/vnc/*path", get(watch::watch_novnc_http))
         .with_state(state)
 }
 
@@ -437,7 +440,7 @@ async fn internal_browser_open(
     let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
     ensure_discord_control(&state, bunny_user, link.session_id)?;
     let browser_id =
-        find_or_create_browser(Arc::clone(&state), link.session_id, &body.url).await?;
+        crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &body.url).await?;
     Ok(Json(serde_json::json!({ "browser_id": browser_id.to_string() })))
 }
 
@@ -531,7 +534,7 @@ async fn internal_snapshot(
             .browser_url
             .clone()
             .unwrap_or_else(|| default_browser_url(&state, link.session_id));
-        find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
+        crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
         // Let Chromium paint before CDP screenshot.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
@@ -582,6 +585,7 @@ pub struct StreamStartRequest {
     pub layout: Option<String>,
     pub visibility: Option<String>,
     pub ttl_hours: Option<u64>,
+    pub browser_url: Option<String>,
 }
 
 async fn internal_stream_start(
@@ -591,8 +595,33 @@ async fn internal_stream_start(
 ) -> Result<Json<watch::WatchLinkResponse>, ApiError> {
     verify_bridge_token(&state, &headers)?;
     let link = resolve_link(&state, &body.ctx)?;
-    watch::create_watch_link(&state, &body.ctx, link.session_id, body.layout, body.visibility, body.ttl_hours)
-        .await
+    let url = body
+        .browser_url
+        .clone()
+        .unwrap_or_else(|| default_browser_url(&state, link.session_id));
+    let browser_id =
+        crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
+    audit(
+        &state,
+        &body.ctx,
+        link.session_id,
+        "/bunny stream_browser_start",
+        &format!("browser stream at {url}"),
+        "ok",
+        None,
+        None,
+        Some(browser_id),
+    );
+    watch::create_watch_link(
+        &state,
+        &body.ctx,
+        link.session_id,
+        browser_id,
+        body.layout,
+        body.visibility,
+        body.ttl_hours,
+    )
+    .await
 }
 
 async fn internal_stream_stop(
@@ -1096,36 +1125,6 @@ fn resolve_shell_terminal(
         .next()
         .map(|(id, ..)| id)
         .ok_or_else(|| ApiError::not_found("no shell — open a shell in the Web UI first"))
-}
-
-async fn find_or_create_browser(state: Arc<AppState>, session_id: Uuid, url: &str) -> Result<Uuid, ApiError> {
-    let existing_id = {
-        state
-            .browser_sessions
-            .read()
-            .iter()
-            .find(|(_, sid)| **sid == session_id)
-            .map(|(id, _)| *id)
-    };
-    if let Some(id) = existing_id {
-        state.browsers.restart(id, url).map_err(|e| ApiError::validation(&e.to_string()))?;
-        state
-            .clone()
-            .start_browser_cdp(session_id, id)
-            .await
-            .map_err(|e| ApiError::validation(&e.to_string()))?;
-        return Ok(id);
-    }
-    let created = state
-        .browsers
-        .create(session_id, url)
-        .map_err(|e| ApiError::validation(&e.to_string()))?;
-    state
-        .clone()
-        .start_browser_cdp(session_id, created)
-        .await
-        .map_err(|e| ApiError::validation(&e.to_string()))?;
-    Ok(created)
 }
 
 pub fn audit(

@@ -137,6 +137,10 @@ impl DiscordDb {
             CREATE INDEX IF NOT EXISTS idx_watch_token ON watch_sessions(token);
             "#,
         )?;
+        let _ = self.conn.execute(
+            "ALTER TABLE watch_sessions ADD COLUMN browser_id TEXT",
+            [],
+        );
         Ok(())
     }
 
@@ -537,8 +541,8 @@ impl DiscordDb {
     pub fn create_watch(&self, watch: &WatchSession) -> Result<()> {
         let roles = serde_json::to_string(&watch.required_role_ids)?;
         self.conn.execute(
-            r#"INSERT INTO watch_sessions (id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, expires_at, created_at)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"#,
+            r#"INSERT INTO watch_sessions (id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, browser_id, expires_at, created_at)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"#,
             params![
                 watch.id.to_string(),
                 watch.token,
@@ -551,6 +555,7 @@ impl DiscordDb {
                 watch.mode,
                 watch.status,
                 roles,
+                watch.browser_id.map(|id| id.to_string()),
                 watch.expires_at.to_rfc3339(),
                 watch.created_at.to_rfc3339(),
             ],
@@ -561,7 +566,7 @@ impl DiscordDb {
     pub fn get_watch_by_token(&self, token: &str) -> Result<Option<WatchSession>> {
         self.conn
             .query_row(
-                "SELECT id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, expires_at, created_at FROM watch_sessions WHERE token = ?1 AND status = 'active'",
+                "SELECT id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, browser_id, expires_at, created_at FROM watch_sessions WHERE token = ?1 AND status = 'active'",
                 params![token],
                 map_watch_row,
             )
@@ -581,7 +586,7 @@ impl DiscordDb {
         let now = Utc::now().to_rfc3339();
         self.conn
             .query_row(
-                "SELECT id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, expires_at, created_at
+                "SELECT id, token, session_id, guild_id, channel_id, thread_id, layout, visibility, mode, status, required_role_ids, browser_id, expires_at, created_at
                  FROM watch_sessions WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active' AND expires_at > ?3 ORDER BY created_at DESC LIMIT 1",
                 params![guild_id, channel_id, now],
                 map_watch_row,
@@ -720,6 +725,7 @@ fn map_task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTask> {
 fn map_watch_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WatchSession> {
     let roles_json: String = r.get(10)?;
     let roles: Vec<String> = serde_json::from_str(&roles_json).unwrap_or_default();
+    let browser_id: Option<String> = r.get(11)?;
     Ok(WatchSession {
         id: Uuid::parse_str(&r.get::<_, String>(0)?).unwrap_or_default(),
         token: r.get(1)?,
@@ -732,7 +738,8 @@ fn map_watch_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WatchSession> {
         mode: r.get(8)?,
         status: r.get(9)?,
         required_role_ids: roles,
-        expires_at: parse_ts(&r.get::<_, String>(11)?),
-        created_at: parse_ts(&r.get::<_, String>(12)?),
+        browser_id: browser_id.and_then(|s| Uuid::parse_str(&s).ok()),
+        expires_at: parse_ts(&r.get::<_, String>(12)?),
+        created_at: parse_ts(&r.get::<_, String>(13)?),
     })
 }

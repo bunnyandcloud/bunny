@@ -1138,12 +1138,7 @@ async fn create_browser(
     let session_id = Uuid::parse_str(&body.session_id).map_err(|_| ApiError::validation("session_id"))?;
     ensure_session_access(&state, user, session_id, Action::BrowserView)?;
     let url = body.target_url.unwrap_or_else(|| "http://127.0.0.1:3000".into());
-    let id = state.browsers.create(session_id, &url)?;
-    state
-        .clone()
-        .start_browser_cdp(session_id, id)
-        .await
-        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let id = crate::browser_ops::find_or_create_browser(state.clone(), session_id, &url).await?;
     Ok(Json(BrowserResponse {
         id: id.to_string(),
         stream_path: format!("/api/v1/browser-sessions/{id}/stream"),

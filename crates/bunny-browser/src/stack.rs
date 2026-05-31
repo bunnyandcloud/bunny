@@ -101,6 +101,8 @@ fn spawn_xvfb(display: &str, width: u32, height: u32) -> Result<()> {
         .arg("0")
         .arg(&screen)
         .arg("-ac")
+        .arg("+extension")
+        .arg("XTEST")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -205,6 +207,9 @@ fn spawn_chromium(
 }
 
 fn spawn_vnc(display: &str, port: u16) -> Option<()> {
+    // View-only noVNC (watch / Stream) cannot use a local cursor — the pointer must
+    // appear in the framebuffer. XFIXES would override "-cursor X" with a transparent
+    // remote cursor that view-only clients never render; disable it explicitly.
     match Command::new("x11vnc")
         .env("DISPLAY", display)
         .arg("-display")
@@ -216,6 +221,12 @@ fn spawn_vnc(display: &str, port: u16) -> Option<()> {
         .arg("-forever")
         .arg("-shared")
         .arg("-noxdamage")
+        .arg("-noxfixes")
+        .arg("-cursor")
+        .arg("X")
+        .arg("-cursorpos")
+        .arg("-pointer_mode")
+        .arg("2")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
