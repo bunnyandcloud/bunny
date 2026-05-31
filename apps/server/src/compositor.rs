@@ -33,10 +33,16 @@ pub async fn capture_snapshot(
                     let png = stack_images_vertical(&s.png, &b.png)?;
                     Ok(SnapshotResult {
                         png,
-                        caption: "Session snapshot (shell + browser)".into(),
+                        caption: format!("{} + browser", s.caption),
                     })
                 }
-                (Ok(s), Err(_)) => Ok(s),
+                (Ok(s), Err(e)) => {
+                    tracing::warn!("browser snapshot failed: {e}");
+                    Ok(SnapshotResult {
+                        png: s.png,
+                        caption: format!("{} (browser unavailable: {e})", s.caption),
+                    })
+                }
                 (Err(_), Ok(b)) => Ok(b),
                 (Err(e), Err(_)) => Err(e),
             }
@@ -98,7 +104,7 @@ fn capture_shell(
     let png = render_text_png(&clean, 900, 720)?;
     Ok(SnapshotResult {
         png,
-        caption: format!("Shell: {label}"),
+        caption: format!("Shell snapshot — {label}"),
     })
 }
 

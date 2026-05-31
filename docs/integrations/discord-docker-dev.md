@@ -74,6 +74,8 @@ bunny discord bridge
 | `invalid bridge token` sur `/bunny link` | Le token dans `.discord/bridge.yaml` n’est pas dans la config agent — `bunny discord sync` puis **redémarrer `bunny run`** (Ctrl+C, relancer) |
 | `discord account not linked to bunny user` sur `run` | Redémarrer `bunny run` (fix récent), puis retenter `/bunny run` — ou refaire `/bunny link` avec un nouveau code Web UI |
 | Choisir un shell | `/bunny shell_list` puis `/bunny run shell:<nom> command:pwd` (sans `shell:` = premier shell créé) |
+| Snapshot shell | `/bunny snapshot` ou `/bunny snapshot shell:shell 1` — légende Discord indique le shell |
+| Snapshot complet | `/bunny full_snapshot` — shell + browser (Chromium démarré auto sur :3000 ou 1er preview) |
 | Slash commands doublées (`run` + `shell_run`, chaque cmd x2) | **Global + guild** en parallèle. `./scripts/docker-dev.sh stop-bridge` puis **un seul** `start-bridge`. Vérifie `guild_id` dans `.discord/bridge.yaml`. Quitte Discord (Cmd+Q). Log attendu : `removed stale global slash commands`. |
 
 ### Activer les intents Discord (obligatoire une fois)

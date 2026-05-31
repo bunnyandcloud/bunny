@@ -57,7 +57,8 @@ cargo run -p bunny-discord-bridge
 | `/bunny link` | Link channel to session |
 | `/bunny unlink` | Remove link |
 | `/bunny status` | Show link status |
-| `/bunny snapshot` | PNG snapshot in channel |
+| `/bunny snapshot` | Shell PNG (`shell:` optional — see `shell_list`) |
+| `/bunny full_snapshot` | Shell + browser PNG (starts headless Chromium if needed; optional `url:`) |
 | `/bunny shell_list` | List shells |
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) |
 | `/bunny stream_start` | Post read-only watch URL |

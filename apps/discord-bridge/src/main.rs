@@ -98,7 +98,7 @@ impl BunnyClient {
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
 
-    async fn post_snapshot(&self, body: &serde_json::Value) -> Result<(Vec<u8>, String)> {
+    async fn post_snapshot(&self, body: &serde_json::Value) -> Result<(Vec<u8>, String, String)> {
         let res = self
             .http
             .post(format!("{}/api/v1/internal/discord/snapshot", self.base))
@@ -111,8 +111,14 @@ impl BunnyClient {
             let text = res.text().await?;
             anyhow::bail!("snapshot failed {status}: {text}");
         }
+        let caption = res
+            .headers()
+            .get("x-bunny-snapshot-caption")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("Snapshot")
+            .to_string();
         let bytes = res.bytes().await?.to_vec();
-        Ok((bytes, "snapshot.png".into()))
+        Ok((bytes, "snapshot.png".into(), caption))
     }
 }
 
@@ -179,11 +185,35 @@ impl EventHandler for Handler {
                     "status",
                     "Link status",
                 ))
-                .add_option(CreateCommandOption::new(
-                    CommandOptionType::SubCommand,
-                    "snapshot",
-                    "Session snapshot",
-                ))
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "snapshot",
+                        "Shell snapshot (tmux pane)",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "shell",
+                        "Shell name (see shell_list; default = first shell)",
+                    )),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "full_snapshot",
+                        "Shell + browser snapshot (starts browser if needed)",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "shell",
+                        "Shell name (see shell_list; default = first shell)",
+                    ))
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "url",
+                        "Browser URL (default: first preview port or http://127.0.0.1:3000)",
+                    )),
+                )
                 .add_option(
                     CreateCommandOption::new(
                         CommandOptionType::SubCommand,
@@ -347,6 +377,32 @@ impl EventHandler for Handler {
     }
 }
 
+async fn run_snapshot(
+    bunny: &BunnyClient,
+    bridge_ctx: &serde_json::Value,
+    sub_opts: &[serenity::all::CommandDataOption],
+    target: &str,
+    ensure_browser: bool,
+) -> Result<CommandReply> {
+    let mut body = bridge_ctx.clone();
+    body["target"] = serde_json::json!(target);
+    if ensure_browser {
+        body["ensure_browser"] = serde_json::json!(true);
+    }
+    if let Some(shell) = opt_str(sub_opts, "shell") {
+        body["shell_name"] = serde_json::json!(shell);
+    }
+    if let Some(url) = opt_str(sub_opts, "url") {
+        body["browser_url"] = serde_json::json!(url);
+    }
+    let (png, filename, caption) = bunny.post_snapshot(&body).await?;
+    Ok(CommandReply::Snapshot {
+        caption: format!("{caption} (not stored on disk)."),
+        png,
+        filename,
+    })
+}
+
 async fn handle_command(
     bunny: &BunnyClient,
     cmd: &serenity::model::application::CommandInteraction,
@@ -380,16 +436,8 @@ async fn handle_command(
                 serde_json::to_string_pretty(&res)?
             )))
         }
-        "snapshot" => {
-            let mut body = bridge_ctx.clone();
-            body["target"] = serde_json::json!("all");
-            let (png, filename) = bunny.post_snapshot(&body).await?;
-            Ok(CommandReply::Snapshot {
-                caption: "Session snapshot (not stored on disk).".into(),
-                png,
-                filename,
-            })
-        }
+        "snapshot" => run_snapshot(bunny, bridge_ctx, &sub_opts, "shell", false).await,
+        "full_snapshot" => run_snapshot(bunny, bridge_ctx, &sub_opts, "all", true).await,
         "shell_list" => {
             let q = query_ctx(bridge_ctx);
             let q_ref: Vec<(&str, String)> = q.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();

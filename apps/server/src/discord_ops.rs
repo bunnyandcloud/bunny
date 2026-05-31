@@ -359,6 +359,20 @@ pub struct SnapshotRequest {
     pub ctx: BridgeContext,
     pub target: Option<String>,
     pub shell_name: Option<String>,
+    /// Start headless Chromium before capture (for browser / full snapshots).
+    #[serde(default)]
+    pub ensure_browser: bool,
+    pub browser_url: Option<String>,
+}
+
+fn default_browser_url(state: &AppState, session_id: Uuid) -> String {
+    state
+        .previews
+        .read()
+        .values()
+        .find(|p| p.session_id == session_id)
+        .map(|p| format!("http://127.0.0.1:{}", p.local_port))
+        .unwrap_or_else(|| "http://127.0.0.1:3000".into())
 }
 
 async fn internal_snapshot(
@@ -372,8 +386,21 @@ async fn internal_snapshot(
         Some("browser") => SnapshotTarget::Browser,
         Some("shell") => SnapshotTarget::Shell,
         Some("all") => SnapshotTarget::All,
-        _ => SnapshotTarget::All,
+        _ => SnapshotTarget::Shell,
     };
+
+    let needs_browser = body.ensure_browser
+        || matches!(target, SnapshotTarget::Browser | SnapshotTarget::All);
+    if needs_browser {
+        let url = body
+            .browser_url
+            .clone()
+            .unwrap_or_else(|| default_browser_url(&state, link.session_id));
+        find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
+        // Let Chromium paint before CDP screenshot.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+
     let snap = capture_snapshot(
         &state,
         link.session_id,
@@ -393,10 +420,18 @@ async fn internal_snapshot(
         None,
         None,
     );
-    Ok((
-        [(header::CONTENT_TYPE, "image/png")],
-        snap.png,
-    ))
+    let caption_header = axum::http::HeaderValue::from_str(&snap.caption)
+        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("Snapshot"));
+    let mut response = axum::response::Response::new(axum::body::Body::from(snap.png));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("image/png"),
+    );
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("x-bunny-snapshot-caption"),
+        caption_header,
+    );
+    Ok(response)
 }
 
 #[derive(Deserialize)]
