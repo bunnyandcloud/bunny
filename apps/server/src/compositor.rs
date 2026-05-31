@@ -104,7 +104,7 @@ fn capture_shell(
     let png = render_text_png(&clean, 900, 720)?;
     Ok(SnapshotResult {
         png,
-        caption: format!("Shell snapshot — {label}"),
+        caption: format!("Shell snapshot - {label}"),
     })
 }
 

@@ -375,6 +375,36 @@ fn default_browser_url(state: &AppState, session_id: Uuid) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:3000".into())
 }
 
+fn resolve_shell_label(
+    state: &AppState,
+    session_id: Uuid,
+    shell_name: Option<&str>,
+) -> Result<String, ApiError> {
+    let term_id = resolve_shell_terminal(state, session_id, shell_name)?;
+    Ok(shell_name
+        .map(str::to_string)
+        .or_else(|| state.terminals.name(term_id))
+        .unwrap_or_else(|| term_id.to_string()))
+}
+
+fn discord_snapshot_caption(
+    target: SnapshotTarget,
+    shell_label: &str,
+    snap: &crate::compositor::SnapshotResult,
+) -> String {
+    match target {
+        SnapshotTarget::Shell => format!("Shell snapshot - {shell_label}"),
+        SnapshotTarget::Browser => "Browser snapshot".into(),
+        SnapshotTarget::All => {
+            if snap.caption.contains("browser unavailable") {
+                format!("Full snapshot - shell: {shell_label} (browser unavailable)")
+            } else {
+                format!("Full snapshot - shell: {shell_label} + browser")
+            }
+        }
+    }
+}
+
 async fn internal_snapshot(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -401,6 +431,8 @@ async fn internal_snapshot(
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
 
+    let shell_label = resolve_shell_label(&state, link.session_id, body.shell_name.as_deref())?;
+
     let snap = capture_snapshot(
         &state,
         link.session_id,
@@ -409,19 +441,23 @@ async fn internal_snapshot(
     )
     .await
     .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let discord_caption = discord_snapshot_caption(target, &shell_label, &snap);
     audit(
         &state,
         &body.ctx,
         link.session_id,
         "/bunny snapshot",
-        &snap.caption,
+        &discord_caption,
         "ok",
         None,
         None,
         None,
     );
-    let caption_header = axum::http::HeaderValue::from_str(&snap.caption)
-        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("Snapshot"));
+    let caption_header = axum::http::HeaderValue::from_str(&discord_caption)
+        .unwrap_or_else(|_| {
+            axum::http::HeaderValue::from_str(&format!("Shell snapshot - {shell_label}"))
+                .unwrap_or_else(|_| axum::http::HeaderValue::from_static("Snapshot"))
+        });
     let mut response = axum::response::Response::new(axum::body::Body::from(snap.png));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
