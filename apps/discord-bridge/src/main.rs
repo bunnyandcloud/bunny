@@ -77,6 +77,11 @@ impl BunnyClient {
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
+            if status.as_u16() == 405 {
+                anyhow::bail!(
+                    "bunny API 405 Method Not Allowed on {path} — restart `bunny run` in the container after rebuilding (cargo build --release -p bunny-server)"
+                );
+            }
             anyhow::bail!("bunny API {status}: {text}");
         }
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
@@ -220,6 +225,30 @@ impl EventHandler for Handler {
                         "shell_list",
                         "List shells",
                     ),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "shell_new",
+                        "Create a new shell",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "name",
+                        "Shell name (default: next shell N)",
+                    )),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "shell_close",
+                        "Close a shell (kills tmux window)",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "shell",
+                        "Shell name (required if more than one; see shell_list)",
+                    )),
                 )
                 .add_option(
                     CreateCommandOption::new(CommandOptionType::SubCommand, "run", "Run shell command")
@@ -455,8 +484,33 @@ async fn handle_command(
                     lines.push(format!("• `{name}` ({status}){tag}"));
                 }
                 lines.push("Use `/bunny run shell:<name> command:...`".into());
+                lines.push("`/bunny shell_new` · `/bunny shell_close shell:<name>`".into());
             }
             Ok(CommandReply::Text(lines.join("\n")))
+        }
+        "shell_new" => {
+            let mut body = bridge_ctx.clone();
+            if let Some(name) = opt_str(&sub_opts, "name") {
+                body["name"] = serde_json::json!(name);
+            }
+            let res = bunny.post_json("/shell/new", &body).await?;
+            let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let id = res
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            Ok(CommandReply::Text(format!(
+                "Shell **`{name}`** created (`{id}`).\nOpen the Web UI Terminal tab to interact."
+            )))
+        }
+        "shell_close" => {
+            let mut body = bridge_ctx.clone();
+            if let Some(shell) = opt_str(&sub_opts, "shell") {
+                body["shell_name"] = serde_json::json!(shell);
+            }
+            let res = bunny.post_json("/shell/close", &body).await?;
+            let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            Ok(CommandReply::Text(format!("Shell **`{name}`** closed.")))
         }
         "run" | "shell_run" => {
             let command = opt_str(&sub_opts, "command").unwrap_or("");

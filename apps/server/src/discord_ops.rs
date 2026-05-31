@@ -40,6 +40,7 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/shell/list", get(internal_shell_list))
         .route("/shell/run", post(internal_shell_run))
         .route("/shell/new", post(internal_shell_new))
+        .route("/shell/close", post(internal_shell_close))
         .route("/browser/open", post(internal_browser_open))
         .route("/browser/status", get(internal_browser_status))
         .route("/snapshot", post(internal_snapshot))
@@ -250,7 +251,7 @@ async fn internal_shell_run(
 pub struct ShellNewRequest {
     #[serde(flatten)]
     pub ctx: BridgeContext,
-    pub name: String,
+    pub name: Option<String>,
 }
 
 async fn internal_shell_new(
@@ -263,18 +264,36 @@ async fn internal_shell_new(
     let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
     ensure_discord_control(&state, bunny_user, link.session_id)?;
     let session_id = link.session_id;
+    let name = body
+        .name
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| crate::terminals::next_shell_name(&state, session_id));
+    {
+        let rows = state
+            .auth
+            .db()
+            .lock()
+            .list_terminals_for_session(session_id)
+            .unwrap_or_default();
+        if rows.iter().any(|(_, _, existing, ..)| existing == &name) {
+            return Err(ApiError::validation(&format!(
+                "shell name already exists: {name}"
+            )));
+        }
+    }
     let cwd = crate::terminals::default_shell_cwd();
     let secret_env = state.secret_env_for_session(session_id);
     let (term_id, tmux_target) = state
         .terminals
-        .create(session_id, &body.name, &cwd, None, 80, 24, secret_env)
+        .create(session_id, &name, &cwd, None, 80, 24, secret_env)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     state.terminal_sessions.write().insert(term_id, session_id);
     crate::terminals::persist_terminal(
         &state,
         term_id,
         session_id,
-        &body.name,
+        &name,
         &state.config.terminal.shell,
         None,
         &cwd,
@@ -283,7 +302,93 @@ async fn internal_shell_new(
         tmux_target.as_deref(),
     )
     .map_err(|e| ApiError::validation(&e.to_string()))?;
-    Ok(Json(serde_json::json!({ "terminal_id": term_id.to_string(), "name": body.name })))
+    audit(
+        &state,
+        &body.ctx,
+        session_id,
+        "/bunny shell_new",
+        &format!("create {name}"),
+        "ok",
+        Some(bunny_user),
+        Some(term_id),
+        None,
+    );
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "terminal_id": term_id.to_string(),
+        "name": name,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ShellCloseRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    pub shell_name: Option<String>,
+}
+
+async fn internal_shell_close(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ShellCloseRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    let link = resolve_link(&state, &body.ctx)?;
+    let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
+    ensure_discord_control(&state, bunny_user, link.session_id)?;
+    let session_id = link.session_id;
+    let rows = state
+        .auth
+        .db()
+        .lock()
+        .list_terminals_for_session(session_id)
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return Err(ApiError::not_found("no shell in this session"));
+    }
+    let shell_name = if let Some(name) = body
+        .shell_name
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+    {
+        name
+    } else if rows.len() == 1 {
+        rows[0].2.clone()
+    } else {
+        return Err(ApiError::validation(
+            "multiple shells — specify shell: <name> (see shell_list)",
+        ));
+    };
+    let term_id = resolve_shell_terminal(&state, session_id, Some(&shell_name))?;
+    let display_name = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(|row| row.2)
+        .unwrap_or(shell_name);
+    state.terminals.remove(term_id);
+    state.terminal_sessions.write().remove(&term_id);
+    crate::terminals::remove_terminal_record(&state, term_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    audit(
+        &state,
+        &body.ctx,
+        session_id,
+        "/bunny shell_close",
+        &format!("close {display_name}"),
+        "ok",
+        Some(bunny_user),
+        Some(term_id),
+        None,
+    );
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "terminal_id": term_id.to_string(),
+        "name": display_name,
+    })))
 }
 
 async fn internal_shell_list(

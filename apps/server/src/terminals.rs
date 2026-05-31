@@ -129,6 +129,22 @@ pub fn remove_terminal_record(state: &AppState, id: Uuid) -> Result<()> {
     Ok(())
 }
 
+/// Next unused `shell N` name for a session (matches Web UI naming).
+pub fn next_shell_name(state: &AppState, session_id: Uuid) -> String {
+    let rows = state
+        .auth
+        .db()
+        .lock()
+        .list_terminals_for_session(session_id)
+        .unwrap_or_default();
+    let used: std::collections::HashSet<String> = rows.iter().map(|(_, _, name, ..)| name.clone()).collect();
+    let mut n = rows.len() + 1;
+    while used.contains(&format!("shell {n}")) {
+        n += 1;
+    }
+    format!("shell {n}")
+}
+
 /// Candidate attach targets — per-terminal session first (never alphabetical sort).
 fn tmux_target_candidates(record: &TerminalRecord) -> Vec<String> {
     let mut out = Vec::new();

@@ -68,12 +68,15 @@ bunny discord bridge
 | Page blanche sur :7681 | `bunny run` |
 | Browser : `Xvfb` / `No such file` | `./scripts/docker-dev.sh browser-setup` (le `setup --minimal` n’installe pas la stack navigateur) |
 | `/bunny` ne répond pas | `start-bridge` (1 terminal dédié). Arrêt : **Ctrl+C** dans ce terminal, ou `./scripts/docker-dev.sh stop-bridge` |
+| `405 Method Not Allowed` sur `shell_close` / nouvelle commande | Rebuild + **redémarrer l’agent** : dans le conteneur `cargo build --release -p bunny-server`, puis Ctrl+C sur `bunny run` et relancer |
 | `discord` inconnu | `bunny setup --minimal` (recompile le CLI) |
 | `DisallowedGatewayIntents` | Portail Discord → ton bot → **Privileged Gateway Intents** → activer **Message Content Intent** (et enregistrer), puis relancer `start-bridge` |
 | `failed to lookup address` / `HTTP request to get gateway URL failed` au lancement du bridge | **Réseau DNS du conteneur** (pas Discord) — avant toute action sur Discord. `./scripts/docker-dev.sh check-network` puis `down` + `up` pour appliquer le DNS du compose ; redémarrer Docker Desktop si ça persiste |
 | `invalid bridge token` sur `/bunny link` | Le token dans `.discord/bridge.yaml` n’est pas dans la config agent — `bunny discord sync` puis **redémarrer `bunny run`** (Ctrl+C, relancer) |
 | `discord account not linked to bunny user` sur `run` | Redémarrer `bunny run` (fix récent), puis retenter `/bunny run` — ou refaire `/bunny link` avec un nouveau code Web UI |
 | Choisir un shell | `/bunny shell_list` puis `/bunny run shell:<nom> command:pwd` (sans `shell:` = premier shell créé) |
+| Créer un shell | `/bunny shell_new` ou `/bunny shell_new name:debug` |
+| Fermer un shell | `/bunny shell_close shell:shell 1` (sans `shell:` si un seul onglet) |
 | Snapshot shell | `/bunny snapshot` ou `/bunny snapshot shell:shell 1` — légende Discord indique le shell |
 | Snapshot complet | `/bunny full_snapshot` — shell + browser (Chromium démarré auto sur :3000 ou 1er preview) |
 | Slash commands doublées (`run` + `shell_run`, chaque cmd x2) | **Global + guild** en parallèle. `./scripts/docker-dev.sh stop-bridge` puis **un seul** `start-bridge`. Vérifie `guild_id` dans `.discord/bridge.yaml`. Quitte Discord (Cmd+Q). Log attendu : `removed stale global slash commands`. |

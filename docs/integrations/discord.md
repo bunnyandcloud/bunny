@@ -60,6 +60,8 @@ cargo run -p bunny-discord-bridge
 | `/bunny snapshot` | Shell PNG (`shell:` optional — see `shell_list`) |
 | `/bunny full_snapshot` | Shell + browser PNG (starts headless Chromium if needed; optional `url:`) |
 | `/bunny shell_list` | List shells |
+| `/bunny shell_new` | Create shell (`name:` optional — auto `shell N`) |
+| `/bunny shell_close` | Close shell (`shell:` required if multiple) |
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) |
 | `/bunny stream_start` | Post read-only watch URL |
 | `/bunny ask/plan/do` | Claude agent task |
