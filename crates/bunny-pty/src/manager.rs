@@ -1,5 +1,6 @@
 use crate::session::PtySession;
 use crate::tmux;
+use crate::protocol::TerminalOutput;
 use anyhow::{Context, Result};
 use bunny_core::types::TerminalStatus;
 use parking_lot::RwLock;
@@ -108,31 +109,10 @@ impl TerminalManager {
     }
 
     /// Load disk scrollback into the live buffer when the agent restarted without it.
+    /// Deprecated for live display — disk is recovery-only; kept for explicit restore paths.
+    #[allow(dead_code)]
     pub fn hydrate_scrollback_from_disk(&self, id: Uuid) {
-        let Some(dir) = &self.scrollback_dir else {
-            return;
-        };
-        let base = crate::scrollback::load(dir, id).unwrap_or_default();
-        let discord = crate::scrollback::load_discord_sidecar(dir, id);
-        let disk = crate::scrollback::merge_discord_transcript(&base, &discord);
-        if disk.is_empty() {
-            return;
-        }
-        if let Some(session) = self.terminals.read().get(&id) {
-            let live = session.buffer.all_content();
-            let live_has_discord = live.contains("[discord] $");
-            let disk_has_discord = disk.contains("[discord] $");
-            let missing_discord = discord
-                .lines()
-                .filter(|l| l.starts_with("[discord] $"))
-                .any(|cmd_line| !live.contains(cmd_line));
-            if live.len() < disk.len()
-                || (disk_has_discord && !live_has_discord)
-                || missing_discord
-            {
-                session.buffer.replace(&disk);
-            }
-        }
+        let _ = id;
     }
 
     /// Returns `(terminal_id, tmux_target for persistence)`.
@@ -149,6 +129,7 @@ impl TerminalManager {
         existing_tmux_target: Option<&str>,
         initial_scrollback: Option<String>,
     ) -> Result<(Uuid, Option<String>)> {
+        let recovery_scrollback = initial_scrollback.filter(|s| !s.trim().is_empty());
         let mut env = build_allowlisted_env(cwd);
         for (k, v) in extra_env {
             if k.starts_with("BUNNY_SECRET_") {
@@ -184,7 +165,7 @@ impl TerminalManager {
                 rows,
                 self.buffer_lines,
                 self.scrollback_dir.clone(),
-                initial_scrollback,
+                recovery_scrollback,
             )?;
             (pty, Some(tmux_target))
         } else {
@@ -199,7 +180,7 @@ impl TerminalManager {
                 env,
                 self.buffer_lines,
                 self.scrollback_dir.clone(),
-                initial_scrollback,
+                recovery_scrollback,
             )?;
             (pty, None)
         };
@@ -228,24 +209,48 @@ impl TerminalManager {
         session.resize(cols, rows)
     }
 
-    pub fn subscribe(&self, id: Uuid) -> Option<tokio::sync::broadcast::Receiver<String>> {
+    pub fn subscribe(&self, id: Uuid) -> Option<tokio::sync::broadcast::Receiver<TerminalOutput>> {
         let terminals = self.terminals.read();
         terminals.get(&id).map(|s| s.subscribe())
     }
 
-    pub fn buffer_replay(&self, id: Uuid, from: u64) -> Option<Vec<(u64, String)>> {
+    pub fn buffer_offset(&self, id: Uuid) -> Option<u64> {
+        self.terminals
+            .read()
+            .get(&id)
+            .map(|s| s.buffer.current_offset())
+    }
+
+    pub fn buffer_replay_range(
+        &self,
+        id: Uuid,
+        from: u64,
+        to: u64,
+    ) -> Option<Vec<(u64, String)>> {
         let terminals = self.terminals.read();
         terminals
             .get(&id)
-            .map(|s| s.buffer.replay_from(from))
+            .map(|s| s.buffer.replay_range(from, to))
     }
 
-    /// Append read-only text to the live buffer and notify WebSocket clients.
+    pub fn take_recovery_replay(&self, id: Uuid) -> Option<String> {
+        let terminals = self.terminals.read();
+        terminals.get(&id).and_then(|s| s.take_recovery_replay())
+    }
+
+    /// Append Discord transcript to the attach buffer and notify live WebSocket clients.
+    /// Disk persistence is handled separately; no disk read on reconnect.
     pub fn inject_transcript(&self, id: Uuid, text: &str) {
+        if text.is_empty() {
+            return;
+        }
         let terminals = self.terminals.read();
         if let Some(session) = terminals.get(&id) {
-            session.buffer.append(text);
-            let _ = session.output_tx.send(text.to_string());
+            let offset = session.buffer.append(text);
+            let _ = session.output_tx.send(TerminalOutput {
+                offset,
+                data: text.to_string(),
+            });
         }
     }
 
@@ -257,7 +262,7 @@ impl TerminalManager {
             .map(|s| s.buffer.all_content())
     }
 
-    /// Visible terminal screen for Discord snapshots (tmux pane, no scrollback merge).
+    /// Visible terminal screen for Discord snapshots (tmux pane only).
     pub fn capture_snapshot_text(&self, id: Uuid) -> Option<String> {
         let terminals = self.terminals.read();
         let session = terminals.get(&id)?;
@@ -270,38 +275,7 @@ impl TerminalManager {
                 }
             }
         }
-        let content = session.buffer.all_content();
-        if !content.trim().is_empty() {
-            return Some(content);
-        }
-        if let Some(dir) = &self.scrollback_dir {
-            return crate::scrollback::load(dir, id);
-        }
         None
-    }
-
-    /// Best-effort visible terminal text (tmux pane + live buffer + disk scrollback).
-    pub fn capture_display_text(&self, id: Uuid) -> Option<String> {
-        let terminals = self.terminals.read();
-        let session = terminals.get(&id)?;
-        let mut content = session.buffer.all_content();
-        if let Some(ref target) = session.tmux_target {
-            if tmux::target_alive(target) {
-                if let Ok(cap) = tmux::capture_pane(target) {
-                    content = crate::scrollback::merge(Some(content), cap);
-                }
-            }
-        }
-        if content.trim().is_empty() {
-            if let Some(dir) = &self.scrollback_dir {
-                content = crate::scrollback::load(dir, id).unwrap_or_default();
-            }
-        }
-        if content.is_empty() {
-            None
-        } else {
-            Some(content)
-        }
     }
 
     /// Stop attach client and kill tmux window if applicable.

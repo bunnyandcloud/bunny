@@ -22,6 +22,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
   late final TerminalController _controller;
   WebSocketChannel? _channel;
   int _offset = 0;
+  int _liveFence = 0;
+  bool _replayDone = false;
 
   @override
   void initState() {
@@ -51,13 +53,25 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _channel!.stream.listen((data) {
       try {
         final msg = jsonDecode(data as String) as Map<String, dynamic>;
-        if (msg['type'] == 'output') {
-          _terminal.write(msg['data'] as String);
-          _offset = msg['offset'] as int? ?? _offset;
-        } else if (msg['type'] == 'replay') {
+        if (msg['type'] == 'replay') {
+          final mode = msg['replay_mode'] as String? ??
+              (msg['has_history'] == true ? 'recovery' : 'none');
+          final snapshot = msg['snapshot_offset'] as int? ?? 0;
+          if (mode == 'recovery') {
+            _terminal.clear();
+          }
           for (final c in (msg['chunks'] as List)) {
             _terminal.write(c['data'] as String);
+            _offset = c['offset'] as int? ?? _offset;
           }
+          _liveFence = snapshot;
+          _replayDone = true;
+        } else if (msg['type'] == 'output') {
+          if (!_replayDone) return;
+          final offset = msg['offset'] as int? ?? 0;
+          if (offset <= _liveFence) return;
+          _terminal.write(msg['data'] as String);
+          _offset = offset;
         }
       } catch (_) {}
     });

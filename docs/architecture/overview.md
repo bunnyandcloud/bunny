@@ -9,3 +9,7 @@ See the technical plan for full details. Summary:
 - **packages/**: OpenAPI + WebSocket JSON Schema
 
 All client traffic uses HTTPS/WSS with server-side RBAC. Internal Chromium CDP and VNC are never exposed publicly.
+
+## Deeper dives
+
+- [Terminaux web (shells, tmux, WebSocket)](./terminals.md)

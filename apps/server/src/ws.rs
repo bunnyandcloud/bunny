@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
-use bunny_pty::protocol::{ReplayChunk, TerminalClientMsg, TerminalServerMsg};
+use bunny_pty::protocol::{ReplayChunk, ReplayMode, TerminalClientMsg, TerminalServerMsg};
 use bunny_pty::tmux;
 use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
@@ -8,12 +8,18 @@ use std::sync::Arc;
 use tokio_tungstenite::{connect_async, tungstenite::Message as UpstreamMessage};
 use uuid::Uuid;
 
+struct ReplayResponse {
+    replay_mode: ReplayMode,
+    snapshot_offset: u64,
+    chunks: Vec<ReplayChunk>,
+}
+
 pub async fn handle_terminal_ws(
     socket: WebSocket,
     state: Arc<AppState>,
     terminal_id: Uuid,
     can_write: bool,
-    from_offset: Option<u64>,
+    _from_offset: Option<u64>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
@@ -36,12 +42,8 @@ pub async fn handle_terminal_ws(
         let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
     }
 
-    let from = from_offset.unwrap_or(0);
-    let has_history = send_replay(&mut sender, &state, terminal_id, from).await;
-    if !has_history {
-        state.terminals.refresh_display(terminal_id);
-    }
-    let mut pending_refresh_after_resize = !has_history;
+    let mut live_fence: u64 = 0;
+    let mut pending_refresh_after_resize = false;
 
     loop {
         tokio::select! {
@@ -75,11 +77,11 @@ pub async fn handle_terminal_ws(
                                         let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
                                     }
                                     let from = from_offset.unwrap_or(0);
-                                    let has_history =
-                                        send_replay(&mut sender, &state, terminal_id, from).await;
-                                    if !has_history {
-                                        state.terminals.refresh_display(terminal_id);
-                                    }
+                                    let replay = build_replay(&state, terminal_id, from);
+                                    live_fence = replay.snapshot_offset;
+                                    pending_refresh_after_resize =
+                                        replay.replay_mode == ReplayMode::None;
+                                    send_replay(&mut sender, replay).await;
                                 }
                                 TerminalClientMsg::Refresh => {
                                     state.terminals.refresh_display(terminal_id);
@@ -94,8 +96,14 @@ pub async fn handle_terminal_ws(
             }
             out = out_rx.recv() => {
                 match out {
-                    Ok(data) => {
-                        let msg = TerminalServerMsg::Output { data, offset: 0 };
+                    Ok(chunk) => {
+                        if chunk.offset <= live_fence {
+                            continue;
+                        }
+                        let msg = TerminalServerMsg::Output {
+                            data: chunk.data,
+                            offset: chunk.offset,
+                        };
                         if let Ok(json) = serde_json::to_string(&msg) {
                             if sender.send(Message::Text(json)).await.is_err() {
                                 break;
@@ -106,6 +114,95 @@ pub async fn handle_terminal_ws(
                 }
             }
         }
+    }
+}
+
+fn build_replay(state: &AppState, terminal_id: Uuid, from_offset: u64) -> ReplayResponse {
+    if let Some(text) = state.terminals.take_recovery_replay(terminal_id) {
+        let snapshot = state
+            .terminals
+            .buffer_offset(terminal_id)
+            .unwrap_or(0);
+        if text.trim().is_empty() {
+            return ReplayResponse {
+                replay_mode: ReplayMode::None,
+                snapshot_offset: snapshot,
+                chunks: vec![],
+            };
+        }
+        tracing::info!(
+            terminal = %terminal_id,
+            bytes = text.len(),
+            "sending terminal recovery replay"
+        );
+        return ReplayResponse {
+            replay_mode: ReplayMode::Recovery,
+            snapshot_offset: snapshot,
+            chunks: vec![ReplayChunk {
+                offset: 1,
+                data: text,
+            }],
+        };
+    }
+
+    let snapshot = state
+        .terminals
+        .buffer_offset(terminal_id)
+        .unwrap_or(0);
+
+    if from_offset >= snapshot {
+        return ReplayResponse {
+            replay_mode: ReplayMode::None,
+            snapshot_offset: snapshot,
+            chunks: vec![],
+        };
+    }
+
+    let rows = state
+        .terminals
+        .buffer_replay_range(terminal_id, from_offset, snapshot)
+        .unwrap_or_default();
+
+    if rows.is_empty() {
+        return ReplayResponse {
+            replay_mode: ReplayMode::None,
+            snapshot_offset: snapshot,
+            chunks: vec![],
+        };
+    }
+
+    let total: usize = rows.iter().map(|(_, data)| data.len()).sum();
+    tracing::info!(
+        terminal = %terminal_id,
+        bytes = total,
+        from = from_offset,
+        snapshot = snapshot,
+        "sending terminal catch-up replay"
+    );
+
+    ReplayResponse {
+        replay_mode: ReplayMode::CatchUp,
+        snapshot_offset: snapshot,
+        chunks: rows
+            .into_iter()
+            .map(|(offset, data)| ReplayChunk { offset, data })
+            .collect(),
+    }
+}
+
+async fn send_replay(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    replay: ReplayResponse,
+) {
+    let has_history = replay.replay_mode == ReplayMode::Recovery;
+    let msg = TerminalServerMsg::Replay {
+        chunks: replay.chunks,
+        replay_mode: replay.replay_mode,
+        snapshot_offset: replay.snapshot_offset,
+        has_history,
+    };
+    if let Ok(json) = serde_json::to_string(&msg) {
+        let _ = sender.send(Message::Text(json)).await;
     }
 }
 
@@ -131,67 +228,6 @@ fn secret_env_for_terminal(state: &AppState, terminal_id: Uuid) -> std::collecti
         .get(&terminal_id)
         .map(|session_id| state.secret_env_for_session(*session_id))
         .unwrap_or_default()
-}
-
-/// Push scrollback to the client. Returns true when persisted history was included.
-async fn send_replay(
-    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    state: &AppState,
-    terminal_id: Uuid,
-    from_offset: u64,
-) -> bool {
-    state.terminals.hydrate_scrollback_from_disk(terminal_id);
-
-    let mut chunks: Vec<ReplayChunk> = state
-        .terminals
-        .buffer_replay(terminal_id, from_offset)
-        .map(|rows| {
-            rows.into_iter()
-                .map(|(offset, data)| ReplayChunk { offset, data })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if from_offset == 0 {
-        let buffer_text: String = chunks.iter().map(|c| c.data.clone()).collect();
-        let replay_text =
-            crate::terminals::build_terminal_replay(state, terminal_id, &buffer_text);
-        if !replay_text.is_empty() {
-            chunks = vec![ReplayChunk {
-                offset: 1,
-                data: replay_text,
-            }];
-        }
-    }
-
-    let total: usize = chunks.iter().map(|c| c.data.len()).sum();
-    let has_history = total > 80;
-
-    if has_history {
-        tracing::info!(
-            terminal = %terminal_id,
-            bytes = total,
-            "sending terminal history replay"
-        );
-    } else if from_offset == 0 {
-        tracing::debug!(
-            terminal = %terminal_id,
-            buffer_bytes = total,
-            "no terminal history to replay"
-        );
-    }
-
-    if !chunks.is_empty() {
-        let msg = TerminalServerMsg::Replay {
-            chunks,
-            has_history,
-        };
-        if let Ok(json) = serde_json::to_string(&msg) {
-            let _ = sender.send(Message::Text(json)).await;
-        }
-    }
-
-    has_history
 }
 
 pub async fn handle_session_realtime(socket: WebSocket, state: Arc<AppState>, session_id: Uuid) {

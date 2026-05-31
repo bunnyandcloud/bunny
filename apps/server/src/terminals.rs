@@ -282,7 +282,6 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
         initial_scrollback,
     )?;
     debug_assert_eq!(term_id, record.id);
-    state.terminals.hydrate_scrollback_from_disk(record.id);
     let persisted_target = tmux_out.as_deref().or(tmux_target.as_deref());
     if persisted_target != record.tmux_target.as_deref() {
         let _ = persist_terminal(

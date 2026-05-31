@@ -64,6 +64,19 @@ async fn capture_browser(state: &AppState, session_id: Uuid) -> Result<SnapshotR
     })
 }
 
+fn append_discord_below_pane(pane: &str, discord: &str) -> String {
+    let discord = discord.trim();
+    if discord.is_empty() {
+        return pane.to_string();
+    }
+    let pane = pane.trim_end();
+    if pane.is_empty() {
+        format!("{discord}\n")
+    } else {
+        format!("{pane}\n{discord}\n")
+    }
+}
+
 fn capture_shell(
     state: &AppState,
     session_id: Uuid,
@@ -75,7 +88,7 @@ fn capture_shell(
         .capture_snapshot_text(term_id)
         .unwrap_or_default();
     let discord = crate::terminals::discord_transcript_for_snapshot(state, term_id);
-    let text = crate::terminals::merge_discord_transcript_into_pane(&pane, &discord);
+    let text = append_discord_below_pane(&pane, &discord);
     let redacted = state.redactor.read().redact_text(&text);
     let clean = normalize_terminal_text(&redacted);
     let label = shell_name

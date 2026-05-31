@@ -271,6 +271,20 @@ case "$cmd" in
       exec bunny configure
     '
     ;;
+  browser-setup)
+    docker compose -f "$COMPOSE_FILE" up -d
+    echo "→ Installing browser stack (Xvfb, Chromium, noVNC) — several minutes…"
+    docker compose -f "$COMPOSE_FILE" exec bunny-dev bash -lc '
+      set -e
+      cd /opt/bunny
+      ./scripts/install-prerequisites.sh
+      echo ""
+      echo "→ Verify:"
+      bunny doctor || true
+    '
+    echo ""
+    echo "✓ Browser tab ready — reload the Browser panel in the Web UI"
+    ;;
   logs)
     docker compose -f "$COMPOSE_FILE" logs -f bunny-dev
     ;;
@@ -290,6 +304,7 @@ case "$cmd" in
 Bunny Docker dev
 
   ./scripts/docker-dev.sh bootstrap       RECOMMENDED: install Rust + bunny configure
+  ./scripts/docker-dev.sh browser-setup   Install Xvfb + Chromium + noVNC (Browser tab)
   ./scripts/docker-dev.sh up              Start container
   ./scripts/docker-dev.sh init            Create config.yaml + hint for owner
   ./scripts/docker-dev.sh shell           Shell in container (auto setup if needed)

@@ -37,6 +37,8 @@ Open the UI in your browser (see [where to connect](#where-to-open-the-ui) below
 
 Port **Preview** (iframe proxy to e.g. `:3000`) works without the browser stack. The **Browser** tab (noVNC / WebRTC) needs the packages above — run `bunny doctor` to verify.
 
+**Docker dev note:** `./scripts/docker-dev.sh bootstrap` and `bunny setup --minimal` skip the browser stack. Run `./scripts/docker-dev.sh browser-setup` before using the Browser tab (see [Docker](#docker-dev-with-docker-devsh)).
+
 ### Linux (Ubuntu / Debian / Docker)
 
 Inside the container or VM:
@@ -90,7 +92,43 @@ curl -fsSL https://sh.rustup.rs | sh
 
 After installing Rust, **open a new shell** or run `source "$HOME/.cargo/env"` so `cargo` is on your `PATH`.
 
-### Docker (fresh Ubuntu container)
+### Docker (dev with `docker-dev.sh`)
+
+Recommended on Mac: agent + terminals in Ubuntu, Discord bridge on the host.
+
+```bash
+./scripts/docker-dev.sh bootstrap    # Rust + bunny configure (minimal — no browser stack)
+./scripts/docker-dev.sh shell
+bunny run                            # terminal 1 — keep open
+```
+
+**Browser tab (React on :3000, noVNC):** `bootstrap` / `bunny setup --minimal` do **not** install Xvfb or Chromium. Run once per container (or after `docker-dev.sh down -v`):
+
+```bash
+./scripts/docker-dev.sh browser-setup   # Xvfb, Chromium (Playwright), x11vnc, noVNC — ~2 min
+bunny doctor                            # optional: should show ✓ Xvfb, ✓ Chromium
+```
+
+Then in the Web UI: open the **Browser** tab and click **Recharger**. Your app must listen inside the container (e.g. `npm run dev` in a shell tab on port 3000).
+
+Discord on Mac: [docs/integrations/discord-docker-dev.md](docs/integrations/discord-docker-dev.md).
+
+Equivalent manual steps:
+
+```bash
+./scripts/docker-dev.sh up
+./scripts/docker-dev.sh init
+./scripts/docker-dev.sh browser-setup   # skip only if you never use the Browser tab
+./scripts/docker-dev.sh shell
+bunny run
+```
+
+| Symptom | Fix |
+|---------|-----|
+| `failed to start Xvfb: No such file or directory` | `./scripts/docker-dev.sh browser-setup` |
+| Browser black / not loading | App listening on `127.0.0.1:3000` **inside** the container; click Recharger |
+
+### Docker (manual `docker run`)
 
 On the **host**:
 
@@ -103,25 +141,16 @@ docker run -dit --name bunny-dev \
   ubuntu:24.04 sleep infinity
 ```
 
-Inside the container (or use the helper script from the host):
+Inside the container:
 
 ```bash
-./scripts/docker-dev.sh up
-./scripts/docker-dev.sh init
-./scripts/docker-dev.sh shell
+./scripts/install-prerequisites.sh   # full stack including browser (not --minimal)
+source "$HOME/.cargo/env"
+bunny configure
 bunny run
 ```
 
-`init` creates `~/.config/bunny/config.yaml` automatically. For **Discord**, see [docs/integrations/discord-docker-dev.md](docs/integrations/discord-docker-dev.md).
-
-Legacy manual flow:
-
-```bash
-docker exec -it bunny-dev bash
-cd /opt/bunny && ./bunny setup && bunny configure && bunny run
-```
-
-In Docker, the launcher and agent bind **`0.0.0.0:7681`** automatically so port publishing works. Confirm you see:
+Or use `./bunny setup` (full install, not `--minimal`). Confirm you see:
 
 `✓ Listening on http://0.0.0.0:7681` — not `127.0.0.1` only inside the container.
 

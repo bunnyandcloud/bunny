@@ -52,6 +52,7 @@ bunny discord bridge
 | Commande | Rôle |
 |----------|------|
 | `./scripts/docker-dev.sh bootstrap` | Install + `bunny configure` interactif |
+| `./scripts/docker-dev.sh browser-setup` | Xvfb + Chromium + noVNC pour l’onglet Browser |
 | `./scripts/docker-dev.sh shell` | Shell (auto `setup` si pas de Rust) |
 | `./scripts/docker-dev.sh start-agent` | `bunny run` |
 | `./scripts/docker-dev.sh start-bridge` | `bunny discord bridge` |
@@ -65,6 +66,7 @@ bunny discord bridge
 |----------|--------|
 | `Rust toolchain required` | `bunny setup --minimal` puis `bunny configure` |
 | Page blanche sur :7681 | `bunny run` |
+| Browser : `Xvfb` / `No such file` | `./scripts/docker-dev.sh browser-setup` (le `setup --minimal` n’installe pas la stack navigateur) |
 | `/bunny` ne répond pas | `start-bridge` (1 terminal dédié). Arrêt : **Ctrl+C** dans ce terminal, ou `./scripts/docker-dev.sh stop-bridge` |
 | `discord` inconnu | `bunny setup --minimal` (recompile le CLI) |
 | `DisallowedGatewayIntents` | Portail Discord → ton bot → **Privileged Gateway Intents** → activer **Message Content Intent** (et enregistrer), puis relancer `start-bridge` |

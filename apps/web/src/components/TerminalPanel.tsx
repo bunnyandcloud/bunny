@@ -21,6 +21,31 @@ interface Props {
   readonly?: boolean;
 }
 
+type ReplayMode = 'none' | 'catch_up' | 'recovery';
+
+function offsetStorageKey(terminalId: string): string {
+  return `bunny:term:${terminalId}:offset`;
+}
+
+function readStoredOffset(terminalId: string): number {
+  try {
+    const raw = localStorage.getItem(offsetStorageKey(terminalId));
+    if (!raw) return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredOffset(terminalId: string, offset: number) {
+  try {
+    localStorage.setItem(offsetStorageKey(terminalId), String(offset));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
 const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel(
   { terminalId, active = true, autoFocus = true, readonly },
   ref,
@@ -29,7 +54,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const injectFnRef = useRef<(text: string) => boolean>(() => false);
-  const offsetRef = useRef(0);
+  const offsetRef = useRef(readStoredOffset(terminalId));
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -100,6 +125,17 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
     let gaveUp = false;
 
     let suppressNextClear = false;
+    let replayPhaseDone = false;
+    let liveFence = 0;
+    /** Fresh xterm mount (F5): replay full buffer. WS reconnect: incremental catch-up only. */
+    let isFirstConnect = true;
+
+    function rememberOffset(offset: number) {
+      if (offset > offsetRef.current) {
+        offsetRef.current = offset;
+        writeStoredOffset(terminalId, offset);
+      }
+    }
 
     function stripLeadingScreenClear(data: string): string {
       return data.replace(/^(\x1b\[[0-9;?0-9]*[a-zA-Z])+/u, '');
@@ -135,18 +171,72 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       requestAnimationFrame(() => sendResize());
     }
 
+    function replayMode(msg: Record<string, unknown>): ReplayMode {
+      const mode = msg.replay_mode;
+      if (mode === 'catch_up' || mode === 'recovery' || mode === 'none') {
+        return mode;
+      }
+      return msg.has_history ? 'recovery' : 'none';
+    }
+
+    function handleReplay(msg: Record<string, unknown>) {
+      clearTimeout(resizeAfterReplayTimer);
+      replayPhaseDone = false;
+
+      const mode = replayMode(msg);
+      liveFence = typeof msg.snapshot_offset === 'number' ? msg.snapshot_offset : 0;
+      const chunks = Array.isArray(msg.chunks) ? msg.chunks : [];
+
+      if (mode === 'recovery') {
+        term.reset();
+        suppressNextClear = true;
+        for (const c of chunks) {
+          if (c && typeof c === 'object' && 'data' in c) {
+            writeOutput(String((c as { data: string }).data), true);
+            const off = (c as { offset?: number }).offset;
+            if (typeof off === 'number') {
+              rememberOffset(off);
+            }
+          }
+        }
+      } else if (mode === 'catch_up') {
+        suppressNextClear = chunks.length > 0;
+        for (const c of chunks) {
+          if (c && typeof c === 'object' && 'data' in c) {
+            writeOutput(String((c as { data: string }).data), true);
+            const off = (c as { offset?: number }).offset;
+            if (typeof off === 'number') {
+              rememberOffset(off);
+            }
+          }
+        }
+      }
+
+      replayPhaseDone = true;
+      sendResizeDeferred();
+    }
+
     function connect() {
       if (gaveUp) return;
-      const ws = new WebSocket(terminalWsUrl(terminalId, offsetRef.current));
+      const ws = new WebSocket(terminalWsUrl(terminalId));
       wsRef.current = ws;
-      let replaySeen = false;
       let opened = false;
+      replayPhaseDone = false;
+      liveFence = 0;
 
       ws.onopen = () => {
         opened = true;
         reconnectAttempts = 0;
         sendResize();
-        ws.send(JSON.stringify({ type: 'subscribe', from_offset: offsetRef.current }));
+        // F5 recreates an empty xterm — must replay from 0, not last stored offset.
+        const fromOffset = isFirstConnect ? 0 : offsetRef.current;
+        isFirstConnect = false;
+        ws.send(
+          JSON.stringify({
+            type: 'subscribe',
+            from_offset: fromOffset,
+          }),
+        );
         sendResizeDeferred();
         resizeAfterReplayTimer = setTimeout(sendResizeDeferred, 100);
       };
@@ -160,20 +250,14 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
               `\r\n\x1b[31m${msg.message ?? 'Shell unavailable'}\x1b[0m\r\n`,
             );
             ws.close();
+          } else if (msg.type === 'replay') {
+            handleReplay(msg);
           } else if (msg.type === 'output') {
+            if (!replayPhaseDone) return;
+            const offset = typeof msg.offset === 'number' ? msg.offset : 0;
+            if (offset <= liveFence) return;
             writeOutput(msg.data);
-            offsetRef.current = msg.offset ?? offsetRef.current;
-          } else if (msg.type === 'replay' && msg.chunks) {
-            replaySeen = true;
-            clearTimeout(resizeAfterReplayTimer);
-            if (msg.has_history) {
-              suppressNextClear = true;
-            }
-            for (const c of msg.chunks) {
-              writeOutput(c.data, true);
-              offsetRef.current = c.offset;
-            }
-            sendResizeDeferred();
+            rememberOffset(offset);
           }
         } catch {
           /* ignore */
@@ -217,7 +301,6 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       const filtered = filterClientInput(text);
       if (!filtered) return false;
 
-      // Show immediately (term.input does not mirror keyboard echo).
       term.write(filtered);
 
       if (ws?.readyState === WebSocket.OPEN) {

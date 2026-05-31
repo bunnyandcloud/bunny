@@ -1,4 +1,5 @@
 use crate::buffer::CircularBuffer;
+use crate::protocol::TerminalOutput;
 use crate::sanitize::strip_probe_noise;
 use crate::scrollback;
 use anyhow::Result;
@@ -23,12 +24,14 @@ pub struct PtySession {
     pub name: String,
     pub buffer: Arc<CircularBuffer>,
     status: Arc<RwLock<TerminalStatus>>,
-    pub output_tx: broadcast::Sender<String>,
+    pub output_tx: broadcast::Sender<TerminalOutput>,
     cmd_tx: mpsc::UnboundedSender<PtyCommand>,
     child: Arc<RwLock<Box<dyn Child + Send + Sync>>>,
     /// When set, only the attach client is killed on drop; tmux window keeps running.
     pub tmux_target: Option<String>,
     scrollback_dir: Option<PathBuf>,
+    /// Disk history to replay once after agent restart (not seeded into attach buffer).
+    recovery_replay: RwLock<Option<String>>,
 }
 
 impl PtySession {
@@ -43,7 +46,7 @@ impl PtySession {
         env: HashMap<String, String>,
         buffer_lines: usize,
         scrollback_dir: Option<PathBuf>,
-        initial_scrollback: Option<String>,
+        recovery_scrollback: Option<String>,
     ) -> Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
@@ -74,7 +77,7 @@ impl PtySession {
             rows,
             buffer_lines,
             scrollback_dir,
-            initial_scrollback,
+            recovery_scrollback,
         )
     }
 
@@ -87,7 +90,7 @@ impl PtySession {
         rows: u16,
         buffer_lines: usize,
         scrollback_dir: Option<PathBuf>,
-        initial_scrollback: Option<String>,
+        recovery_scrollback: Option<String>,
     ) -> Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
@@ -118,7 +121,7 @@ impl PtySession {
             rows,
             buffer_lines,
             scrollback_dir,
-            initial_scrollback,
+            recovery_scrollback,
         )
     }
 
@@ -132,20 +135,19 @@ impl PtySession {
         _rows: u16,
         buffer_lines: usize,
         scrollback_dir: Option<PathBuf>,
-        initial_scrollback: Option<String>,
+        recovery_scrollback: Option<String>,
     ) -> Result<Self> {
         let mut reader = pair.master.try_clone_reader()?;
         let mut writer = pair.master.take_writer()?;
         let master = pair.master;
 
         let buffer = Arc::new(CircularBuffer::new(buffer_lines, 2 * 1024 * 1024));
-        if let Some(init) = initial_scrollback {
-            buffer.restore(&init);
-        }
         let (output_tx, _) = broadcast::channel(256);
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
         let status = Arc::new(RwLock::new(TerminalStatus::Running));
         let child = Arc::new(RwLock::new(child));
+
+        let recovery = recovery_scrollback.filter(|s| !s.trim().is_empty());
 
         let buffer_clone = buffer.clone();
         let output_tx_clone = output_tx.clone();
@@ -165,8 +167,11 @@ impl PtySession {
                         if chunk.is_empty() {
                             continue;
                         }
-                        buffer_clone.append(&chunk);
-                        let _ = output_tx_clone.send(chunk);
+                        let end_offset = buffer_clone.append(&chunk);
+                        let _ = output_tx_clone.send(TerminalOutput {
+                            offset: end_offset,
+                            data: chunk,
+                        });
                         if let Some(dir) = &scrollback_dir_reader {
                             if last_persist.elapsed() >= Duration::from_secs(2) {
                                 let content = buffer_clone.all_content();
@@ -220,6 +225,7 @@ impl PtySession {
             child,
             tmux_target,
             scrollback_dir,
+            recovery_replay: RwLock::new(recovery),
         })
     }
 
@@ -246,8 +252,16 @@ impl PtySession {
         Ok(())
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe(&self) -> broadcast::Receiver<TerminalOutput> {
         self.output_tx.subscribe()
+    }
+
+    pub fn take_recovery_replay(&self) -> Option<String> {
+        self.recovery_replay.write().take()
+    }
+
+    pub fn has_recovery_replay(&self) -> bool {
+        self.recovery_replay.read().is_some()
     }
 }
 
