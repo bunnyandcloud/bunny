@@ -593,20 +593,26 @@ export function browserNovncUrl(browserId: string, opts?: { viewOnly?: boolean }
   if (opts?.viewOnly) {
     params.set('view_only', '1');
     params.set('show_dot', '1');
+    params.set('bunny_lock', 'readonly');
   }
   return `/api/v1/browser-sessions/${browserId}/vnc/vnc.html?${params}`;
 }
 
-export function watchNovncUrl(token: string) {
+export function watchNovncUrl(token: string, opts?: { interactive?: boolean }) {
   const path = `api/v1/watch/${token}/vnc/ws`;
   const params = new URLSearchParams({
     autoconnect: '1',
     reconnect: '1',
     reconnect_delay: '2000',
     resize: 'scale',
-    view_only: '1',
-    show_dot: '1',
     path,
   });
+  if (opts?.interactive) {
+    params.set('bunny_lock', 'interactive');
+  } else {
+    params.set('view_only', '1');
+    params.set('show_dot', '1');
+    params.set('bunny_lock', 'readonly');
+  }
   return `/api/v1/watch/${token}/vnc/vnc.html?${params}`;
 }

@@ -586,6 +586,9 @@ pub struct StreamStartRequest {
     pub visibility: Option<String>,
     pub ttl_hours: Option<u64>,
     pub browser_url: Option<String>,
+    /// When true, watch link allows mouse/keyboard (noVNC interactive). Default: read-only.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 async fn internal_stream_start(
@@ -606,7 +609,14 @@ async fn internal_stream_start(
         &body.ctx,
         link.session_id,
         "/bunny stream_browser_start",
-        &format!("browser stream at {url}"),
+        &format!(
+            "browser stream at {url} ({})",
+            if body.interactive {
+                "interactive"
+            } else {
+                "read-only"
+            }
+        ),
         "ok",
         None,
         None,
@@ -620,6 +630,7 @@ async fn internal_stream_start(
         body.layout,
         body.visibility,
         body.ttl_hours,
+        body.interactive,
     )
     .await
 }

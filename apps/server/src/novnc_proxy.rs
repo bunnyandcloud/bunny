@@ -11,6 +11,14 @@ use std::sync::Arc;
 use tokio::fs;
 use uuid::Uuid;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NovncEmbedLock {
+    /// Force interactive mode (clears sticky noVNC view_only storage).
+    Interactive,
+    /// Force read-only; hide settings so view_only cannot be toggled.
+    ReadOnly,
+}
+
 pub async fn http_proxy(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<Uuid>,
@@ -55,6 +63,12 @@ async fn proxy_request(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let path = path.trim_start_matches('/');
+    let rel = if path.is_empty() { "vnc.html" } else { path };
+    if rel == "vnc.html" {
+        if let Some(lock) = parse_bunny_lock(req.uri().query()) {
+            return serve_locked_novnc_html(lock).await;
+        }
+    }
     if let Some(file_path) = resolve_novnc_file(path) {
         return serve_novnc_file(file_path).await;
     }
@@ -62,6 +76,75 @@ async fn proxy_request(
     // websockify only speaks WebSocket; static UI is served from disk above.
     let _ = req;
     Err(StatusCode::NOT_FOUND)
+}
+
+fn parse_bunny_lock(query: Option<&str>) -> Option<NovncEmbedLock> {
+    let query = query?;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        if key == "bunny_lock" {
+            return match value {
+                "readonly" => Some(NovncEmbedLock::ReadOnly),
+                "interactive" => Some(NovncEmbedLock::Interactive),
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+fn novnc_html_inject(lock: NovncEmbedLock) -> &'static str {
+    match lock {
+        NovncEmbedLock::Interactive => r#"
+<script>
+try { localStorage.setItem('view_only', 'false'); } catch (e) {}
+(function () {
+  function unlock() {
+    var cb = document.getElementById('noVNC_setting_view_only');
+    if (!cb) { requestAnimationFrame(unlock); return; }
+    cb.checked = false;
+    cb.disabled = false;
+  }
+  unlock();
+})();
+</script>
+"#,
+        NovncEmbedLock::ReadOnly => r#"
+<style>#noVNC_settings_button,#noVNC_settings{display:none!important}</style>
+<script>
+try { localStorage.setItem('view_only', 'true'); } catch (e) {}
+(function () {
+  function lock() {
+    var cb = document.getElementById('noVNC_setting_view_only');
+    if (!cb) { requestAnimationFrame(lock); return; }
+    cb.checked = true;
+    cb.disabled = true;
+    cb.addEventListener('change', function () { cb.checked = true; });
+  }
+  lock();
+})();
+</script>
+"#,
+    }
+}
+
+pub async fn serve_locked_novnc_html(lock: NovncEmbedLock) -> Result<Response, StatusCode> {
+    let file_path = resolve_novnc_file("vnc.html").ok_or(StatusCode::NOT_FOUND)?;
+    let mut html = fs::read_to_string(&file_path)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let inject = novnc_html_inject(lock);
+    if let Some(pos) = html.rfind("</body>") {
+        html.insert_str(pos, inject);
+    } else {
+        html.push_str(inject);
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from(html))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub(crate) fn resolve_novnc_file(path: &str) -> Option<PathBuf> {

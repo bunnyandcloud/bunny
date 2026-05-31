@@ -91,6 +91,7 @@ Headers and bodies require explicit opt-in with redaction.
 - Chromium CDP binds `127.0.0.1` only.
 - VNC and noVNC proxied through authenticated API.
 - CDP sidecar runs locally, outputs redacted JSON lines.
+- **Watch read-only (v1):** noVNC UI lock (`bunny_lock`) hides settings and forces client-side `view_only`; this does **not** block RFB input at the WebSocket proxy. See [novnc-readonly-server-enforcement](../improvements/novnc-readonly-server-enforcement.md).
 
 ## Relay mode
 

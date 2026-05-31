@@ -268,12 +268,17 @@ impl EventHandler for Handler {
                     CreateCommandOption::new(
                         CommandOptionType::SubCommand,
                         "stream_browser_start",
-                        "Start browser and post read-only watch URL",
+                        "Start browser and post watch URL (read-only by default)",
                     )
                     .add_sub_option(CreateCommandOption::new(
                         CommandOptionType::String,
                         "url",
                         "Browser URL (default: first preview port or http://127.0.0.1:3000)",
+                    ))
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::Boolean,
+                        "interactive",
+                        "Allow mouse/keyboard on the watch link (default: read-only)",
                     )),
                 )
                 .add_option(CreateCommandOption::new(
@@ -560,11 +565,18 @@ async fn handle_command(
             if let Some(url) = opt_str(&sub_opts, "url") {
                 body["browser_url"] = serde_json::json!(url);
             }
+            if let Some(interactive) = opt_bool(&sub_opts, "interactive") {
+                body["interactive"] = serde_json::json!(interactive);
+            }
             let res = bunny.post_json("/stream/start", &body).await?;
             let url = res.get("watch_url").and_then(|v| v.as_str()).unwrap_or("?");
-            Ok(CommandReply::Text(format!(
-                "Browser started. Live read-only watch:\n{url}"
-            )))
+            let mode = res.get("mode").and_then(|v| v.as_str()).unwrap_or("read_only");
+            let label = if mode == "interactive" {
+                "Interactive watch (read + write)"
+            } else {
+                "Live read-only watch"
+            };
+            Ok(CommandReply::Text(format!("Browser started. {label}:\n{url}")))
         }
         "stream_stop" => {
             bunny.post_json("/stream/stop", bridge_ctx).await?;
@@ -622,6 +634,15 @@ fn opt_str<'a>(opts: &'a [serenity::all::CommandDataOption], name: &str) -> Opti
         .find(|o| o.name == name)
         .and_then(|o| match &o.value {
             CommandDataOptionValue::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+}
+
+fn opt_bool(opts: &[serenity::all::CommandDataOption], name: &str) -> Option<bool> {
+    opts.iter()
+        .find(|o| o.name == name)
+        .and_then(|o| match &o.value {
+            CommandDataOptionValue::Boolean(b) => Some(*b),
             _ => None,
         })
 }

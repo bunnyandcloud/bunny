@@ -20,6 +20,7 @@ pub struct WatchLinkResponse {
     pub expires_at: String,
     pub layout: String,
     pub visibility: String,
+    pub mode: String,
 }
 
 pub async fn create_watch_link(
@@ -30,9 +31,15 @@ pub async fn create_watch_link(
     layout: Option<String>,
     visibility: Option<String>,
     ttl_hours: Option<u64>,
+    interactive: bool,
 ) -> Result<Json<WatchLinkResponse>, ApiError> {
     let token = Uuid::new_v4().simple().to_string();
     let ttl = ttl_hours.unwrap_or(1).max(1);
+    let mode = if interactive {
+        "interactive"
+    } else {
+        "read_only"
+    };
     let watch = WatchSession {
         id: Uuid::new_v4(),
         token: token.clone(),
@@ -42,7 +49,7 @@ pub async fn create_watch_link(
         thread_id: ctx.thread_id.clone(),
         layout: layout.unwrap_or_else(|| "full".into()),
         visibility: visibility.unwrap_or_else(|| "channel".into()),
-        mode: "read_only".into(),
+        mode: mode.into(),
         status: "active".into(),
         required_role_ids: vec![],
         browser_id: Some(browser_id),
@@ -67,6 +74,7 @@ pub async fn create_watch_link(
         expires_at: watch.expires_at.to_rfc3339(),
         layout: watch.layout,
         visibility: watch.visibility,
+        mode: watch.mode,
     }))
 }
 
@@ -189,8 +197,19 @@ pub async fn watch_novnc_http(
     State(state): State<Arc<AppState>>,
     Path((token, path)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    let _watch = resolve_active_watch(&state, &token)?;
+    let watch = resolve_active_watch(&state, &token)?;
     let path = path.trim_start_matches('/');
+    let rel = if path.is_empty() { "vnc.html" } else { path };
+    if rel == "vnc.html" {
+        let lock = if watch.mode == "interactive" {
+            novnc_proxy::NovncEmbedLock::Interactive
+        } else {
+            novnc_proxy::NovncEmbedLock::ReadOnly
+        };
+        return novnc_proxy::serve_locked_novnc_html(lock)
+            .await
+            .map_err(|_| ApiError::not_found("noVNC asset"));
+    }
     if let Some(file_path) = novnc_proxy::resolve_novnc_file(path) {
         return novnc_proxy::serve_novnc_file(file_path)
             .await

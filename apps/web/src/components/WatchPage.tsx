@@ -6,6 +6,8 @@ export default function WatchPage({ token }: { token: string }) {
   const [error, setError] = useState('');
   const [browserId, setBrowserId] = useState<string | null>(null);
 
+  const interactive = meta?.mode === 'interactive';
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -44,7 +46,12 @@ export default function WatchPage({ token }: { token: string }) {
     <div className="min-h-screen bg-bunny-bg text-gray-200 flex flex-col">
       <header className="border-b border-bunny-border px-4 py-2 flex items-center justify-between text-sm shrink-0">
         <span>
-          Bunny watch · layout <strong>{meta.layout}</strong> · read-only
+          Bunny watch · layout <strong>{meta.layout}</strong> ·{' '}
+          {interactive ? (
+            <strong className="text-amber-300">interactive</strong>
+          ) : (
+            'read-only'
+          )}
         </span>
         <span className="text-bunny-muted text-xs">
           expires {new Date(meta.expires_at).toLocaleString()}
@@ -54,7 +61,7 @@ export default function WatchPage({ token }: { token: string }) {
         {browserId ? (
           <iframe
             title="Bunny watch"
-            src={watchNovncUrl(token)}
+            src={watchNovncUrl(token, { interactive })}
             className="absolute inset-0 w-full h-full border-0"
           />
         ) : (
