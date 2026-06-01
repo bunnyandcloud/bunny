@@ -73,6 +73,9 @@ pub struct AuthFlow {
 }
 
 fn store_oauth_url(auth: &mut AuthFlow, url: String, redirect_port: u16) {
+    let Some(url) = sanitize_oauth_authorize_url(&url) else {
+        return;
+    };
     if auth.oauth_url.as_deref() == Some(url.as_str()) {
         return;
     }
@@ -248,7 +251,8 @@ fn strip_ansi(text: &str) -> String {
 }
 
 fn is_oauth_url_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c)
+    // Exclude `[` `]` `"` — terminal JSON/debug lines must not be merged into the URL.
+    c.is_ascii_alphanumeric() || "-._~:/?#@!$&'()*+,;=%".contains(c)
 }
 
 /// Parse OAuth URL from terminal output, including when the TUI wraps across lines.
@@ -256,9 +260,76 @@ pub fn extract_oauth_url(text: &str) -> Option<String> {
     let text = strip_ansi(text);
     let start = OAUTH_PREFIXES.iter().filter_map(|p| text.find(p)).min()?;
     let tail = &text[start..];
-    let url: String = tail.chars().filter(|c| is_oauth_url_char(*c)).collect();
-    if oauth_url_is_complete(&url) {
-        Some(url)
+    let mut url = String::new();
+    for line in tail.lines() {
+        let part = line.trim();
+        if url.is_empty() {
+            if !OAUTH_PREFIXES.iter().any(|p| part.starts_with(p)) {
+                continue;
+            }
+            url.push_str(part);
+        } else if part.starts_with('&')
+            || part.starts_with('%')
+            || (!part.is_empty()
+                && !part.contains(' ')
+                && part.chars().all(is_oauth_url_char))
+        {
+            url.push_str(part);
+        } else {
+            break;
+        }
+        if oauth_url_is_complete(&url) {
+            break;
+        }
+    }
+    sanitize_oauth_authorize_url(&url)
+}
+
+/// Rebuild authorize URL with one value per query key (fixes duplicated / JSON-corrupted params).
+pub fn sanitize_oauth_authorize_url(url: &str) -> Option<String> {
+    if !OAUTH_PREFIXES.iter().any(|p| url.starts_with(p)) {
+        return None;
+    }
+    if url.contains('[') || url.contains('"') {
+        return None;
+    }
+    let (base, query) = url.split_once('?')?;
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    for segment in query.split('&') {
+        if segment.is_empty() {
+            continue;
+        }
+        let (key, value) = segment.split_once('=')?;
+        if key.is_empty() || key.contains('[') || value.contains('[') || value.contains('"') {
+            continue;
+        }
+        if pairs.iter().any(|(k, _)| *k == key) {
+            continue;
+        }
+        if key == "response_type" && value != "code" {
+            continue;
+        }
+        if key == "client_id"
+            && (value.len() > 64 || !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        {
+            continue;
+        }
+        pairs.push((key, value));
+    }
+    let has_scope = pairs.iter().any(|(k, _)| *k == "scope");
+    let has_client = pairs.iter().any(|(k, _)| *k == "client_id");
+    let has_redirect = pairs.iter().any(|(k, _)| *k == "redirect_uri");
+    if !has_scope || !has_client || !has_redirect {
+        return None;
+    }
+    let query = pairs
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let clean = format!("{base}?{query}");
+    if oauth_url_is_complete(&clean) {
+        Some(clean)
     } else {
         None
     }
@@ -266,10 +337,12 @@ pub fn extract_oauth_url(text: &str) -> Option<String> {
 
 /// Claude Code OAuth must include `scope` (and usually `state`).
 pub fn oauth_url_is_complete(url: &str) -> bool {
-    url.starts_with("https://claude.com/cai/oauth/authorize")
+    OAUTH_PREFIXES.iter().any(|p| url.starts_with(p))
         && url.contains("scope=")
         && url.contains("client_id=")
         && url.contains("redirect_uri=")
+        && !url.contains('[')
+        && !url.contains('"')
 }
 
 pub fn oauth_redirect_path(token: Uuid) -> String {
@@ -640,6 +713,26 @@ mod tests {
         assert!(url.contains("scope="));
         assert!(url.contains("client_id=abc"));
         assert!(!url.contains('\n'));
+        assert!(!url.contains('['));
+    }
+
+    #[test]
+    fn rejects_json_corruption_in_terminal() {
+        let text = r#"https://claude.ai/oauth/authorize?code=true&client_id=["9d1c250a-e61b-44d9-88ed-5944d1962f5e"]&response_type=["code","code","code"]&scope=user%3Aprofile&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=xyz"#;
+        assert!(extract_oauth_url(text).is_none());
+    }
+
+    #[test]
+    fn sanitize_dedupes_response_type() {
+        let raw = "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&response_type=code&scope=user%3Aprofile&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=xyz";
+        let url = sanitize_oauth_authorize_url(raw).expect("url");
+        assert_eq!(url.matches("response_type=").count(), 1);
+    }
+
+    #[test]
+    fn accepts_claude_ai_authorize_prefix() {
+        let raw = "https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&scope=user%3Aprofile&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=xyz";
+        assert!(sanitize_oauth_authorize_url(raw).is_some());
     }
 
     #[test]
