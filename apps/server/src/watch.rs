@@ -78,20 +78,74 @@ pub async fn create_watch_link(
     }))
 }
 
-pub fn stop_watch_for_channel(state: &AppState, guild_id: &str, channel_id: &str) -> Result<bool, ApiError> {
-    if let Some(w) = state
-        .discord
-        .lock()
-        .active_watch_for_channel(guild_id, channel_id)
-        .map_err(|e| ApiError::validation(&e.to_string()))?
-    {
-        return state
-            .discord
-            .lock()
-            .stop_watch(&w.token)
-            .map_err(|e| ApiError::validation(&e.to_string()));
+pub fn parse_watch_token_from_url(input: &str) -> Result<String, ApiError> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err(ApiError::validation("watch URL is empty"));
     }
-    Ok(false)
+    if let Some(token) = extract_watch_token_from_path(input) {
+        return Ok(token);
+    }
+    if let Some(idx) = input.find("/watch/") {
+        let rest = &input[idx + "/watch/".len()..];
+        if let Some(token) = token_from_watch_suffix(rest) {
+            return Ok(token);
+        }
+    }
+    Err(ApiError::validation(
+        "invalid watch URL: expected .../watch/<token>",
+    ))
+}
+
+fn extract_watch_token_from_path(path: &str) -> Option<String> {
+    let path = path.split(['?', '#']).next()?;
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let pos = segments.iter().position(|s| *s == "watch")?;
+    token_from_watch_suffix(segments.get(pos + 1)?.trim())
+}
+
+fn token_from_watch_suffix(suffix: &str) -> Option<String> {
+    let token = suffix.split('/').next()?.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
+pub fn stop_browser_streams(
+    state: &AppState,
+    guild_id: &str,
+    channel_id: &str,
+    watch_url: Option<&str>,
+) -> Result<u32, ApiError> {
+    let tokens = {
+        let db = state.discord.lock();
+        if let Some(url) = watch_url {
+            let token = parse_watch_token_from_url(url)?;
+            let watch = db
+                .get_watch_by_token(&token)
+                .map_err(|e| ApiError::validation(&e.to_string()))?
+                .ok_or_else(|| ApiError::not_found("watch session"))?;
+            if watch.guild_id != guild_id || watch.channel_id != channel_id {
+                return Err(ApiError::forbidden(
+                    "watch URL does not belong to this channel",
+                ));
+            }
+            db.stop_watch(&token)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            vec![token]
+        } else {
+            let tokens = db
+                .active_watch_tokens_for_channel(guild_id, channel_id)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            db.stop_all_watches_for_channel(guild_id, channel_id)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            tokens
+        }
+    };
+    state.watch_hub.revoke_many(&tokens);
+    Ok(tokens.len() as u32)
 }
 
 pub async fn get_watch_meta(
@@ -229,5 +283,35 @@ pub async fn watch_novnc_ws(
         .browsers
         .get_novnc_port(browser_id)
         .ok_or_else(|| ApiError::not_found("browser session"))?;
-    Ok(ws.on_upgrade(move |socket| ws::handle_novnc_proxy(socket, novnc_port)))
+    let revoked_rx = state.watch_hub.subscribe(&token);
+    Ok(ws.on_upgrade(move |socket| {
+        let revoked = crate::watch_hub::WatchHub::revoked_flag(revoked_rx);
+        ws::handle_novnc_proxy(socket, novnc_port, Some(revoked))
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_watch_token_from_url;
+
+    #[test]
+    fn parse_watch_token_from_full_url() {
+        let token = parse_watch_token_from_url("http://127.0.0.1:7681/watch/abc123def456");
+        assert!(token.is_ok());
+        assert_eq!(token.ok(), Some("abc123def456".to_string()));
+    }
+
+    #[test]
+    fn parse_watch_token_from_path() {
+        let token = parse_watch_token_from_url("/watch/abc123def456");
+        assert!(token.is_ok());
+        assert_eq!(token.ok(), Some("abc123def456".to_string()));
+    }
+
+    #[test]
+    fn parse_watch_token_strips_query() {
+        let token = parse_watch_token_from_url("https://host/watch/abc123?autoconnect=1");
+        assert!(token.is_ok());
+        assert_eq!(token.ok(), Some("abc123".to_string()));
+    }
 }

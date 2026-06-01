@@ -10,19 +10,28 @@ export default function WatchPage({ token }: { token: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    const load = async () => {
       try {
         const m = await getWatchMeta(token);
         if (cancelled) return;
         setMeta(m);
         setBrowserId(m.browser_ids[0] ?? null);
+        setError('');
         await grantWatchAccess(token, {});
       } catch (e) {
-        if (!cancelled) setError(apiErrorMessage(e, 'Cannot open watch session'));
+        if (!cancelled) setError(apiErrorMessage(e, 'Watch stream ended or unavailable'));
       }
-    })();
+    };
+
+    void load();
+    const poll = window.setInterval(() => {
+      void load();
+    }, 2000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(poll);
     };
   }, [token]);
 

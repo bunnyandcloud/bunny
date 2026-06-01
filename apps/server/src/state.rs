@@ -1,6 +1,7 @@
 use crate::cdp_collector::CdpCollectorHandle;
 use crate::claude::{AuthFlow, InstallState};
 use crate::realtime::RealtimeHub;
+use crate::watch_hub::WatchHub;
 use anyhow::Result;
 use bunny_auth::AuthService;
 use bunny_discord::DiscordDb;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub browser_sessions: RwLock<HashMap<Uuid, Uuid>>,
     pub cdp_collectors: RwLock<HashMap<Uuid, CdpCollectorHandle>>,
     pub realtime: Arc<RealtimeHub>,
+    pub watch_hub: Arc<WatchHub>,
     pub timeline_seq: AtomicU64,
     pub data_dir: String,
     pub secrets: Mutex<SecretsVault>,
@@ -123,6 +125,7 @@ impl AppState {
             browser_sessions: RwLock::new(HashMap::new()),
             cdp_collectors: RwLock::new(HashMap::new()),
             realtime: Arc::new(RealtimeHub::new()),
+            watch_hub: Arc::new(WatchHub::new()),
             timeline_seq: AtomicU64::new(0),
             data_dir: data_dir.clone(),
             config,

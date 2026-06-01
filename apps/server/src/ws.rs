@@ -4,6 +4,7 @@ use bunny_pty::protocol::{ReplayChunk, ReplayMode, TerminalClientMsg, TerminalSe
 use bunny_pty::tmux;
 use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio_tungstenite::{connect_async, tungstenite::Message as UpstreamMessage};
 use uuid::Uuid;
@@ -317,12 +318,20 @@ fn fetch_timeline_since(
 }
 
 /// Bidirectional proxy: browser noVNC client ↔ local websockify (Chromium desktop).
-pub async fn handle_novnc_proxy(socket: WebSocket, novnc_port: u16) {
+pub async fn handle_novnc_proxy(
+    socket: WebSocket,
+    novnc_port: u16,
+    revoked: Option<Arc<AtomicBool>>,
+) {
     let upstream_url = format!("ws://127.0.0.1:{novnc_port}/");
-    proxy_websocket(socket, upstream_url).await;
+    proxy_websocket(socket, upstream_url, revoked).await;
 }
 
-pub async fn proxy_websocket(socket: WebSocket, upstream_url: String) {
+pub async fn proxy_websocket(
+    socket: WebSocket,
+    upstream_url: String,
+    revoked: Option<Arc<AtomicBool>>,
+) {
     let Ok((upstream, _)) = connect_async(&upstream_url).await else {
         return;
     };
@@ -332,6 +341,12 @@ pub async fn proxy_websocket(socket: WebSocket, upstream_url: String) {
 
     let client_to_upstream = async {
         while let Some(msg) = client_rx.next().await {
+            if revoked
+                .as_ref()
+                .is_some_and(|f| f.load(Ordering::SeqCst))
+            {
+                break;
+            }
             let Ok(msg) = msg else { break };
             let upstream_msg = match msg {
                 Message::Text(text) => UpstreamMessage::Text(text),
@@ -357,6 +372,15 @@ pub async fn proxy_websocket(socket: WebSocket, upstream_url: String) {
 
     let upstream_to_client = async {
         while let Some(msg) = upstream_rx.next().await {
+            if revoked
+                .as_ref()
+                .is_some_and(|f| f.load(Ordering::SeqCst))
+            {
+                let _ = client_tx
+                    .send(Message::Close(None))
+                    .await;
+                break;
+            }
             let Ok(msg) = msg else { break };
             let client_msg = match msg {
                 UpstreamMessage::Text(text) => Message::Text(text),
@@ -383,9 +407,20 @@ pub async fn proxy_websocket(socket: WebSocket, upstream_url: String) {
         }
     };
 
+    let revoke_wait = async {
+        if let Some(flag) = &revoked {
+            while !flag.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        } else {
+            std::future::pending::<()>().await
+        }
+    };
+
     tokio::select! {
         () = client_to_upstream => {}
         () = upstream_to_client => {}
+        () = revoke_wait => {}
     }
 }
 

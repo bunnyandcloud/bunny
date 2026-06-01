@@ -576,10 +576,33 @@ impl DiscordDb {
 
     pub fn stop_watch(&self, token: &str) -> Result<bool> {
         let n = self.conn.execute(
-            "UPDATE watch_sessions SET status = 'stopped' WHERE token = ?1",
+            "UPDATE watch_sessions SET status = 'stopped' WHERE token = ?1 AND status = 'active'",
             params![token],
         )?;
         Ok(n > 0)
+    }
+
+    pub fn active_watch_tokens_for_channel(
+        &self,
+        guild_id: &str,
+        channel_id: &str,
+    ) -> Result<Vec<String>> {
+        let now = Utc::now().to_rfc3339();
+        let mut stmt = self.conn.prepare(
+            "SELECT token FROM watch_sessions WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active' AND expires_at > ?3",
+        )?;
+        let tokens = stmt
+            .query_map(params![guild_id, channel_id, now], |r| r.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(tokens)
+    }
+
+    pub fn stop_all_watches_for_channel(&self, guild_id: &str, channel_id: &str) -> Result<u32> {
+        let n = self.conn.execute(
+            "UPDATE watch_sessions SET status = 'stopped' WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
+            params![guild_id, channel_id],
+        )?;
+        Ok(n as u32)
     }
 
     pub fn active_watch_for_channel(&self, guild_id: &str, channel_id: &str) -> Result<Option<WatchSession>> {

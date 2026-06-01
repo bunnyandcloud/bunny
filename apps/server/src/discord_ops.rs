@@ -635,14 +635,27 @@ async fn internal_stream_start(
     .await
 }
 
+#[derive(Deserialize)]
+pub struct StreamStopRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    /// Full watch URL (`.../watch/<token>`) or path; stops only that link when set.
+    pub url: Option<String>,
+}
+
 async fn internal_stream_stop(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<BridgeContext>,
+    Json(body): Json<StreamStopRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     verify_bridge_token(&state, &headers)?;
-    let stopped = watch::stop_watch_for_channel(&state, &body.guild_id, &body.channel_id)?;
-    Ok(Json(serde_json::json!({ "ok": stopped })))
+    let stopped = watch::stop_browser_streams(
+        &state,
+        &body.ctx.guild_id,
+        &body.ctx.channel_id,
+        body.url.as_deref(),
+    )?;
+    Ok(Json(serde_json::json!({ "stopped": stopped })))
 }
 
 async fn internal_stream_status(

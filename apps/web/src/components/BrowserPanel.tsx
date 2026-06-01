@@ -17,16 +17,15 @@ function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
 }
 
-/** Stack (Xvfb → Chromium → x11vnc → websockify) needs a few seconds before noVNC can connect. */
-async function waitForBrowserStack(browserId: string) {
-  const deadline = Date.now() + 20_000;
+/** Poll until websockify accepts TCP (server sets novncReady). */
+async function waitForBrowserNovncReady(browserId: string, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const info = await getBrowser(browserId);
-    if (info.novncPort != null) {
-      await new Promise((r) => setTimeout(r, 2500));
+    if (info.novncPort != null && info.novncReady) {
       return;
     }
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error('Le navigateur distant met trop de temps à démarrer — clique Recharger.');
 }
@@ -40,21 +39,25 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
   const targetUrl = `http://127.0.0.1:${targetPort}`;
   const initStarted = useRef(false);
 
+  const showBrowser = useCallback((id: string) => {
+    setBrowserId(id);
+    sessionStorage.setItem(browserStorageKey(sessionId), id);
+    setReloadKey((k) => k + 1);
+  }, [sessionId]);
+
   const startBrowser = useCallback(async () => {
     setStarting(true);
     setError(null);
     try {
       const created = await createBrowser(sessionId, targetUrl);
-      setBrowserId(created.id);
-      sessionStorage.setItem(browserStorageKey(sessionId), created.id);
-      await waitForBrowserStack(created.id);
-      setReloadKey((k) => k + 1);
+      await waitForBrowserNovncReady(created.id);
+      showBrowser(created.id);
     } catch (e) {
       setError(String(e));
     } finally {
       setStarting(false);
     }
-  }, [sessionId, targetUrl]);
+  }, [sessionId, targetUrl, showBrowser]);
 
   const ensureBrowser = useCallback(async () => {
     setStarting(true);
@@ -62,9 +65,14 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
     const stored = sessionStorage.getItem(browserStorageKey(sessionId));
     if (stored) {
       try {
-        await waitForBrowserStack(stored);
-        setBrowserId(stored);
-        setReloadKey((k) => k + 1);
+        const info = await getBrowser(stored);
+        if (info.novncPort != null && info.novncReady) {
+          showBrowser(stored);
+          setStarting(false);
+          return;
+        }
+        await waitForBrowserNovncReady(stored);
+        showBrowser(stored);
         setStarting(false);
         return;
       } catch {
@@ -72,7 +80,7 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
       }
     }
     await startBrowser();
-  }, [sessionId, startBrowser]);
+  }, [sessionId, startBrowser, showBrowser]);
 
   const reloadBrowser = useCallback(async () => {
     if (!browserId) {
@@ -83,7 +91,7 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
     setError(null);
     try {
       await restartBrowser(browserId, sessionId, targetUrl);
-      await waitForBrowserStack(browserId);
+      await waitForBrowserNovncReady(browserId);
       setReloadKey((k) => k + 1);
     } catch (e) {
       setError(String(e));
@@ -166,7 +174,8 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-bunny-muted text-sm px-6 text-center">
             <p>Démarrage de Chromium sur le serveur…</p>
             <p className="text-xs text-bunny-muted/80">
-              Premier lancement : ~5 s (Xvfb + Chromium + noVNC). Ensuite c’est plus rapide.
+              Premier lancement : quelques secondes (Xvfb + noVNC, puis Chromium). Les
+              onglets suivants réutilisent le même navigateur.
             </p>
           </div>
         )}

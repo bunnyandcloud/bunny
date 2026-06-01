@@ -64,6 +64,7 @@ cargo run -p bunny-discord-bridge
 | `/bunny shell_close` | Close shell (`shell:` required if multiple) |
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) |
 | `/bunny stream_browser_start` | Start browser + watch URL (optional `url:`; `interactive:true` for read+write) |
+| `/bunny stream_browser_stop` | Stop browser watch stream(s) in this channel (optional `url:` for one link) |
 | `/bunny ask/plan/do` | Claude agent task |
 | `/bunny stop` | Cancel task |
 
@@ -72,6 +73,8 @@ cargo run -p bunny-discord-bridge
 `/bunny stream_browser_start` starts headless Chromium if needed, then returns a URL like `https://host/watch/<token>`. By default the watch page is **read-only** (noVNC `view_only`). Pass **`interactive:true`** to allow mouse and keyboard on the shared link — anyone with the URL can control the browser until the link expires.
 
 **Security:** only use `interactive:true` when you intend to grant remote control via the watch link. Read-only links use a locked noVNC profile (settings hidden, `view_only` forced in the embedded UI). This stops casual bypass via noVNC settings; **server-side RFB input blocking** is not implemented yet — see [novnc-readonly-server-enforcement](../improvements/novnc-readonly-server-enforcement.md).
+
+`/bunny stream_browser_stop` revokes watch link(s) for the **current Discord channel** (interactive and read-only alike). Without `url:`, **all** active watch tokens for that channel are stopped. With `url:` set to a watch URL from `stream_browser_start`, only that token is revoked (the URL must belong to the same channel). Open watch pages disconnect their noVNC WebSocket immediately; the watch shell polls every 2s and shows an error without requiring a manual refresh. Chromium keeps running; only the public `/watch/:token` access is invalidated.
 
 ## Security
 

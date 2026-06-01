@@ -1154,9 +1154,11 @@ async fn get_browser(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let novnc = state.browsers.get_novnc_port(id);
     let cdp = state.browsers.get_cdp_port(id);
+    let novnc_ready = novnc.is_some_and(bunny_browser::stack::tcp_port_open);
     Ok(Json(serde_json::json!({
         "id": id,
         "novncPort": novnc,
+        "novncReady": novnc_ready,
         "cdpPort": cdp,
         "webrtcOfferPath": format!("/api/v1/browser-sessions/{id}/webrtc/offer"),
     })))
@@ -1254,7 +1256,7 @@ async fn browser_novnc_ws(
         .browsers
         .get_novnc_port(id)
         .ok_or_else(|| ApiError::not_found("browser session"))?;
-    Ok(ws.on_upgrade(move |socket| ws::handle_novnc_proxy(socket, novnc_port)))
+    Ok(ws.on_upgrade(move |socket| ws::handle_novnc_proxy(socket, novnc_port, None)))
 }
 
 async fn browser_webrtc_stop(

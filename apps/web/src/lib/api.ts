@@ -455,6 +455,7 @@ export function getBrowser(browserId: string) {
   return api<{
     id: string;
     novncPort: number | null;
+    novncReady: boolean;
     cdpPort: number | null;
     webrtcOfferPath: string;
   }>(`/browser-sessions/${browserId}`);

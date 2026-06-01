@@ -169,7 +169,7 @@ async fn proxy_handler(
             format!("ws://127.0.0.1:{port}/{path}")
         };
         return Ok(upgrade
-            .on_upgrade(move |socket| ws::proxy_websocket(socket, ws_upstream))
+            .on_upgrade(move |socket| ws::proxy_websocket(socket, ws_upstream, None))
             .into_response());
     }
 

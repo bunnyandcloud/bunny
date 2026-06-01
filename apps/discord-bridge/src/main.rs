@@ -281,11 +281,18 @@ impl EventHandler for Handler {
                         "Allow mouse/keyboard on the watch link (default: read-only)",
                     )),
                 )
-                .add_option(CreateCommandOption::new(
-                    CommandOptionType::SubCommand,
-                    "stream_stop",
-                    "Stop watch",
-                ))
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "stream_browser_stop",
+                        "Stop browser watch stream(s) for this channel",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "url",
+                        "Watch URL to stop (default: all active streams in this channel)",
+                    )),
+                )
                 .add_option(CreateCommandOption::new(
                     CommandOptionType::SubCommand,
                     "stream_status",
@@ -578,9 +585,27 @@ async fn handle_command(
             };
             Ok(CommandReply::Text(format!("Browser started. {label}:\n{url}")))
         }
-        "stream_stop" => {
-            bunny.post_json("/stream/stop", bridge_ctx).await?;
-            Ok(CommandReply::Text("Watch stream stopped.".into()))
+        "stream_browser_stop" => {
+            let watch_url = opt_str(&sub_opts, "url");
+            let mut body = bridge_ctx.clone();
+            if let Some(url) = watch_url {
+                body["url"] = serde_json::json!(url);
+            }
+            let res = bunny.post_json("/stream/stop", &body).await?;
+            let stopped = res.get("stopped").and_then(|v| v.as_u64()).unwrap_or(0);
+            if watch_url.is_some() {
+                Ok(CommandReply::Text(if stopped > 0 {
+                    "Watch stream stopped.".into()
+                } else {
+                    "No matching active watch stream for that URL.".into()
+                }))
+            } else if stopped > 0 {
+                Ok(CommandReply::Text(format!(
+                    "Stopped {stopped} browser watch stream(s)."
+                )))
+            } else {
+                Ok(CommandReply::Text("No active browser watch streams.".into()))
+            }
         }
         "stream_status" => {
             let q = query_ctx(bridge_ctx);

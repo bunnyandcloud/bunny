@@ -18,6 +18,7 @@ mod state;
 mod task_runner;
 mod terminals;
 mod watch;
+mod watch_hub;
 mod web_ui;
 mod webrtc;
 mod ws;

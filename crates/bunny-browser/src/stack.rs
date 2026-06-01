@@ -1,7 +1,9 @@
 use anyhow::Result;
 use bunny_core::types::BrowserStatus;
 use serde::{Deserialize, Serialize};
+use std::net::{SocketAddr, TcpStream};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +35,14 @@ impl BrowserStack {
         info!(%x11_display, cdp_port, vnc_port, novnc_port, "starting browser stack");
 
         spawn_xvfb(&x11_display, config.width, config.height)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        wait_for_xvfb(&x11_display, Duration::from_secs(5))?;
+
+        // noVNC can connect as soon as Xvfb + VNC + websockify are up; Chromium may still be loading.
+        spawn_vnc(&x11_display, vnc_port);
+        spawn_websockify(vnc_port, novnc_port);
+        if !wait_for_tcp_port(novnc_port, Duration::from_secs(8)) {
+            warn!(novnc_port, "websockify not accepting connections yet");
+        }
 
         let profile_dir = config.profile_dir.clone();
         spawn_chromium(
@@ -45,10 +54,6 @@ impl BrowserStack {
             config.ephemeral_profile,
             profile_dir.as_deref(),
         )?;
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-        spawn_vnc(&x11_display, vnc_port);
-        spawn_websockify(vnc_port, novnc_port);
-        std::thread::sleep(std::time::Duration::from_millis(800));
 
         Ok(Self {
             x11_display,
@@ -250,6 +255,52 @@ fn spawn_websockify(vnc_port: u16, listen_port: u16) -> Option<()> {
             None
         }
     }
+}
+
+fn xvfb_lock_path(display: &str) -> Option<std::path::PathBuf> {
+    let n = display.strip_prefix(':')?;
+    Some(std::path::PathBuf::from(format!("/tmp/.X{n}-lock")))
+}
+
+fn wait_for_xvfb(display: &str, timeout: Duration) -> Result<()> {
+    let lock = xvfb_lock_path(display);
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if lock.as_ref().is_some_and(|p| p.exists()) && x11_display_ready(display) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    anyhow::bail!("Xvfb display {display} did not become ready in time");
+}
+
+fn x11_display_ready(display: &str) -> bool {
+    match Command::new("xdpyinfo")
+        .env("DISPLAY", display)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(s) if s.success() => true,
+        Ok(_) => false,
+        Err(_) => true,
+    }
+}
+
+pub fn tcp_port_open(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(80)).is_ok()
+}
+
+fn wait_for_tcp_port(port: u16, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if tcp_port_open(port) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    false
 }
 
 fn pick_port(preferred: u16) -> Result<u16> {
