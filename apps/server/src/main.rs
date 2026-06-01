@@ -5,6 +5,7 @@ mod claude;
 mod cli;
 mod config_init;
 mod compositor;
+mod discord_claude;
 mod discord_follow;
 mod discord_ops;
 mod middleware;

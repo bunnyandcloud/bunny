@@ -2082,6 +2082,12 @@ impl ApiError {
     pub(crate) fn validation(msg: &str) -> Self { Self { status: StatusCode::BAD_REQUEST, code: "VALIDATION_ERROR".into(), message: msg.into() } }
 }
 
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
         ApiError::validation(&e.to_string())

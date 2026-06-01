@@ -141,6 +141,14 @@ impl DiscordDb {
             "ALTER TABLE watch_sessions ADD COLUMN browser_id TEXT",
             [],
         );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_session_links ADD COLUMN last_shell_name TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_session_links ADD COLUMN claude_session_id TEXT",
+            [],
+        );
         Ok(())
     }
 
@@ -213,6 +221,55 @@ impl DiscordDb {
             params![guild_id, channel_id],
         )?;
         Ok(n > 0)
+    }
+
+    pub fn get_last_shell_name(&self, guild_id: &str, channel_id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT last_shell_name FROM discord_session_links WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
+                params![guild_id, channel_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+            .map(|opt| opt.flatten().filter(|s| !s.is_empty()))
+    }
+
+    pub fn set_last_shell_name(&self, guild_id: &str, channel_id: &str, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_session_links SET last_shell_name = ?1 WHERE guild_id = ?2 AND channel_id = ?3",
+            params![name, guild_id, channel_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_claude_session_id(
+        &self,
+        guild_id: &str,
+        channel_id: &str,
+    ) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT claude_session_id FROM discord_session_links WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
+                params![guild_id, channel_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+            .map(|opt| opt.flatten().filter(|s| !s.is_empty()))
+    }
+
+    pub fn set_claude_session_id(
+        &self,
+        guild_id: &str,
+        channel_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_session_links SET claude_session_id = ?1 WHERE guild_id = ?2 AND channel_id = ?3",
+            params![session_id, guild_id, channel_id],
+        )?;
+        Ok(())
     }
 
     pub fn get_session_link(&self, guild_id: &str, channel_id: &str) -> Result<Option<DiscordSessionLink>> {

@@ -23,4 +23,5 @@ serenity = { version = "0.12", default-features = false, features = [
     "gateway",
     "rustls_backend",
     "model",
+    "builder",
 ] }

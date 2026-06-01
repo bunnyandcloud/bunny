@@ -31,3 +31,15 @@ pub fn classify_command_risk(cmd: &str) -> &'static str {
 pub fn requires_approval(cmd: &str) -> bool {
     classify_command_risk(cmd) != "safe"
 }
+
+/// Commands that need a real TTY — cannot run via Discord `/bunny run` (non-interactive).
+pub fn is_interactive_discord_command(cmd: &str) -> bool {
+    let lower = cmd.trim().to_lowercase();
+    let first = lower.split_whitespace().next().unwrap_or("");
+    (matches!(
+        first,
+        "nvim" | "vim" | "vi" | "nano" | "emacs" | "less" | "more" | "man" | "htop" | "top"
+            | "btop" | "claude" | "ssh" | "mysql" | "psql"
+    ) && !lower.contains(" -c "))
+        || lower.starts_with("sudo ")
+}

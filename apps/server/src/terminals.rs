@@ -525,6 +525,76 @@ pub fn ensure_session_terminals_live(state: &Arc<AppState>, session_id: Uuid) {
     }
 }
 
+/// Max file size sent to Discord as an attachment (Discord allows up to 25 MB; stay under).
+pub const DISCORD_FILE_ATTACHMENT_MAX: u64 = 24 * 1024 * 1024;
+
+/// Read a file relative to the shell cwd for Discord attachment download.
+pub fn read_discord_shell_file(
+    state: &AppState,
+    term_id: Uuid,
+    relative_path: &str,
+    max_bytes: u64,
+) -> Result<(String, Vec<u8>)> {
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    let cwd = if state.terminals.uses_tmux() {
+        resolve_tmux_target(state, &record)?
+            .and_then(|t| tmux::pane_cwd(&t))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&record.cwd))
+    } else {
+        PathBuf::from(&record.cwd)
+    };
+
+    let path = resolve_discord_file_path(&cwd, relative_path)?;
+    let meta = std::fs::metadata(&path)?;
+    if !meta.is_file() {
+        anyhow::bail!("not a file: {}", path.display());
+    }
+    let size = meta.len();
+    if size > max_bytes {
+        anyhow::bail!(
+            "file too large for Discord ({size} bytes, max {max_bytes}) — open it in the Web UI terminal"
+        );
+    }
+    let bytes = std::fs::read(&path)?;
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    Ok((filename, bytes))
+}
+
+fn resolve_discord_file_path(cwd: &Path, user_path: &str) -> Result<PathBuf> {
+    let user_path = user_path.trim();
+    if user_path.is_empty() {
+        anyhow::bail!("path required");
+    }
+    if user_path.contains('\0') || user_path.contains("..") {
+        anyhow::bail!("invalid path");
+    }
+    if user_path.starts_with('/') {
+        anyhow::bail!("use a path relative to the shell directory (not absolute)");
+    }
+    let joined = cwd.join(user_path.trim_start_matches("./"));
+    let canonical = joined
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("file not found: {e}"))?;
+    let cwd_canon = cwd
+        .canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf());
+    if !canonical.starts_with(&cwd_canon) {
+        anyhow::bail!("path must stay inside the shell working directory");
+    }
+    Ok(canonical)
+}
+
 /// Run a command for Discord without typing into the interactive shell (keeps tmux pane clean).
 /// Uses the pane's current working directory and session vault secrets.
 pub fn exec_discord_shell_command(
@@ -576,7 +646,7 @@ pub fn exec_discord_shell_command(
         cmd.env(k, v);
     }
 
-    let out = cmd.output()?;
+    let out = run_command_with_timeout(&mut cmd, std::time::Duration::from_secs(120))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -589,22 +659,206 @@ pub fn exec_discord_shell_command(
     Ok((text, out.status.code().unwrap_or(1)))
 }
 
+/// Run a Discord shell command with a hard timeout (avoids hanging the API on interactive tools).
+pub fn exec_discord_shell_command_timed(
+    state: &AppState,
+    term_id: Uuid,
+    session_id: Uuid,
+    command: &str,
+    timeout: std::time::Duration,
+) -> Result<(String, i32)> {
+    use bunny_pty::locale;
+    use std::process::{Command, Stdio};
+
+    if bunny_discord::risk::is_interactive_discord_command(command) {
+        anyhow::bail!(
+            "interactive command not supported from Discord — use the Web UI terminal, or e.g. `head -n 80 landing-page.html` / `cat landing-page.html`"
+        );
+    }
+
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    let cwd = if state.terminals.uses_tmux() {
+        resolve_tmux_target(state, &record)?
+            .and_then(|t| tmux::pane_cwd(&t))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&record.cwd))
+    } else {
+        PathBuf::from(&record.cwd)
+    };
+
+    let shell = if record.shell.is_empty() {
+        state.config.terminal.shell.clone()
+    } else {
+        record.shell.clone()
+    };
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    let mut cmd = Command::new(&shell);
+    cmd.arg("-lc")
+        .arg(command)
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in locale::utf8_locale_vars() {
+        cmd.env(k, v);
+    }
+    cmd.env("TERM", "dumb");
+    cmd.env("HOME", &home);
+    cmd.env("PWD", cwd.display().to_string());
+    cmd.env(
+        "PATH",
+        format!("{home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+    );
+    for (k, v) in state.secret_env_for_session(session_id) {
+        cmd.env(k, v);
+    }
+
+    let out = run_command_with_timeout(&mut cmd, timeout)?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.trim_end().to_string(),
+        (true, false) => stderr.trim_end().to_string(),
+        (false, false) => format!("{stdout}{stderr}").trim_end().to_string(),
+    };
+    append_discord_transcript(state, term_id, command, &text);
+    Ok((text, out.status.code().unwrap_or(1)))
+}
+
+struct TimedOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: std::process::ExitStatus,
+}
+
+fn run_command_with_timeout(
+    cmd: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<TimedOutput> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::thread;
+    use std::time::Instant;
+
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let started = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_end(&mut stdout);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = err.read_to_end(&mut stderr);
+                }
+                return Ok(TimedOutput {
+                    stdout,
+                    stderr,
+                    status,
+                });
+            }
+            Ok(None) => {
+                if started.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!(
+                        "command timed out after {}s — interactive editors (nvim, vim) are not supported from Discord",
+                        timeout.as_secs()
+                    );
+                }
+                thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+/// Strip ANSI escapes so injected Discord output does not clear or corrupt the xterm view.
+pub fn strip_ansi_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for ch in chars.by_ref() {
+                    if ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn summarize_discord_command(command: &str) -> String {
+    if let Some(rest) = command.strip_prefix("claude --print ") {
+        let rest = rest.trim();
+        let unquoted = rest
+            .strip_prefix('\'')
+            .and_then(|s| s.strip_suffix('\''))
+            .or_else(|| {
+                rest.strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+            })
+            .unwrap_or(rest);
+        let preview: String = unquoted.chars().take(72).collect();
+        let suffix = if unquoted.chars().count() > 72 {
+            "…"
+        } else {
+            ""
+        };
+        return format!("claude --print '{preview}{suffix}'");
+    }
+    let n: String = command.chars().take(120).collect();
+    if command.chars().count() > 120 {
+        format!("{n}…")
+    } else {
+        n
+    }
+}
+
 fn discord_transcript_entry(command: &str, output: &str) -> String {
-    let display = mirror_output_for_display(output);
-    format!("[discord] $ {command}\n{display}\n")
+    let label = summarize_discord_command(command);
+    format!("[discord] $ {label}\n{output}\n")
 }
 
 fn discord_transcript_entry_terminal(command: &str, output: &str) -> String {
-    let display = mirror_output_for_display(output);
-    format!("\r\n[discord] $ {command}\r\n{display}\r\n")
+    let label = summarize_discord_command(command);
+    format!("\r\n[discord] $ {label}\r\n{output}\r\n")
 }
 
 /// Record Discord runs for Web UI scrollback and snapshot overlay (target shell only).
 fn append_discord_transcript(state: &AppState, term_id: Uuid, command: &str, output: &str) {
     let dir = scrollback_dir(state);
     let _ = std::fs::create_dir_all(&dir);
-    let entry = discord_transcript_entry(command, output);
-    let mut entry_terminal = discord_transcript_entry_terminal(command, output);
+    let output = strip_ansi_escapes(output);
+    let output = if output.trim().is_empty() {
+        "(no output)".to_string()
+    } else {
+        output
+    };
+
+    let entry = discord_transcript_entry(command, &output);
+    let mut entry_terminal = discord_transcript_entry_terminal(command, &output);
     if let Some(prompt) = terminal_prompt_line(state, term_id) {
         entry_terminal.push_str("\r\n");
         entry_terminal.push_str(&prompt);
@@ -612,18 +866,32 @@ fn append_discord_transcript(state: &AppState, term_id: Uuid, command: &str, out
 
     let path = discord_transcript_path(state, term_id);
     let mut discord_only = std::fs::read_to_string(&path).unwrap_or_default();
-    discord_only.push_str(&entry);
-    const MAX_BYTES: usize = 32_768;
-    if discord_only.len() > MAX_BYTES {
-        let keep = &discord_only[discord_only.len() - MAX_BYTES..];
-        discord_only = keep[keep.find('\n').map(|i| i + 1).unwrap_or(0)..].to_string();
+    if !discord_only.is_empty() && !discord_only.ends_with('\n') {
+        discord_only.push('\n');
     }
+    discord_only.push_str(&entry);
+    trim_tail_bytes(&mut discord_only, 256 * 1024);
     let _ = std::fs::write(&path, discord_only);
 
-    let scroll = scrollback::load(&dir, term_id).unwrap_or_default();
-    scrollback::save(&dir, term_id, &format!("{scroll}{entry_terminal}"));
+    // Append to on-disk scrollback without scrollback::save() re-merge (which can drop history).
+    let scroll_path = scrollback::scrollback_path(&dir, term_id);
+    let mut scroll = std::fs::read_to_string(&scroll_path).unwrap_or_default();
+    if !scroll.is_empty() && !scroll.ends_with("\n") {
+        scroll.push_str("\r\n");
+    }
+    scroll.push_str(&entry_terminal);
+    trim_tail_bytes(&mut scroll, 512 * 1024);
+    let _ = std::fs::write(&scroll_path, scroll);
 
     state.terminals.inject_transcript(term_id, &entry_terminal);
+}
+
+fn trim_tail_bytes(text: &mut String, max_bytes: usize) {
+    if text.len() <= max_bytes {
+        return;
+    }
+    let keep = &text[text.len() - max_bytes..];
+    *text = keep[keep.find('\n').map(|i| i + 1).unwrap_or(0)..].to_string();
 }
 
 fn terminal_prompt_line(state: &AppState, term_id: Uuid) -> Option<String> {
@@ -691,26 +959,6 @@ pub fn merge_discord_transcript_into_pane(pane: &str, discord: &str) -> String {
             format!("{head}\n{discord}\n{}", prompt.trim_start_matches('\n'))
         }
         None => format!("{discord}\n{pane}\n"),
-    }
-}
-
-fn mirror_output_for_display(output: &str) -> String {
-    const MAX_CHARS: usize = 2000;
-    const MAX_LINES: usize = 24;
-    if output.trim().is_empty() {
-        return "(no output)".into();
-    }
-    let lines: Vec<&str> = output.lines().collect();
-    if lines.len() > MAX_LINES {
-        format!(
-            "{}\n… ({} more lines)",
-            lines[..MAX_LINES].join("\n"),
-            lines.len() - MAX_LINES
-        )
-    } else if output.len() > MAX_CHARS {
-        format!("{}…", &output[..MAX_CHARS])
-    } else {
-        output.to_string()
     }
 }
 

@@ -39,6 +39,7 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/status", get(internal_status))
         .route("/shell/list", get(internal_shell_list))
         .route("/shell/run", post(internal_shell_run))
+        .route("/shell/file", post(internal_shell_file))
         .route("/shell/new", post(internal_shell_new))
         .route("/shell/close", post(internal_shell_close))
         .route("/browser/open", post(internal_browser_open))
@@ -52,6 +53,7 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/agent/do", post(internal_agent_do))
         .route("/task/stop", post(internal_task_stop))
         .route("/approval/resolve", post(internal_approval_resolve))
+        .route("/claude/reset", post(internal_claude_reset))
         .route("/follow/start", post(internal_follow_start))
         .route("/follow/stop", post(internal_follow_stop))
         .route("/audit", post(internal_audit))
@@ -215,6 +217,11 @@ async fn internal_shell_run(
     }
     let term_id = resolve_shell_terminal(&state, link.session_id, body.shell_name.as_deref())?;
     crate::terminals::ensure_session_terminals_live(&state, link.session_id);
+    if bunny_discord::risk::is_interactive_discord_command(&body.command) {
+        return Err(ApiError::validation(
+            "commande interactive non supportée depuis Discord — utilisez le terminal Web UI, ou par ex. `head -n 80 landing-page.html`",
+        ));
+    }
     let (output, exit_code) = capture_shell_run_output(
         Arc::clone(&state),
         link.session_id,
@@ -222,6 +229,8 @@ async fn internal_shell_run(
         &body.command,
     )
     .await?;
+    let output = truncate_discord_shell_output(&output);
+    remember_discord_shell(&state, &body.ctx.guild_id, &body.ctx.channel_id, term_id);
     let result = if exit_code == 0 { "ok" } else { "error" };
     audit(
         &state,
@@ -248,6 +257,85 @@ async fn internal_shell_run(
         "exit_code": exit_code,
         "shell": shell_name,
     })))
+}
+
+#[derive(Deserialize)]
+pub struct ShellFileRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    pub path: String,
+    pub shell_name: Option<String>,
+}
+
+async fn internal_shell_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ShellFileRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    let link = resolve_link(&state, &body.ctx)?;
+    let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
+    ensure_discord_control(&state, bunny_user, link.session_id)?;
+    let term_id = resolve_discord_shell(
+        &state,
+        link.session_id,
+        &body.ctx.guild_id,
+        &body.ctx.channel_id,
+        body.shell_name.as_deref(),
+    )?;
+    crate::terminals::ensure_session_terminals_live(&state, link.session_id);
+    let (filename, bytes) = crate::terminals::read_discord_shell_file(
+        &state,
+        term_id,
+        &body.path,
+        crate::terminals::DISCORD_FILE_ATTACHMENT_MAX,
+    )
+    .map_err(|e| ApiError::validation(&e.to_string()))?;
+    remember_discord_shell(&state, &body.ctx.guild_id, &body.ctx.channel_id, term_id);
+    let shell_name = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(|row| row.2)
+        .unwrap_or_else(|| "shell".into());
+    let size = bytes.len();
+    let caption = format!(
+        "File `{filename}` from shell `{shell_name}` ({size} bytes) — open the attachment to view the full content."
+    );
+    audit(
+        &state,
+        &body.ctx,
+        link.session_id,
+        "/bunny file",
+        &body.path,
+        "ok",
+        Some(bunny_user),
+        Some(term_id),
+        None,
+    );
+    let caption_header = axum::http::HeaderValue::from_str(&caption).unwrap_or_else(|_| {
+        axum::http::HeaderValue::from_static("File attachment")
+    });
+    let name_header = axum::http::HeaderValue::from_str(&filename).unwrap_or_else(|_| {
+        axum::http::HeaderValue::from_static("file.txt")
+    });
+    let mut response = axum::response::Response::new(axum::body::Body::from(bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/octet-stream"),
+    );
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("x-bunny-file-caption"),
+        caption_header,
+    );
+    response.headers_mut().insert(
+        axum::http::HeaderName::from_static("x-bunny-file-name"),
+        name_header,
+    );
+    Ok(response)
 }
 
 #[derive(Deserialize)]
@@ -681,6 +769,7 @@ pub struct AgentRequest {
     pub ctx: BridgeContext,
     pub agent: String,
     pub prompt: String,
+    pub shell_name: Option<String>,
 }
 
 async fn internal_agent_ask(
@@ -720,18 +809,126 @@ async fn run_agent(
     let link = resolve_link(state, &body.ctx)?;
     let bunny_user = resolve_bunny_user(state, &body.ctx)?;
     ensure_discord_agent(state, bunny_user, link.session_id)?;
-    let task_id = task_runner::start_task(
-        state.clone(),
+    let task_id = task_runner::create_task_record(
+        state,
         link.session_id,
         mode,
         &body.agent,
         &body.prompt,
-        body.ctx.discord_user_id.clone(),
-        body.ctx.thread_id.clone(),
+        &body.ctx.discord_user_id,
         bunny_user,
     )
     .map_err(|e| ApiError::validation(&e.to_string()))?;
-    Ok(Json(serde_json::json!({ "task_id": task_id.to_string() })))
+
+    let shell_name = body.shell_name.as_deref();
+    let mode_label = match mode {
+        AgentTaskMode::Ask => "ask",
+        AgentTaskMode::Plan => "plan",
+        AgentTaskMode::Do => "do",
+        _ => "agent",
+    };
+
+    let result = task_runner::run_discord_agent(
+        Arc::clone(state),
+        link.session_id,
+        &body.ctx.guild_id,
+        &body.ctx.channel_id,
+        mode,
+        &body.prompt,
+        shell_name,
+    )
+    .await;
+
+    match result {
+        Ok(r) if r.needs_approval => {
+            let approval_id = Uuid::new_v4();
+            let summary = r.approval_summary.clone().unwrap_or_default();
+            let reason = if let Some(ref ctx) = r.claude_pane_ctx {
+                crate::discord_claude::encode_claude_pane_reason(ctx)
+            } else {
+                "shell_risk".into()
+            };
+            let req = bunny_discord::ApprovalRequest {
+                id: approval_id,
+                task_id,
+                session_id: link.session_id,
+                action_summary: summary.clone(),
+                reason,
+                status: "pending".into(),
+                discord_message_id: None,
+                created_at: chrono::Utc::now(),
+                resolved_at: None,
+            };
+            state
+                .discord
+                .lock()
+                .create_approval(&req)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            state
+                .discord
+                .lock()
+                .update_task_status(task_id, bunny_discord::AgentTaskStatus::WaitingApproval)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            audit(
+                state,
+                &body.ctx,
+                link.session_id,
+                &format!("/bunny {mode_label}"),
+                &body.prompt,
+                "needs_approval",
+                Some(bunny_user),
+                None,
+                None,
+            );
+            Ok(Json(serde_json::json!({
+                "needs_approval": true,
+                "approval_id": approval_id.to_string(),
+                "task_id": task_id.to_string(),
+                "summary": summary,
+                "shell": r.shell,
+                "mode": mode_label,
+                "claude_pane": r.claude_pane_ctx.is_some(),
+            })))
+        }
+        Ok(r) => {
+            let status = if r.exit_code == 0 {
+                bunny_discord::AgentTaskStatus::Done
+            } else {
+                bunny_discord::AgentTaskStatus::Failed
+            };
+            state
+                .discord
+                .lock()
+                .update_task_status(task_id, status)
+                .map_err(|e| ApiError::validation(&e.to_string()))?;
+            audit(
+                state,
+                &body.ctx,
+                link.session_id,
+                &format!("/bunny {mode_label}"),
+                &body.prompt,
+                if r.exit_code == 0 { "ok" } else { "error" },
+                Some(bunny_user),
+                None,
+                None,
+            );
+            Ok(Json(serde_json::json!({
+                "ok": r.exit_code == 0,
+                "task_id": task_id.to_string(),
+                "output": r.output,
+                "exit_code": r.exit_code,
+                "shell": r.shell,
+                "mode": mode_label,
+            })))
+        }
+        Err(e) => {
+            let _ = state
+                .discord
+                .lock()
+                .update_task_status(task_id, bunny_discord::AgentTaskStatus::Failed);
+            Err(e)
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -769,8 +966,42 @@ async fn internal_approval_resolve(
     let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
     let approval_id =
         Uuid::parse_str(&body.approval_id).map_err(|_| ApiError::validation("approval_id"))?;
-    task_runner::resolve_approval(&state, approval_id, body.approve, bunny_user)
+    let outcome = task_runner::resolve_approval(&state, approval_id, body.approve, bunny_user)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "output": outcome.output,
+        "exit_code": outcome.exit_code,
+        "mode": outcome.mode,
+        "shell": outcome.shell,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ClaudeResetRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+}
+
+async fn internal_claude_reset(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ClaudeResetRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    let link = resolve_link(&state, &body.ctx)?;
+    crate::discord_claude::clear_claude_session(&state, &body.ctx.guild_id, &body.ctx.channel_id)?;
+    audit(
+        &state,
+        &body.ctx,
+        link.session_id,
+        "/bunny claude_reset",
+        "",
+        "ok",
+        None,
+        None,
+        None,
+    );
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -1104,14 +1335,31 @@ async fn capture_shell_run_output(
 ) -> Result<(String, i32), ApiError> {
     let command = command.to_string();
     tokio::task::spawn_blocking(move || {
-        crate::terminals::exec_discord_shell_command(&state, term_id, session_id, &command)
-            .map_err(|e| ApiError::validation(&e.to_string()))
+        crate::terminals::exec_discord_shell_command_timed(
+            &state,
+            term_id,
+            session_id,
+            &command,
+            std::time::Duration::from_secs(40),
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))
     })
     .await
     .map_err(|e| ApiError::validation(&e.to_string()))?
 }
 
-fn resolve_shell_terminal(
+/// Server-side cap; Discord bridge paginates (~10 × 1990 chars).
+const DISCORD_SHELL_OUTPUT_MAX: usize = 18_000;
+
+fn truncate_discord_shell_output(output: &str) -> String {
+    if output.chars().count() <= DISCORD_SHELL_OUTPUT_MAX {
+        return output.to_string();
+    }
+    let truncated: String = output.chars().take(DISCORD_SHELL_OUTPUT_MAX).collect();
+    format!("{truncated}\n\n… _(tronqué — fichier complet dans le terminal Web UI)_")
+}
+
+pub(crate) fn resolve_shell_terminal(
     state: &AppState,
     session_id: Uuid,
     shell_name: Option<&str>,
@@ -1149,6 +1397,46 @@ fn resolve_shell_terminal(
         .next()
         .map(|(id, ..)| id)
         .ok_or_else(|| ApiError::not_found("no shell — open a shell in the Web UI first"))
+}
+
+pub(crate) fn resolve_discord_shell(
+    state: &AppState,
+    session_id: Uuid,
+    guild_id: &str,
+    channel_id: &str,
+    shell_name: Option<&str>,
+) -> Result<Uuid, ApiError> {
+    if let Some(name) = shell_name {
+        return resolve_shell_terminal(state, session_id, Some(name));
+    }
+    if let Ok(Some(last)) = state.discord.lock().get_last_shell_name(guild_id, channel_id) {
+        if let Ok(id) = resolve_shell_terminal(state, session_id, Some(&last)) {
+            return Ok(id);
+        }
+    }
+    resolve_shell_terminal(state, session_id, None)
+}
+
+pub(crate) fn remember_discord_shell(
+    state: &AppState,
+    guild_id: &str,
+    channel_id: &str,
+    term_id: Uuid,
+) {
+    let name = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(|row| row.2);
+    if let Some(name) = name {
+        let _ = state
+            .discord
+            .lock()
+            .set_last_shell_name(guild_id, channel_id, &name);
+    }
 }
 
 pub fn audit(

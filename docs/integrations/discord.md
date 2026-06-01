@@ -62,11 +62,14 @@ cargo run -p bunny-discord-bridge
 | `/bunny shell_list` | List shells |
 | `/bunny shell_new` | Create shell (`name:` optional — auto `shell N`) |
 | `/bunny shell_close` | Close shell (`shell:` required if multiple) |
-| `/bunny run` | Run shell command (Editor+ Bunny user linked) |
+| `/bunny run` | Run shell command (Editor+ Bunny user linked); long output is paginated |
+| `/bunny file` | Download a file from the shell cwd as a **Discord attachment** (full file up to 24 MB) |
 | `/bunny stream_browser_start` | Start browser + watch URL (optional `url:`; `interactive:true` for read+write) |
 | `/bunny stream_browser_stop` | Stop browser watch stream(s) in this channel (optional `url:` for one link) |
-| `/bunny ask/plan/do` | Claude agent task |
-| `/bunny stop` | Cancel task |
+| `/bunny ask/plan` | Claude session with **context** (`claude -p --resume` per channel) — read/plan style prompts |
+| `/bunny do` | Claude agent with **context** (`--resume`) and auto-approved file edits (`acceptEdits`) — creates/updates files without stalling on the welcome screen |
+| `/bunny claude_reset` | Clear the stored `ask`/`plan` conversation id for this channel |
+| `/bunny stop` | Cancel task record (does not kill an in-flight `claude` process in tmux) |
 
 ## Watch links
 
@@ -76,11 +79,18 @@ cargo run -p bunny-discord-bridge
 
 `/bunny stream_browser_stop` revokes watch link(s) for the **current Discord channel** (interactive and read-only alike). Without `url:`, **all** active watch tokens for that channel are stopped. With `url:` set to a watch URL from `stream_browser_start`, only that token is revoked (the URL must belong to the same channel). Open watch pages disconnect their noVNC WebSocket immediately; the watch shell polls every 2s and shows an error without requiring a manual refresh. Chromium keeps running; only the public `/watch/:token` access is invalidated.
 
+## Claude from Discord
+
+- **`ask` / `plan`**: each linked Discord channel keeps a Claude `session_id`. Follow-up prompts reuse context (`claude -p --resume`). Use `/bunny claude_reset` to start fresh.
+- **`do`**: same resume session as `ask`/`plan`, plus `--permission-mode acceptEdits` so landing pages and file writes complete in Discord without the interactive welcome screen. Follow up with another `/bunny do` on the same channel to continue the task.
+- **Autoriser / Refuser** buttons apply to risky shell commands and (legacy) tmux tool prompts; most `do` file edits do not need a button.
+- **Viewing whole files:** Discord chat is limited to ~2000 characters per message. Use **`/bunny file path:landing-page.html`** to receive the complete file as an attachment (open in browser or editor). For files larger than 24 MB or interactive viewing, use the **Web UI** terminal (`cat`, `less`, preview in browser).
+
 ## Security
 
 - Bridge uses `Authorization: Bearer` with hashed token stored in config
 - Shell/agent commands require Discord account linked to a Bunny user with Editor+ on the session
-- Sensitive shell commands may require approval (Phase 2)
+- Tool approvals and risky shell commands require **DiscordApprove** (buttons or API)
 - All actions are written to `discord_audit_log`
 
 ## OAuth
