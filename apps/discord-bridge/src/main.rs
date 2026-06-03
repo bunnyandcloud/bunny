@@ -795,6 +795,10 @@ async fn handle_command(
                 .await?;
             if let Some(output) = res.get("output").and_then(|v| v.as_str()) {
                 let exit_code = res.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0);
+                let persistent = res
+                    .get("persistent")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let shell = res
                     .get("shell")
                     .and_then(|v| v.as_str())
@@ -804,7 +808,11 @@ async fn handle_command(
                 } else {
                     output.trim().to_string()
                 };
-                Ok(format_shell_run_reply(shell, &text, exit_code))
+                if persistent {
+                    Ok(format_persistent_shell_run_reply(shell, &text))
+                } else {
+                    Ok(format_shell_run_reply(shell, &text, exit_code))
+                }
             } else {
                 Ok(text_reply(format!(
                     "```json\n{}\n```",
@@ -1157,6 +1165,30 @@ fn cap_discord_pages(mut pages: Vec<String>) -> Vec<String> {
         last.push_str("\n\n_(suite dans le terminal Web UI — limite Discord)_");
     }
     pages
+}
+
+/// Long-running `/bunny run`: prose header + single fenced excerpt (no nested markdown).
+fn format_persistent_shell_run_reply(shell: &str, excerpt: &str) -> CommandReply {
+    let header = format!(
+        "**Shell :** `{shell}`\n\
+         **Processus long / persistant** — lancé dans le shell.\n\
+         La sortie continue dans l’onglet **Terminal** de la Web UI.\n\n\
+         **Extrait :**"
+    );
+    let body = if excerpt.trim().is_empty() || excerpt == "(no output)" {
+        "_(pas encore de sortie)_".to_string()
+    } else {
+        let mut page = String::new();
+        page.push_str("```\n");
+        page.push_str(excerpt);
+        if !excerpt.ends_with('\n') {
+            page.push('\n');
+        }
+        page.push_str("```");
+        page
+    };
+    let page = format!("{header}\n{body}");
+    CommandReply::Text(cap_discord_pages(vec![page]))
 }
 
 /// Paginate shell output so each Discord message stays under 2000 chars.

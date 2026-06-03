@@ -233,14 +233,15 @@ async fn internal_shell_run(
             "commande interactive non supportée depuis Discord — utilisez le terminal Web UI, ou par ex. `head -n 80 landing-page.html`",
         ));
     }
-    let (output, exit_code) = capture_shell_run_output(
+    let run = capture_shell_run_output(
         Arc::clone(&state),
         link.session_id,
         term_id,
         &body.command,
     )
     .await?;
-    let output = truncate_discord_shell_output(&output);
+    let output = truncate_discord_shell_output(&run.output);
+    let exit_code = run.exit_code;
     remember_discord_shell(&state, &body.ctx.guild_id, &body.ctx.channel_id, term_id);
     let result = if exit_code == 0 { "ok" } else { "error" };
     audit(
@@ -266,6 +267,7 @@ async fn internal_shell_run(
         "ok": exit_code == 0,
         "output": output,
         "exit_code": exit_code,
+        "persistent": run.persistent,
         "shell": shell_name,
     })))
 }
@@ -1343,18 +1345,11 @@ async fn capture_shell_run_output(
     session_id: Uuid,
     term_id: Uuid,
     command: &str,
-) -> Result<(String, i32), ApiError> {
+) -> Result<crate::terminals::DiscordShellRunResult, ApiError> {
     let command = command.to_string();
     tokio::task::spawn_blocking(move || {
-        crate::terminals::exec_discord_shell_command_timed(
-            &state,
-            term_id,
-            session_id,
-            &command,
-            std::time::Duration::from_secs(40),
-            None,
-        )
-        .map_err(|e| ApiError::validation(&e.to_string()))
+        crate::terminals::exec_discord_shell_command_run(&state, term_id, session_id, &command)
+            .map_err(|e| ApiError::validation(&e.to_string()))
     })
     .await
     .map_err(|e| ApiError::validation(&e.to_string()))?

@@ -690,6 +690,241 @@ pub fn exec_discord_shell_command(
     Ok((text, out.status.code().unwrap_or(1)))
 }
 
+/// How long `/bunny run` waits for a command to finish before treating it as persistent.
+pub const DISCORD_RUN_QUICK_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+const BUNNY_EXIT_MARKER: &str = "__BUNNY_EXIT__";
+const DISCORD_RUN_EXCERPT_MAX_LINES: usize = 24;
+const DISCORD_RUN_EXCERPT_MAX_CHARS: usize = 1400;
+
+/// Result of `/bunny run` for Discord formatting.
+#[derive(Debug, Clone)]
+pub struct DiscordShellRunResult {
+    pub output: String,
+    pub exit_code: i32,
+    pub persistent: bool,
+}
+
+/// Run a command for Discord via the shell tmux pane (generic: quick finish or persistent process).
+pub fn exec_discord_shell_command_run(
+    state: &AppState,
+    term_id: Uuid,
+    session_id: Uuid,
+    command: &str,
+) -> Result<DiscordShellRunResult> {
+    if bunny_discord::risk::is_interactive_discord_command(command) {
+        anyhow::bail!(
+            "interactive command not supported from Discord — use the Web UI terminal, or e.g. `head -n 80 landing-page.html` / `cat landing-page.html`"
+        );
+    }
+
+    ensure_terminal_attached(state, term_id)?;
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    let target = match resolve_tmux_target(state, &record)? {
+        Some(t) => t,
+        None => {
+            let (text, code) = exec_discord_shell_command_timed(
+                state,
+                term_id,
+                session_id,
+                command,
+                std::time::Duration::from_secs(40),
+                None,
+            )?;
+            return Ok(DiscordShellRunResult {
+                output: text,
+                exit_code: code,
+                persistent: false,
+            });
+        }
+    };
+
+    let baseline = capture_pane_text(&target).unwrap_or_default();
+    let wrapped = discord_run_wrap_command(command);
+    tmux::send_keys_literal(&target, &wrapped, true)?;
+    state.terminals.refresh_display(term_id);
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    let after_send = capture_pane_text(&target).unwrap_or_else(|_| baseline.clone());
+
+    let started = std::time::Instant::now();
+    let mut last_delta = String::new();
+    while started.elapsed() < DISCORD_RUN_QUICK_WAIT {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let Ok(cap) = capture_pane_text(&target) else {
+            continue;
+        };
+        let delta = pane_text_since_baseline(&after_send, &cap);
+        if delta.is_empty() {
+            continue;
+        }
+        last_delta = delta.clone();
+        if let Some((output, code)) = split_on_exit_marker(&delta) {
+            let text = sanitize_discord_terminal_excerpt(&output);
+            let text = if text.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                text
+            };
+            append_discord_transcript(state, term_id, command, &text);
+            return Ok(DiscordShellRunResult {
+                output: text,
+                exit_code: code,
+                persistent: false,
+            });
+        }
+    }
+
+    let excerpt = sanitize_discord_terminal_excerpt(&last_delta);
+    let transcript = if excerpt.trim().is_empty() {
+        "Processus long / persistant lancé.\n(pas encore de sortie)".to_string()
+    } else {
+        format!("Processus long / persistant lancé.\n\nExtrait :\n{excerpt}")
+    };
+    append_discord_transcript(state, term_id, command, &transcript);
+    Ok(DiscordShellRunResult {
+        output: excerpt,
+        exit_code: 0,
+        persistent: true,
+    })
+}
+
+fn discord_run_wrap_command(command: &str) -> String {
+    format!(
+        "bash -lc {}; echo {BUNNY_EXIT_MARKER}$?",
+        shell_single_quote(command)
+    )
+}
+
+fn shell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn capture_pane_text(target: &str) -> Result<String> {
+    tmux::capture_pane(target).map(|s| strip_ansi_escapes(&s))
+}
+
+fn pane_text_since_baseline(before: &str, after: &str) -> String {
+    let b: Vec<char> = before.chars().collect();
+    let a: Vec<char> = after.chars().collect();
+    let mut i = 0;
+    while i < b.len() && i < a.len() && b[i] == a[i] {
+        i += 1;
+    }
+    a[i..].iter().collect::<String>().trim().to_string()
+}
+
+fn split_on_exit_marker(delta: &str) -> Option<(String, i32)> {
+    let idx = delta.rfind(BUNNY_EXIT_MARKER)?;
+    let output = delta[..idx].trim_end().to_string();
+    let code_str = delta[idx + BUNNY_EXIT_MARKER.len()..]
+        .lines()
+        .next()?
+        .trim();
+    let code: i32 = code_str.parse().ok()?;
+    Some((output, code))
+}
+
+/// Clean tmux capture for Discord: drop wrapper noise, dev-server boilerplate, cap size.
+fn sanitize_discord_terminal_excerpt(raw: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_nextjs_origin_warning = false;
+    let mut prev_blank = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+
+        if should_skip_discord_run_line(trimmed) || is_mostly_box_drawing(trimmed) {
+            continue;
+        }
+
+        if in_nextjs_origin_warning {
+            if trimmed.contains("Read more:")
+                || trimmed.starts_with("https://nextjs.org/docs/")
+            {
+                in_nextjs_origin_warning = false;
+            }
+            continue;
+        }
+
+        if trimmed.contains("Cross origin request detected") {
+            in_nextjs_origin_warning = true;
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            if prev_blank {
+                continue;
+            }
+            prev_blank = true;
+        } else {
+            prev_blank = false;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let take = lines.len().min(DISCORD_RUN_EXCERPT_MAX_LINES);
+    let start = lines.len().saturating_sub(take);
+    let mut text = lines[start..].join("\n");
+    if text.chars().count() > DISCORD_RUN_EXCERPT_MAX_CHARS {
+        let truncated: String = text
+            .chars()
+            .take(DISCORD_RUN_EXCERPT_MAX_CHARS)
+            .collect();
+        text = format!("{truncated}\n…");
+    }
+    text.trim().to_string()
+}
+
+fn should_skip_discord_run_line(trimmed: &str) -> bool {
+    trimmed.contains(BUNNY_EXIT_MARKER)
+        || trimmed.starts_with("bash -lc ")
+        || trimmed.contains("[discord] $")
+}
+
+fn is_mostly_box_drawing(s: &str) -> bool {
+    if s.len() < 8 {
+        return false;
+    }
+    let box_chars = s
+        .chars()
+        .filter(|c| matches!(c, '─' | '━' | '│' | '┌' | '┐' | '└' | '┘' | '╭' | '╮' | '╰' | '╯' | '▲'))
+        .count();
+    box_chars * 3 > s.len()
+}
+
+#[cfg(test)]
+mod discord_run_tests {
+    use super::*;
+
+    #[test]
+    fn exit_marker_parses_code() {
+        let (out, code) = split_on_exit_marker("hello\nworld\n__BUNNY_EXIT__0").unwrap();
+        assert_eq!(out, "hello\nworld");
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn sanitize_strips_nextjs_cross_origin_block() {
+        let raw = "▲ Next.js 16.1.6\n- Local: http://localhost:3000\nCross origin request detected from 127.0.0.1\nallowedDevOrigins in next.config.js\nRead more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins\n✓ Ready in 200ms";
+        let out = sanitize_discord_terminal_excerpt(raw);
+        assert!(!out.contains("Cross origin"));
+        assert!(!out.contains("allowedDevOrigins"));
+        assert!(out.contains("Ready in"));
+    }
+}
+
 /// Run a Discord shell command with a hard timeout (avoids hanging the API on interactive tools).
 pub fn exec_discord_shell_command_timed(
     state: &AppState,

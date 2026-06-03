@@ -74,6 +74,7 @@ bunny discord bridge
 | `failed to lookup address` / `HTTP request to get gateway URL failed` au lancement du bridge | **Réseau DNS du conteneur** (pas Discord) — avant toute action sur Discord. `./scripts/docker-dev.sh check-network` puis `down` + `up` pour appliquer le DNS du compose ; redémarrer Docker Desktop si ça persiste |
 | `invalid bridge token` sur `/bunny link` | Le token dans `.discord/bridge.yaml` n’est pas dans la config agent — `bunny discord sync` puis **redémarrer `bunny run`** (Ctrl+C, relancer) |
 | `discord account not linked to bunny user` sur `run` | Redémarrer `bunny run` (fix récent), puis retenter `/bunny run` — ou refaire `/bunny link` avec un nouveau code Web UI |
+| `/bunny run` + `npm run dev` → timeout 40s | Rebuild `bunny-server` : `/bunny run` injecte dans tmux ; si la commande ne finit pas en ~8s, Discord indique **processus persistant** + extrait, logs dans l’onglet Terminal. |
 | Choisir un shell | `/bunny shell_list` puis `/bunny run shell:<nom> command:pwd` (sans `shell:` = premier shell créé) |
 | Créer un shell | `/bunny shell_new` ou `/bunny shell_new name:debug` |
 | Fermer un shell | `/bunny shell_close shell:shell 1` (sans `shell:` si un seul onglet) |
