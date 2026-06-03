@@ -87,7 +87,7 @@ Legacy `@bunny and claude …` mentions are removed.
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) in the Web UI shell. Commands that finish within ~8s return full output; **long / persistent** processes get an immediate Discord reply with a live excerpt — full logs in the Terminal tab |
 | `/bunny run_stop` | Send **Ctrl+C** to the foreground process in the shell (default: last shell used in this channel; optional `shell:`). Stops e.g. `npm run dev` started via `/bunny run` |
 | `/bunny file` | Download a file from the shell cwd as a **Discord attachment** (full file up to 24 MB) |
-| `/bunny stream_browser_start` | Start browser + watch URL (optional `url:`; `interactive:true` for read+write) |
+| `/bunny stream_browser_start` | Start browser + watch URL (optional `url:` or `port:`; `interactive:true` for read+write) |
 | `/bunny stream_browser_stop` | Stop browser watch stream(s) in this channel (optional `url:` for one link) |
 | `/bunny ask/plan` | Claude session with **context** (`claude -p --resume` per channel) — read/plan style prompts |
 | `/bunny do` | Claude agent with **context** (`--resume`) and auto-approved file edits (`acceptEdits`) — creates/updates files without stalling on the welcome screen |
@@ -96,7 +96,7 @@ Legacy `@bunny and claude …` mentions are removed.
 
 ## Watch links
 
-`/bunny stream_browser_start` starts headless Chromium if needed, then returns a URL like `https://host/watch/<token>`. By default the watch page is **read-only** (noVNC `view_only`). Pass **`interactive:true`** to allow mouse and keyboard on the shared link — anyone with the URL can control the browser until the link expires.
+`/bunny stream_browser_start` starts headless Chromium if needed, then returns a URL like `https://host/watch/<token>`. By default Chromium opens the first registered preview port for the session, or `http://127.0.0.1:3000`. Use **`port:`** (e.g. `port:5173`) to target a specific local dev server without a full URL; **`url:`** takes precedence when both are set. By default the watch page is **read-only** (noVNC `view_only`). Pass **`interactive:true`** to allow mouse and keyboard on the shared link — anyone with the URL can control the browser until the link expires.
 
 **Security:** only use `interactive:true` when you intend to grant remote control via the watch link. Read-only links use a locked noVNC profile (settings hidden, `view_only` forced in the embedded UI). This stops casual bypass via noVNC settings; **server-side RFB input blocking** is not implemented yet — see [novnc-readonly-server-enforcement](../improvements/novnc-readonly-server-enforcement.md).
 

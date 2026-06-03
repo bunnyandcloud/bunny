@@ -379,6 +379,11 @@ impl EventHandler for Handler {
                         CommandOptionType::Boolean,
                         "interactive",
                         "Allow mouse/keyboard on the watch link (default: read-only)",
+                    ))
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::Integer,
+                        "port",
+                        "Local dev server port (default: first preview port or 3000)",
                     )),
                 )
                 .add_option(
@@ -864,6 +869,12 @@ async fn handle_command(
             let mut body = bridge_ctx.clone();
             if let Some(url) = opt_str(&sub_opts, "url") {
                 body["browser_url"] = serde_json::json!(url);
+            }
+            if let Some(port) = opt_integer(&sub_opts, "port") {
+                if !(1..=65535).contains(&port) {
+                    return Ok(text_reply("Invalid port: must be 1–65535."));
+                }
+                body["browser_port"] = serde_json::json!(port as u16);
             }
             if let Some(interactive) = opt_bool(&sub_opts, "interactive") {
                 body["interactive"] = serde_json::json!(interactive);
@@ -1529,6 +1540,15 @@ fn opt_bool(opts: &[serenity::all::CommandDataOption], name: &str) -> Option<boo
         .find(|o| o.name == name)
         .and_then(|o| match &o.value {
             CommandDataOptionValue::Boolean(b) => Some(*b),
+            _ => None,
+        })
+}
+
+fn opt_integer(opts: &[serenity::all::CommandDataOption], name: &str) -> Option<i64> {
+    opts.iter()
+        .find(|o| o.name == name)
+        .and_then(|o| match &o.value {
+            CommandDataOptionValue::Integer(n) => Some(*n),
             _ => None,
         })
 }

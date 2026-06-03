@@ -643,6 +643,19 @@ fn default_browser_url(state: &AppState, session_id: Uuid) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:3000".into())
 }
 
+fn resolve_browser_url(
+    state: &AppState,
+    session_id: Uuid,
+    browser_url: Option<String>,
+    browser_port: Option<u16>,
+) -> String {
+    browser_url.unwrap_or_else(|| {
+        browser_port
+            .map(|p| format!("http://127.0.0.1:{p}"))
+            .unwrap_or_else(|| default_browser_url(state, session_id))
+    })
+}
+
 fn resolve_shell_label(
     state: &AppState,
     session_id: Uuid,
@@ -746,6 +759,8 @@ pub struct StreamStartRequest {
     pub visibility: Option<String>,
     pub ttl_hours: Option<u64>,
     pub browser_url: Option<String>,
+    /// Local dev server port when `browser_url` is omitted (e.g. 5173).
+    pub browser_port: Option<u16>,
     /// When true, watch link allows mouse/keyboard (noVNC interactive). Default: read-only.
     #[serde(default)]
     pub interactive: bool,
@@ -758,10 +773,12 @@ async fn internal_stream_start(
 ) -> Result<Json<watch::WatchLinkResponse>, ApiError> {
     verify_bridge_token(&state, &headers)?;
     let link = resolve_link(&state, &body.ctx)?;
-    let url = body
-        .browser_url
-        .clone()
-        .unwrap_or_else(|| default_browser_url(&state, link.session_id));
+    let url = resolve_browser_url(
+        &state,
+        link.session_id,
+        body.browser_url.clone(),
+        body.browser_port,
+    );
     let browser_id =
         crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
     audit(

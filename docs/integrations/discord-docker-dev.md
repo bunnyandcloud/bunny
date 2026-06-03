@@ -81,7 +81,7 @@ bunny discord bridge
 | Fermer un shell | `/bunny shell_close shell:shell 1` (sans `shell:` si un seul onglet) |
 | Snapshot shell | `/bunny snapshot` ou `/bunny snapshot shell:shell 1` — légende Discord indique le shell |
 | Snapshot complet | `/bunny full_snapshot` — shell + browser (Chromium démarré auto sur :3000 ou 1er preview) |
-| Stream browser | `/bunny stream_browser_start` — read-only par défaut ; `interactive:true` pour contrôle souris/clavier |
+| Stream browser | `/bunny stream_browser_start` — read-only par défaut ; `port:5173` pour un port local ; `interactive:true` pour contrôle souris/clavier |
 | Arrêter stream browser | `/bunny stream_browser_stop` — tous les liens actifs du canal ; `url:<watch URL>` pour un lien précis |
 | Browser : écran noir en **Stream** / watch | Normal en Docker avec l’ancien WebRTC — rebuild Web UI + agent, puis Stream/watch passent par noVNC read-only (tunnel :7681). Relance `bunny run`. |
 | Slash commands doublées (`run` + `shell_run`, chaque cmd x2) | **Global + guild** en parallèle. `./scripts/docker-dev.sh stop-bridge` puis **un seul** `start-bridge`. Vérifie `guild_id` dans `.discord/bridge.yaml`. Quitte Discord (Cmd+Q). Log attendu : `removed stale global slash commands`. |
