@@ -361,7 +361,7 @@ Tests unitaires : `cargo test -p bunny-pty buffer::` (fencing `replay_range`).
 
 ### 3. Scroll `npm run dev` / alternate screen
 
-tmux + TUI (vim, htop, `npm run dev`) utilisent l’**écran alternatif**. xterm.js gère mal le scroll souris dans ce mode sans handlers dédiés. Piste : `alternate-screen off` dans tmux pour les sessions web, ou addon scroll + blocage `\x1b[?1049h`.
+tmux sessions Web UI : `alternate-screen off` + filtrage côté client des CSI `\x1b[?1049h` / `\x1b[?1047h`. Le scrollback xterm (10k lignes) reste actif pendant les processus longs ; barre de scroll visible sur `.xterm-viewport` (CSS `bunny-terminal-host`). **vim/htop** full-screen dans le navigateur peuvent se comporter différemment — utiliser le terminal local si besoin.
 
 ### 4. Multi-onglets : coût N WebSockets
 

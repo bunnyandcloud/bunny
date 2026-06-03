@@ -339,10 +339,12 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   }, [terminalId, readonly, active]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full min-h-[200px] p-1 bg-bunny-bg rounded"
-    />
+    <div className="bunny-terminal-host h-full w-full min-h-[200px] flex min-h-0">
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 min-w-0 p-1 bg-bunny-bg rounded-l"
+      />
+    </div>
   );
 });
 

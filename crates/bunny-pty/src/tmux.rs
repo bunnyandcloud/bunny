@@ -93,10 +93,27 @@ pub fn configure_session_for_web(session: &str) {
         vec!["set-option", "-t", session, "aggressive-resize", "on"],
         vec!["set-option", "-t", session, "assume-default-size", "on"],
         vec!["set-option", "-t", session, "remain-on-exit", "off"],
+        // Keep app output in the main buffer so the Web UI can scroll full history (npm run dev, etc.).
+        vec!["set-option", "-t", session, "alternate-screen", "off"],
     ] {
         let _ = run(&args);
     }
     apply_utf8_locale(session);
+}
+
+/// Per-pane: ignore application alternate-screen requests (scrollback stays in the web terminal).
+pub fn configure_pane_for_web(target: &str) {
+    if !target_alive(target) {
+        return;
+    }
+    let _ = run(&[
+        "set-option",
+        "-p",
+        "-t",
+        target,
+        "alternate-screen",
+        "off",
+    ]);
 }
 
 pub fn apply_utf8_locale_global() {

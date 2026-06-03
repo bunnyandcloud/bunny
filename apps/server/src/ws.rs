@@ -41,6 +41,7 @@ pub async fn handle_terminal_ws(
         let shell = &state.config.terminal.shell;
         let secret_env = secret_env_for_terminal(&state, terminal_id);
         let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
+        tmux::configure_pane_for_web(&target);
     }
 
     let mut live_fence: u64 = 0;
@@ -76,6 +77,7 @@ pub async fn handle_terminal_ws(
                                         let shell = &state.config.terminal.shell;
                                         let secret_env = secret_env_for_terminal(&state, terminal_id);
                                         let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
+                                        tmux::configure_pane_for_web(&target);
                                     }
                                     let from = from_offset.unwrap_or(0);
                                     let replay = build_replay(&state, terminal_id, from);

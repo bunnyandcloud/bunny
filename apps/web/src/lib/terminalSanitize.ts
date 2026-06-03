@@ -3,10 +3,15 @@
  * the browser terminal is proxied through `tmux attach`.
  */
 
+/** Alternate-screen CSI — disables xterm scrollback when left in the stream. */
+const ALT_SCREEN_CSI =
+  /\x1b\[\?(?:1049|1047|47|1004)[hl]/g;
+
 /** Remove device-attribute and window-report CSI from server output. */
 export function filterServerOutput(data: string): string {
   return (
     data
+      .replace(ALT_SCREEN_CSI, '')
       // Device attributes (primary / secondary)
       .replace(/\x1b\[[\x3f>?]?[0-9;]*c/g, '')
       .replace(/\x1b\][^\x07]*\x07/g, '')
