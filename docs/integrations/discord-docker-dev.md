@@ -91,7 +91,7 @@ bunny discord bridge
 
 - Mention du bot dans un canal → thread auto + shell `discord-*` dans la Web UI (cwd projet).
 - Claude est invoqué en **headless** (`claude -p --output-format json`) ; la réponse est postée **directement** dans le thread (plus de polling tmux).
-- Messages suivants (reply ou @mention) réinjectent le **Goal** + l’historique du thread.
+- Messages suivants (reply ou @mention) réinjectent le **Goal** (contexte) + l’historique du thread ; seul l’utilisateur clôture avec **Goal!** (Claude ne déclare pas l’objectif atteint).
 - **Goal!** / **Cancel** ferment le shell thread (onglet disparaît de la Web UI).
 - Réaction ⛔ sur le dernier message input → interruption du subprocess Claude en cours.
 - Shell `discord-*` dans la Web UI : le transcript `[discord] $ claude -p …` apparaît après l’appel (recharger l’onglet si besoin).

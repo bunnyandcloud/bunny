@@ -423,13 +423,7 @@ async fn post_thread_claude_response(
             .await?;
     }
 
-    if text.to_lowercase().contains("goal reached")
-        || text.to_lowercase().contains("objectif atteint")
-    {
-        post_goal_buttons(http, channel_id, input_message_id, thread_id).await;
-    }
-
-    let _ = (bctx, bunny);
+    let _ = (input_message_id, bctx, bunny, thread_id);
     Ok(())
 }
 

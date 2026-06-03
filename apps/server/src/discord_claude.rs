@@ -406,7 +406,7 @@ pub fn build_thread_claude_prompt(
 ) -> String {
     let history = truncate_thread_transcript(transcript);
     let mut prompt = String::from("# Agent mode (Discord thread)\n\n");
-    prompt.push_str("# Goal du thread (objectif à atteindre)\n");
+    prompt.push_str("# Goal du thread (contexte — référence pour orienter ton travail)\n");
     prompt.push_str(goal_text.trim());
     prompt.push_str("\n\n");
     if !history.is_empty() {
@@ -425,7 +425,8 @@ pub fn build_thread_claude_prompt(
     prompt.push_str("Réponds uniquement au dernier message utilisateur ci-dessous.\n");
     prompt.push_str(&format!("Travaille dans le cwd du projet: {project_cwd}\n"));
     prompt.push_str(
-        "Quand tu estimes que le Goal est atteint, indique-le clairement en fin de réponse (ex. « Goal reached » / « Objectif atteint »).\n\n",
+        "Ne déclare pas si le Goal est atteint ou non (pas de « Objectif atteint », « Goal reached », « pas encore atteint », etc.) — \
+         c’est l’utilisateur qui clôture le thread via le bouton **Goal!** sur Discord quand il est satisfait.\n\n",
     );
     prompt.push_str("Dernier message:\n");
     prompt.push_str(&format!("{author_label}: {user_message}"));
