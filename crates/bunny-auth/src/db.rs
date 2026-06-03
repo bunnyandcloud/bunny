@@ -956,6 +956,17 @@ impl AuthDb {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn get_stream_session_project_path(&self, id: Uuid) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT project_path FROM stream_sessions WHERE id = ?1",
+                params![id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn update_stream_session_status(&self, id: Uuid, status: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE stream_sessions SET status = ?1 WHERE id = ?2",

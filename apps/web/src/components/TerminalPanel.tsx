@@ -58,6 +58,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const connectedOnceRef = useRef(false);
 
   useImperativeHandle(
     ref,
@@ -93,6 +94,8 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
 
   useEffect(() => {
     if (!containerRef.current) return;
+    // Defer WS until this tab is shown at least once — avoids hidden shells disturbing live sessions.
+    if (!active && !connectedOnceRef.current) return;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -226,6 +229,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
 
       ws.onopen = () => {
         opened = true;
+        connectedOnceRef.current = true;
         reconnectAttempts = 0;
         sendResize();
         // F5 recreates an empty xterm — must replay from 0, not last stored offset.
@@ -332,7 +336,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       injectFnRef.current = () => false;
       term.dispose();
     };
-  }, [terminalId, readonly]);
+  }, [terminalId, readonly, active]);
 
   return (
     <div

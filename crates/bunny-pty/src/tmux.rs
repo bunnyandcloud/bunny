@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
 use uuid::Uuid;
 
 pub fn available() -> bool {
@@ -73,18 +74,25 @@ pub fn has_window(session: &str, window: &str) -> bool {
 
 /// Hide tmux status bar / messages for embedded web UI; keep sessions alive across attach clients.
 pub fn configure_session_for_web(session: &str) {
-    apply_utf8_locale_global();
+    static GLOBAL_ONCE: Once = Once::new();
+    GLOBAL_ONCE.call_once(|| {
+        apply_utf8_locale_global();
+        for args in [
+            vec!["set-option", "-g", "exit-empty-time", "0"],
+            vec!["set-option", "-g", "destroy-unattached", "off"],
+        ] {
+            let _ = run(&args);
+        }
+    });
     for args in [
-        vec!["set-option", "-t", session, "-g", "status", "off"],
-        vec!["set-option", "-t", session, "-g", "status-position", "off"],
-        vec!["set-option", "-t", session, "-g", "message", "off"],
-        vec!["set-option", "-t", session, "-g", "message-command", "off"],
-        vec!["set-option", "-t", session, "-g", "aggressive-resize", "on"],
-        vec!["set-option", "-t", session, "-g", "assume-default-size", "on"],
-        // Keep bash sessions when the web agent disconnects its tmux attach client.
-        vec!["set-option", "-t", session, "-g", "exit-empty-time", "0"],
-        vec!["set-option", "-t", session, "-g", "destroy-unattached", "off"],
-        vec!["set-option", "-t", session, "-g", "remain-on-exit", "off"],
+        vec!["set-option", "-t", session, "focus-events", "on"],
+        vec!["set-option", "-t", session, "status", "off"],
+        vec!["set-option", "-t", session, "status-position", "off"],
+        vec!["set-option", "-t", session, "message", "off"],
+        vec!["set-option", "-t", session, "message-command", "off"],
+        vec!["set-option", "-t", session, "aggressive-resize", "on"],
+        vec!["set-option", "-t", session, "assume-default-size", "on"],
+        vec!["set-option", "-t", session, "remain-on-exit", "off"],
     ] {
         let _ = run(&args);
     }
@@ -180,8 +188,27 @@ pub fn send_keys_literal(target: &str, text: &str, enter: bool) -> Result<()> {
     }
     run(&["send-keys", "-t", target, "-l", "--", text])?;
     if enter {
-        run(&["send-keys", "-t", target, "Enter"])?;
+        submit_line(target)?;
     }
+    Ok(())
+}
+
+/// Submit the current line in a pane (Enter). Prefer C-m — more reliable than the Enter key name in headless tmux.
+pub fn submit_line(target: &str) -> Result<()> {
+    if !target_alive(target) {
+        anyhow::bail!("tmux target not alive: {target}");
+    }
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    run(&["send-keys", "-t", target, "C-m"])?;
+    Ok(())
+}
+
+/// Send a special key (e.g. `Escape`, `C-c`) to a tmux pane.
+pub fn send_keys_key(target: &str, key: &str) -> Result<()> {
+    if !target_alive(target) {
+        anyhow::bail!("tmux target not alive: {target}");
+    }
+    run(&["send-keys", "-t", target, key])?;
     Ok(())
 }
 

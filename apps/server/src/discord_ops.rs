@@ -54,6 +54,17 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/task/stop", post(internal_task_stop))
         .route("/approval/resolve", post(internal_approval_resolve))
         .route("/claude/reset", post(internal_claude_reset))
+        .route("/thread/bind", post(internal_thread_bind_route))
+        .route("/thread/input", post(internal_thread_input_route))
+        .route("/thread/answer", post(internal_thread_answer_route))
+        .route("/thread/discussion", post(internal_thread_discussion_route))
+        .route("/thread/stop", post(internal_thread_stop_route))
+        .route("/thread/finalize", post(internal_thread_finalize_route))
+        .route("/thread/status", post(internal_thread_status_route))
+        .route("/thread/attachment", post(internal_thread_attachment_route))
+        .route("/project/set", post(internal_project_set_route))
+        .route("/project", get(internal_project_get_route))
+        .route("/git", post(internal_git_route))
         .route("/follow/start", post(internal_follow_start))
         .route("/follow/stop", post(internal_follow_stop))
         .route("/audit", post(internal_audit))
@@ -1281,7 +1292,7 @@ async fn fetch_discord_user_id(token: &str) -> Result<String, ApiError> {
         .ok_or_else(|| ApiError::validation("no user id"))
 }
 
-fn resolve_link(state: &AppState, ctx: &BridgeContext) -> Result<DiscordSessionLink, ApiError> {
+pub(crate) fn resolve_link(state: &AppState, ctx: &BridgeContext) -> Result<DiscordSessionLink, ApiError> {
     state
         .discord
         .lock()
@@ -1290,7 +1301,7 @@ fn resolve_link(state: &AppState, ctx: &BridgeContext) -> Result<DiscordSessionL
         .ok_or_else(|| ApiError::not_found("channel not linked to a bunny session"))
 }
 
-fn resolve_bunny_user(state: &AppState, ctx: &BridgeContext) -> Result<Uuid, ApiError> {
+pub(crate) fn resolve_bunny_user(state: &AppState, ctx: &BridgeContext) -> Result<Uuid, ApiError> {
     let mut discord = state.discord.lock();
     if let Some(user_id) = discord
         .get_bunny_user_for_discord(&ctx.discord_user_id)
@@ -1309,7 +1320,7 @@ fn resolve_bunny_user(state: &AppState, ctx: &BridgeContext) -> Result<Uuid, Api
     ))
 }
 
-fn ensure_discord_control(state: &AppState, user_id: Uuid, session_id: Uuid) -> Result<(), ApiError> {
+pub(crate) fn ensure_discord_control(state: &AppState, user_id: Uuid, session_id: Uuid) -> Result<(), ApiError> {
     let role = crate::api::get_role(state, user_id, session_id)?;
     if role_can(role, Action::DiscordControl) {
         Ok(())
@@ -1341,6 +1352,7 @@ async fn capture_shell_run_output(
             session_id,
             &command,
             std::time::Duration::from_secs(40),
+            None,
         )
         .map_err(|e| ApiError::validation(&e.to_string()))
     })
@@ -1472,6 +1484,105 @@ pub fn audit(
         created_at: Utc::now(),
     };
     state.discord.lock().insert_audit(&entry).ok();
+}
+
+async fn internal_thread_bind_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadBindRequest>,
+) -> Result<Json<crate::discord_threads::ThreadBindResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_bind(state, body).await
+}
+
+async fn internal_thread_input_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadInputRequest>,
+) -> Result<Json<crate::discord_threads::ThreadInputResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_input(state, body).await
+}
+
+async fn internal_thread_answer_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadAnswerRequest>,
+) -> Result<Json<crate::discord_threads::ThreadAnswerResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_answer(state, body).await
+}
+
+async fn internal_thread_discussion_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadDiscussionRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_discussion(state, body).await
+}
+
+async fn internal_thread_stop_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadIdRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_stop(state, body).await
+}
+
+async fn internal_thread_finalize_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadFinalizeRequest>,
+) -> Result<Json<crate::discord_threads::ThreadFinalizeResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_finalize(state, body).await
+}
+
+async fn internal_thread_status_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadIdRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_status(state, body).await
+}
+
+async fn internal_thread_attachment_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_attachment(state, body).await
+}
+
+async fn internal_project_set_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ProjectPathRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_project_set(state, body).await
+}
+
+async fn internal_project_get_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(ctx): Query<BridgeContext>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_project_get(state, ctx).await
+}
+
+async fn internal_git_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::GitCommandRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_git_command(state, body).await
 }
 
 pub fn generate_bridge_token() -> (String, String) {

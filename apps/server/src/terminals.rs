@@ -215,10 +215,11 @@ pub fn needs_reattach(state: &AppState, id: Uuid) -> bool {
 
 /// Drop stale attach clients and (re)connect to tmux.
 pub fn prepare_terminal_connection(state: &AppState, id: Uuid) -> Result<()> {
-    if state.terminals.get(id).is_some() && !needs_reattach(state, id) {
-        return Ok(());
-    }
     if state.terminals.get(id).is_some() {
+        match state.terminals.status(id) {
+            Some(TerminalStatus::Running) | Some(TerminalStatus::Starting) => return Ok(()),
+            _ => {}
+        }
         detach_terminal(state, id);
     }
     let auth_db = state.auth.db();
@@ -248,8 +249,11 @@ fn sync_status_to_db(state: &AppState, id: Uuid, status: TerminalStatus) {
 }
 
 pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Result<()> {
-    if state.terminals.get(record.id).is_some() && !needs_reattach(state, record.id) {
-        return Ok(());
+    if state.terminals.get(record.id).is_some() {
+        match state.terminals.status(record.id) {
+            Some(TerminalStatus::Running) | Some(TerminalStatus::Starting) => return Ok(()),
+            _ => {}
+        }
     }
     let (history, resume_cwd) = collect_persisted_scrollback(state, record);
 
@@ -515,7 +519,8 @@ pub fn ensure_session_terminals_live(state: &Arc<AppState>, session_id: Uuid) {
     let records: Vec<TerminalRecord> = rows.into_iter().map(row_to_record).collect();
 
     for record in records {
-        if !needs_reattach(state, record.id) {
+        // Never detach/re-attach shells that already have a live in-memory client (Web UI session).
+        if state.terminals.get(record.id).is_some() {
             continue;
         }
         if let Err(e) = attach_terminal_record(state, &record) {
@@ -523,6 +528,32 @@ pub fn ensure_session_terminals_live(state: &Arc<AppState>, session_id: Uuid) {
             let _ = auth_db.lock().update_terminal_status(record.id, "exited");
         }
     }
+}
+
+/// Attach one terminal without touching other shells in the session (Discord thread paths).
+pub fn ensure_terminal_attached(state: &AppState, term_id: Uuid) -> Result<()> {
+    if state.terminals.get(term_id).is_some() && !needs_reattach(state, term_id) {
+        return Ok(());
+    }
+    let row = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not in database"))?;
+    attach_terminal_record(state, &row_to_record(row))
+}
+
+pub fn notify_terminal_created(state: &AppState, session_id: Uuid, term_id: Uuid, name: &str) {
+    state.realtime.publish(
+        session_id,
+        &serde_json::json!({
+            "type": "terminal.status.changed",
+            "terminalId": term_id.to_string(),
+            "name": name,
+            "status": "running",
+        }),
+    );
 }
 
 /// Max file size sent to Discord as an attachment (Discord allows up to 25 MB; stay under).
@@ -646,7 +677,7 @@ pub fn exec_discord_shell_command(
         cmd.env(k, v);
     }
 
-    let out = run_command_with_timeout(&mut cmd, std::time::Duration::from_secs(120))?;
+    let out = run_command_with_timeout(&mut cmd, std::time::Duration::from_secs(120), None)?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -666,6 +697,7 @@ pub fn exec_discord_shell_command_timed(
     session_id: Uuid,
     command: &str,
     timeout: std::time::Duration,
+    thread_id: Option<&str>,
 ) -> Result<(String, i32)> {
     use bunny_pty::locale;
     use std::process::{Command, Stdio};
@@ -719,7 +751,7 @@ pub fn exec_discord_shell_command_timed(
         cmd.env(k, v);
     }
 
-    let out = run_command_with_timeout(&mut cmd, timeout)?;
+    let out = run_command_with_timeout(&mut cmd, timeout, thread_id.map(|t| (state, t)))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -732,6 +764,37 @@ pub fn exec_discord_shell_command_timed(
     Ok((text, out.status.code().unwrap_or(1)))
 }
 
+pub const THREAD_CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Run `claude -p` for a Discord thread; registers subprocess PID for `/thread/stop`.
+pub fn exec_discord_shell_command_for_thread(
+    state: &AppState,
+    term_id: Uuid,
+    session_id: Uuid,
+    thread_id: &str,
+    command: &str,
+) -> Result<(String, i32)> {
+    exec_discord_shell_command_timed(
+        state,
+        term_id,
+        session_id,
+        command,
+        THREAD_CLAUDE_TIMEOUT,
+        Some(thread_id),
+    )
+}
+
+pub fn cancel_thread_claude_run(state: &AppState, thread_id: &str) -> bool {
+    let pid = state.thread_claude_pids.lock().remove(thread_id);
+    if let Some(pid) = pid {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+        return true;
+    }
+    false
+}
+
 struct TimedOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
@@ -741,6 +804,7 @@ struct TimedOutput {
 fn run_command_with_timeout(
     cmd: &mut std::process::Command,
     timeout: std::time::Duration,
+    pid_registry: Option<(&AppState, &str)>,
 ) -> Result<TimedOutput> {
     use std::io::Read;
     use std::process::Stdio;
@@ -753,6 +817,13 @@ fn run_command_with_timeout(
         .spawn()
         .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
 
+    if let Some((state, thread_id)) = pid_registry {
+        state
+            .thread_claude_pids
+            .lock()
+            .insert(thread_id.to_string(), child.id());
+    }
+
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let started = Instant::now();
@@ -760,6 +831,9 @@ fn run_command_with_timeout(
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                if let Some((state, thread_id)) = pid_registry {
+                    state.thread_claude_pids.lock().remove(thread_id);
+                }
                 if let Some(mut out) = child.stdout.take() {
                     let _ = out.read_to_end(&mut stdout);
                 }
@@ -774,6 +848,9 @@ fn run_command_with_timeout(
             }
             Ok(None) => {
                 if started.elapsed() > timeout {
+                    if let Some((state, thread_id)) = pid_registry {
+                        state.thread_claude_pids.lock().remove(thread_id);
+                    }
                     let _ = child.kill();
                     let _ = child.wait();
                     anyhow::bail!(
@@ -810,23 +887,25 @@ pub fn strip_ansi_escapes(text: &str) -> String {
 }
 
 fn summarize_discord_command(command: &str) -> String {
-    if let Some(rest) = command.strip_prefix("claude --print ") {
-        let rest = rest.trim();
-        let unquoted = rest
-            .strip_prefix('\'')
-            .and_then(|s| s.strip_suffix('\''))
-            .or_else(|| {
-                rest.strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
-            })
-            .unwrap_or(rest);
-        let preview: String = unquoted.chars().take(72).collect();
-        let suffix = if unquoted.chars().count() > 72 {
-            "…"
-        } else {
-            ""
-        };
-        return format!("claude --print '{preview}{suffix}'");
+    for prefix in ["claude -p ", "claude --print "] {
+        if let Some(rest) = command.strip_prefix(prefix) {
+            let rest = rest.trim();
+            let unquoted = rest
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+                .or_else(|| {
+                    rest.strip_prefix('"')
+                        .and_then(|s| s.strip_suffix('"'))
+                })
+                .unwrap_or(rest);
+            let preview: String = unquoted.chars().take(72).collect();
+            let suffix = if unquoted.chars().count() > 72 {
+                "…"
+            } else {
+                ""
+            };
+            return format!("claude -p '{preview}{suffix}'");
+        }
     }
     let n: String = command.chars().take(120).collect();
     if command.chars().count() > 120 {

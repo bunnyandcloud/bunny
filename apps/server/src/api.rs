@@ -854,7 +854,6 @@ async fn list_terminals(
     let filter_session = if let Some(s) = &q.session_id {
         let sid = Uuid::parse_str(s).map_err(|_| ApiError::validation("session_id"))?;
         ensure_session_access(&state, user, sid, Action::TerminalRead)?;
-        ensure_session_terminals_live(&state, sid);
         Some(sid)
     } else {
         None

@@ -18,6 +18,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 async-trait = "0.1"
+base64 = "0.22"
 serenity = { version = "0.12", default-features = false, features = [
     "client",
     "gateway",

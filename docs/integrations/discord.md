@@ -50,11 +50,33 @@ cargo run -p bunny-discord-bridge
 
 **Docker on Mac:** see [discord-docker-dev.md](discord-docker-dev.md) (`docker-compose.dev.yml` + `scripts/run-discord-bridge.sh`).
 
+## Thread workflow (@mention)
+
+In a linked channel, **@mention the bridge bot** with your task. The bot:
+
+1. Creates a **Discord thread** named from your message
+2. Opens a **dedicated shell** on the server (cwd = session `project_path`, or `/bunny project path:…`)
+3. Starts **Claude Code** interactively (auto-accepts the “trust this folder” prompt)
+4. Streams shell output into the thread
+5. Optional: creates a **git branch** per thread when the project cwd is a git repo
+
+In the thread:
+
+- **Reply to the bot** or **@mention the bot** → input to Claude in that shell
+- Other messages → stored as discussion context for the next Claude input
+- **Goal!** / **Cancel** buttons → close shell; Cancel resets git to thread start when git was enabled
+- **⛔ / 🛑** reaction on your last bot-directed message → interrupt Claude
+- `/bunny project` / `/bunny git` — see below
+
+Legacy `@bunny and claude …` mentions are removed.
+
 ## Commands (Discord)
 
 | Command | Description |
 |---------|-------------|
 | `/bunny link` | Link channel to session |
+| `/bunny project` | Show or set project directory (`path:` optional) |
+| `/bunny git` | Git in project cwd (`action:` status, diff, log, checkout, branch, merge, reset_hard) |
 | `/bunny unlink` | Remove link |
 | `/bunny status` | Show link status |
 | `/bunny snapshot` | Shell PNG (`shell:` optional — see `shell_list`) |

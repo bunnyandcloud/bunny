@@ -43,6 +43,8 @@ pub struct AppState {
     pub claude_install: Mutex<InstallState>,
     pub claude_auth: Mutex<AuthFlow>,
     pub discord: ParkingMutex<DiscordDb>,
+    /// Active headless Claude subprocess PIDs per Discord thread (for /thread/stop).
+    pub thread_claude_pids: Mutex<HashMap<String, u32>>,
 }
 
 pub struct PreviewState {
@@ -116,6 +118,7 @@ impl AppState {
             claude_install: Mutex::new(InstallState::default()),
             claude_auth: Mutex::new(AuthFlow::default()),
             discord: ParkingMutex::new(discord),
+            thread_claude_pids: Mutex::new(HashMap::new()),
             supervisor: RwLock::new(ProcessSupervisor::new(
                 config.recovery.process_supervisor.max_restarts,
                 config.recovery.process_supervisor.restart_window_seconds,

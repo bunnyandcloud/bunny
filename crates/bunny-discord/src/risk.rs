@@ -35,6 +35,14 @@ pub fn requires_approval(cmd: &str) -> bool {
 /// Commands that need a real TTY — cannot run via Discord `/bunny run` (non-interactive).
 pub fn is_interactive_discord_command(cmd: &str) -> bool {
     let lower = cmd.trim().to_lowercase();
+    // Headless Claude Code (`-p` / `--print`) runs as a subprocess, not in the tmux pane.
+    if lower.starts_with("claude -p")
+        || lower.starts_with("claude --print")
+        || lower.contains(" claude -p ")
+        || lower.contains(" claude --print ")
+    {
+        return false;
+    }
     let first = lower.split_whitespace().next().unwrap_or("");
     (matches!(
         first,

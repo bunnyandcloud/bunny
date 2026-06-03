@@ -119,6 +119,9 @@ pub async fn handle_terminal_ws(
 }
 
 fn build_replay(state: &AppState, terminal_id: Uuid, from_offset: u64) -> ReplayResponse {
+    let disk_merged = crate::terminals::load_scrollback_for_replay(state, terminal_id);
+    let disk_has_discord = disk_merged.contains("[discord]");
+
     if let Some(text) = state.terminals.take_recovery_replay(terminal_id) {
         let snapshot = state
             .terminals
@@ -152,6 +155,22 @@ fn build_replay(state: &AppState, terminal_id: Uuid, from_offset: u64) -> Replay
         .unwrap_or(0);
 
     if from_offset >= snapshot {
+        if from_offset == 0 && disk_has_discord && !disk_merged.trim().is_empty() {
+            let data = disk_merged.replace('\n', "\r\n");
+            tracing::info!(
+                terminal = %terminal_id,
+                bytes = data.len(),
+                "sending discord transcript replay from disk"
+            );
+            return ReplayResponse {
+                replay_mode: ReplayMode::Recovery,
+                snapshot_offset: snapshot,
+                chunks: vec![ReplayChunk {
+                    offset: 1,
+                    data,
+                }],
+            };
+        }
         return ReplayResponse {
             replay_mode: ReplayMode::None,
             snapshot_offset: snapshot,
@@ -165,10 +184,39 @@ fn build_replay(state: &AppState, terminal_id: Uuid, from_offset: u64) -> Replay
         .unwrap_or_default();
 
     if rows.is_empty() {
+        if from_offset == 0 && disk_has_discord && !disk_merged.trim().is_empty() {
+            let data = disk_merged.replace('\n', "\r\n");
+            return ReplayResponse {
+                replay_mode: ReplayMode::Recovery,
+                snapshot_offset: snapshot,
+                chunks: vec![ReplayChunk {
+                    offset: 1,
+                    data,
+                }],
+            };
+        }
         return ReplayResponse {
             replay_mode: ReplayMode::None,
             snapshot_offset: snapshot,
             chunks: vec![],
+        };
+    }
+
+    let buffer_text: String = rows.iter().map(|(_, d)| d.as_str()).collect();
+    if from_offset == 0 && disk_has_discord && !disk_merged.contains(&buffer_text) {
+        let data = disk_merged.replace('\n', "\r\n");
+        tracing::info!(
+            terminal = %terminal_id,
+            bytes = data.len(),
+            "sending merged disk replay (discord transcript)"
+        );
+        return ReplayResponse {
+            replay_mode: ReplayMode::Recovery,
+            snapshot_offset: snapshot,
+            chunks: vec![ReplayChunk {
+                offset: 1,
+                data,
+            }],
         };
     }
 

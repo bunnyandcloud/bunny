@@ -1,3 +1,5 @@
+mod threads;
+
 use anyhow::Result;
 use serenity::all::{
     Command, CommandDataOptionValue, CommandOptionType, CreateActionRow, CreateAttachment,
@@ -63,7 +65,7 @@ impl BunnyClient {
             .await
     }
 
-    async fn post_json_timeout<T: serde::Serialize>(
+    pub(crate) async fn post_json_timeout<T: serde::Serialize>(
         &self,
         path: &str,
         body: &T,
@@ -162,6 +164,8 @@ impl BunnyClient {
 struct Handler {
     bunny: BunnyClient,
     dev_guild_id: Option<u64>,
+    bot_id: std::sync::Mutex<Option<serenity::model::id::UserId>>,
+    thread_runtime: std::sync::Arc<threads::ThreadRuntime>,
 }
 
 /// Discord reply payload (PNG stays in memory — never written to disk).
@@ -194,9 +198,23 @@ const DISCORD_PAGE_LIMIT: usize = 1990;
 const MAX_DISCORD_PAGES: usize = 10;
 
 fn ctx_from_interaction(cmd: &serenity::model::application::CommandInteraction) -> serde_json::Value {
+    let channel_id = cmd.channel_id.get().to_string();
     serde_json::json!({
         "guild_id": cmd.guild_id.map(|g| g.get().to_string()).unwrap_or_default(),
-        "channel_id": cmd.channel_id.get().to_string(),
+        "channel_id": channel_id,
+        "thread_id": channel_id,
+        "discord_user_id": cmd.user.id.get().to_string(),
+    })
+}
+
+async fn ctx_from_interaction_resolved(
+    http: &serenity::http::Http,
+    cmd: &serenity::model::application::CommandInteraction,
+) -> serde_json::Value {
+    let parent = threads::parent_channel_id_for_id(http, cmd.channel_id).await;
+    serde_json::json!({
+        "guild_id": cmd.guild_id.map(|g| g.get().to_string()).unwrap_or_default(),
+        "channel_id": parent,
         "thread_id": cmd.channel_id.get().to_string(),
         "discord_user_id": cmd.user.id.get().to_string(),
     })
@@ -217,6 +235,9 @@ fn query_ctx(ctx: &serde_json::Value) -> Vec<(String, String)> {
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         tracing::info!("discord bridge connected as {}", ready.user.name);
+        if let Ok(mut id) = self.bot_id.lock() {
+            *id = Some(ready.user.id);
+        }
         let commands = vec![
             CreateCommand::new("bunny")
                 .description("Control a linked Bunny session")
@@ -414,6 +435,43 @@ impl EventHandler for Handler {
                         "claude_reset",
                         "Reset Claude conversation for this Discord channel (ask/plan session)",
                     ),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "project",
+                        "Show or set project directory for this channel",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "path",
+                        "Absolute path to project root",
+                    )),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "git",
+                        "Git commands in project directory",
+                    )
+                    .add_sub_option(
+                        CreateCommandOption::new(
+                            CommandOptionType::String,
+                            "action",
+                            "status|diff|log|checkout|branch|merge|reset_hard",
+                        )
+                        .required(true),
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "branch",
+                        "Branch name (checkout/branch/merge)",
+                    ))
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "path",
+                        "File path for diff",
+                    )),
                 ),
         ];
         if let Err(e) = register_slash_commands(&ctx, self.dev_guild_id, commands).await {
@@ -422,52 +480,68 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
-        if msg.author.bot {
-            return;
-        }
-        let Some(content) = msg.content.strip_prefix("@bunny") else {
-            return;
+        let bot_id = match self.bot_id.lock().ok().and_then(|g| *g) {
+            Some(id) => id,
+            None => return,
         };
-        let trimmed = content.trim();
-        let lower = trimmed.to_lowercase();
-        let (path, prompt) = if let Some(rest) = lower.strip_prefix("and claude do :") {
-            ("/agent/do", rest.trim())
-        } else if let Some(rest) = lower.strip_prefix("and claude ask :") {
-            ("/agent/ask", rest.trim())
-        } else if let Some(rest) = lower.strip_prefix("and claude plan :") {
-            ("/agent/plan", rest.trim())
-        } else {
-            return;
-        };
-        if prompt.is_empty() {
-            return;
-        }
-        let bridge_ctx = serde_json::json!({
-            "guild_id": msg.guild_id.map(|g| g.get().to_string()).unwrap_or_default(),
-            "channel_id": msg.channel_id.get().to_string(),
-            "thread_id": msg.channel_id.get().to_string(),
-            "discord_user_id": msg.author.id.get().to_string(),
-        });
-        let mut body = bridge_ctx;
-        body["agent"] = serde_json::json!("claude");
-        body["prompt"] = serde_json::json!(prompt);
-        match self
-            .bunny
-            .post_json_timeout(path, &body, Duration::from_secs(180))
-            .await
+        if let Err(e) = threads::handle_message(
+            &ctx,
+            &msg,
+            &self.bunny,
+            bot_id,
+            &self.thread_runtime,
+        )
+        .await
         {
-            Ok(res) => {
-                let pages = format_agent_reply_pages(&res);
-                for page in pages {
-                    let _ = msg.channel_id.say(&ctx.http, page).await;
+            tracing::error!("discord message handler: {e}");
+        }
+    }
+
+    async fn reaction_add(&self, ctx: Context, reaction: serenity::model::channel::Reaction) {
+        let bot_id = match self.bot_id.lock().ok().and_then(|g| *g) {
+            Some(id) => id,
+            None => return,
+        };
+        if reaction.user_id == Some(bot_id) {
+            return;
+        }
+        if !threads::is_stop_emoji(&reaction.emoji) {
+            return;
+        }
+        let parent_ch = if let Ok(ch) = reaction.channel_id.to_channel(&ctx.http).await {
+            if let serenity::model::channel::Channel::Guild(g) = ch {
+                if let Some(parent) = g.parent_id {
+                    parent.get().to_string()
+                } else {
+                    reaction.channel_id.get().to_string()
                 }
+            } else {
+                reaction.channel_id.get().to_string()
             }
-            Err(e) => {
-                let _ = msg
-                    .channel_id
-                    .say(&ctx.http, format!("Error: {e}"))
-                    .await;
-            }
+        } else {
+            reaction.channel_id.get().to_string()
+        };
+        let thread_id = reaction.channel_id.get().to_string();
+        let user_id = reaction
+            .user_id
+            .map(|u| u.get().to_string())
+            .unwrap_or_default();
+        let bctx = threads::bridge_ctx(
+            reaction.guild_id,
+            &parent_ch,
+            Some(&thread_id),
+            &user_id,
+        );
+        if let Err(e) = threads::handle_stop_reaction(
+            &ctx,
+            &self.bunny,
+            &thread_id,
+            &bctx,
+            reaction.message_id.get(),
+        )
+        .await
+        {
+            tracing::error!("stop reaction: {e}");
         }
     }
 
@@ -489,7 +563,7 @@ impl EventHandler for Handler {
                     return;
                 }
                 tokio::spawn(async move {
-                    let bridge_ctx = ctx_from_interaction(&cmd);
+                    let bridge_ctx = ctx_from_interaction_resolved(&http, &cmd).await;
                     let response = match handle_command(&bunny, &cmd, &bridge_ctx).await {
                         Ok(reply) => reply,
                         Err(e) => text_reply(format!("Error: {e}")),
@@ -500,6 +574,45 @@ impl EventHandler for Handler {
                 });
             }
             Interaction::Component(comp) => {
+                if threads::parse_thread_question_button(&comp.data.custom_id).is_some() {
+                    let bunny = bunny.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            threads::handle_thread_question_button(&comp, http.clone(), &bunny).await
+                        {
+                            tracing::error!("thread question button: {e}");
+                            let _ = comp
+                                .create_followup(
+                                    &http,
+                                    CreateInteractionResponseFollowup::new()
+                                        .content(format!("❌ Erreur : {e}")),
+                                )
+                                .await;
+                        }
+                    });
+                    return;
+                }
+                if let Some((goal, thread_id)) = parse_goal_button(&comp.data.custom_id) {
+                    if comp
+                        .create_response(
+                            &http,
+                            CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let bunny = bunny.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            threads::handle_goal_cancel_button(&comp, &http, &bunny, goal).await
+                        {
+                            tracing::error!("goal/cancel: {e}");
+                        }
+                    });
+                    return;
+                }
                 let Some((approve, approval_id)) = parse_approval_button(&comp.data.custom_id)
                 else {
                     return;
@@ -785,6 +898,16 @@ async fn handle_command(
                 "Conversation Claude réinitialisée pour ce canal (`ask`/`plan` repartiront de zéro). Le shell interactif (`do`) reste dans le terminal tant que vous ne quittez pas Claude.",
             ))
         }
+        "project" => {
+            let path = opt_str(&sub_opts, "path");
+            threads::run_project_command(bunny, bridge_ctx, path).await
+        }
+        "git" => {
+            let action = opt_str(&sub_opts, "action").unwrap_or("status");
+            let branch = opt_str(&sub_opts, "branch");
+            let path = opt_str(&sub_opts, "path");
+            threads::run_git_command(bunny, bridge_ctx, action, branch, path).await
+        }
         "stop" => {
             let task_id = opt_str(&sub_opts, "task_id").unwrap_or("");
             let mut body = bridge_ctx.clone();
@@ -829,6 +952,36 @@ fn approval_button_rows(approval_id: &str) -> Vec<CreateActionRow> {
             .label("Refuser")
             .style(ButtonStyle::Danger),
     ])]
+}
+
+fn parse_goal_button(custom_id: &str) -> Option<(bool, String)> {
+    custom_id
+        .strip_prefix("bunny:goal:")
+        .map(|id| (true, id.to_string()))
+        .or_else(|| {
+            custom_id
+                .strip_prefix("bunny:cancel:")
+                .map(|id| (false, id.to_string()))
+        })
+}
+
+pub(crate) fn paginate_plain(text: &str) -> Vec<String> {
+    const MAX: usize = 1990;
+    if text.len() <= MAX {
+        return vec![text.to_string()];
+    }
+    let mut pages = Vec::new();
+    let mut rest = text.to_string();
+    while !rest.is_empty() {
+        if rest.len() <= MAX {
+            pages.push(rest);
+            break;
+        }
+        let split = rest[..MAX].rfind('\n').unwrap_or(MAX);
+        pages.push(rest[..split].to_string());
+        rest = rest[split..].trim_start().to_string();
+    }
+    pages
 }
 
 fn parse_approval_button(custom_id: &str) -> Option<(bool, String)> {
@@ -1409,11 +1562,14 @@ async fn main() -> Result<()> {
     // GUILDS: slash commands; MESSAGE_CONTENT: @bunny mentions (privileged — enable in Developer Portal)
     let intents = GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT;
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_MESSAGE_REACTIONS;
     let mut client = Client::builder(&config.discord.bot_token, intents)
         .event_handler(Handler {
             bunny,
             dev_guild_id: config.discord.guild_id,
+            bot_id: std::sync::Mutex::new(None),
+            thread_runtime: std::sync::Arc::new(threads::ThreadRuntime::new()),
         })
         .application_id(config.discord.application_id.into())
         .await?;

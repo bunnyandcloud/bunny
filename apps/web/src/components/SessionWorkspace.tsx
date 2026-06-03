@@ -128,9 +128,19 @@ export default function SessionWorkspace({ sessionId }: Props) {
       .catch(() => setSessionName(`Session ${sessionId.slice(0, 8)}`));
   }, [sessionId]);
 
+  const shellIdsRef = useRef<string[]>([]);
+
   const refreshShells = useCallback(async () => {
     const list = await listSessionTerminals(sessionId);
+    const newDiscord = list.find(
+      (s) => s.name.startsWith('discord-') && !shellIdsRef.current.includes(s.id),
+    );
+    shellIdsRef.current = list.map((s) => s.id);
     setShells(list);
+    if (newDiscord) {
+      setActiveId(newDiscord.id);
+      setWorkspaceTab('terminal');
+    }
     return list;
   }, [sessionId]);
 
@@ -187,6 +197,39 @@ export default function SessionWorkspace({ sessionId }: Props) {
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
+  }, [refreshShells]);
+
+  useEffect(() => {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/api/v1/sessions/${sessionId}/realtime`);
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data as string) as {
+          type?: string;
+          terminalId?: string;
+          name?: string;
+        };
+        if (msg.type === 'terminal.status.changed') {
+          void refreshShells().then((list) => {
+            if (msg.name?.startsWith('discord-') && msg.terminalId) {
+              if (list.some((s) => s.id === msg.terminalId)) {
+                setActiveId(msg.terminalId);
+              }
+            }
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    return () => ws.close();
+  }, [sessionId, refreshShells]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshShells();
+    }, 3000);
+    return () => window.clearInterval(id);
   }, [refreshShells]);
 
   async function handleNewShell() {

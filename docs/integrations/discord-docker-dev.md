@@ -83,6 +83,20 @@ bunny discord bridge
 | Arrêter stream browser | `/bunny stream_browser_stop` — tous les liens actifs du canal ; `url:<watch URL>` pour un lien précis |
 | Browser : écran noir en **Stream** / watch | Normal en Docker avec l’ancien WebRTC — rebuild Web UI + agent, puis Stream/watch passent par noVNC read-only (tunnel :7681). Relance `bunny run`. |
 | Slash commands doublées (`run` + `shell_run`, chaque cmd x2) | **Global + guild** en parallèle. `./scripts/docker-dev.sh stop-bridge` puis **un seul** `start-bridge`. Vérifie `guild_id` dans `.discord/bridge.yaml`. Quitte Discord (Cmd+Q). Log attendu : `removed stale global slash commands`. |
+| Mention `@bunny` → pas de réponse dans le thread | Rebuild + redémarrer agent + bridge : `cargo build --release -p bunny-server -p bunny-discord-bridge`, puis Ctrl+C sur `bunny run` et `start-bridge`. Les threads utilisent `claude -p` (headless) — la réponse arrive dans Discord après la fin de l’appel (jusqu’à ~5 min). |
+| Thread : shell `discord-*` sans réponse Discord | Vérifier que Claude Code est installé (`?claude=setup` dans la Web UI). Le shell thread affiche le transcript des commandes `claude -p`, pas une session interactive. |
+| Thread : typing puis silence (pas de GOAL) | Ancien bug : `claude -p` était bloqué comme commande « interactive ». Rebuild `bunny-server` + `bunny-discord-bridge`, redémarrer agent + bridge. |
+
+### Threads Discord (`@bunny` mention)
+
+- Mention du bot dans un canal → thread auto + shell `discord-*` dans la Web UI (cwd projet).
+- Claude est invoqué en **headless** (`claude -p --output-format json`) ; la réponse est postée **directement** dans le thread (plus de polling tmux).
+- Messages suivants (reply ou @mention) réinjectent le **Goal** + l’historique du thread.
+- **Goal!** / **Cancel** ferment le shell thread (onglet disparaît de la Web UI).
+- Réaction ⛔ sur le dernier message input → interruption du subprocess Claude en cours.
+- Shell `discord-*` dans la Web UI : le transcript `[discord] $ claude -p …` apparaît après l’appel (recharger l’onglet si besoin).
+- Erreur `error_max_turns` : le plan partiel est extrait du JSON si présent ; pour un plan sans choix, demander « écris le plan en markdown ».
+- **AskUserQuestion** : si Claude a besoin d’un choix, le bot poste des **boutons** dans le thread ; après clic, `claude -p --resume` reprend avec vos réponses. Plusieurs questions → un message/boutons par question.
 
 ### Activer les intents Discord (obligatoire une fois)
 

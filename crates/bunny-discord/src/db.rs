@@ -1,7 +1,8 @@
 use crate::models::{
-    AgentTask, AgentTaskMode, AgentTaskStatus, ApprovalRequest, DiscordAuditEntry,
-    DiscordFollow, DiscordInstallation, DiscordLinkCode, DiscordSessionLink, DiscordThreadBinding,
-    DiscordUserLink, WatchSession,
+    AgentTask, AgentTaskMode, AgentTaskStatus, ApprovalRequest, AskUserQuestionItem,
+    DiscordAuditEntry, DiscordFollow, DiscordInstallation, DiscordLinkCode, DiscordSessionLink,
+    DiscordThreadBinding, DiscordThreadDiscussion, DiscordThreadMessage, DiscordThreadMessageRole,
+    DiscordThreadPendingQuestions, DiscordThreadStatus, DiscordUserLink, WatchSession,
 };
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
@@ -149,6 +150,63 @@ impl DiscordDb {
             "ALTER TABLE discord_session_links ADD COLUMN claude_session_id TEXT",
             [],
         );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_session_links ADD COLUMN project_cwd_override TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_thread_bindings ADD COLUMN term_id TEXT",
+            [],
+        );
+        for col in [
+            "ALTER TABLE discord_thread_bindings ADD COLUMN project_cwd TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN goal_text TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN git_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN base_branch TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN thread_branch TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN start_commit TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN last_pane_marker INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN last_input_discord_message_id TEXT",
+            "ALTER TABLE discord_thread_bindings ADD COLUMN last_pane_snapshot TEXT NOT NULL DEFAULT ''",
+        ] {
+            let _ = self.conn.execute(col, []);
+        }
+        self.conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS discord_thread_discussion (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                discord_user_id TEXT NOT NULL,
+                author_name TEXT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_thread_discussion ON discord_thread_discussion(thread_id);
+            CREATE TABLE IF NOT EXISTS discord_thread_messages (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                discord_user_id TEXT,
+                author_name TEXT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_thread_messages ON discord_thread_messages(thread_id, created_at);
+            CREATE TABLE IF NOT EXISTS discord_thread_pending_questions (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                questions_json TEXT NOT NULL,
+                answers_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_thread_pending ON discord_thread_pending_questions(thread_id);
+            "#,
+        )?;
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_thread_bindings ADD COLUMN claude_session_id TEXT",
+            [],
+        );
         Ok(())
     }
 
@@ -272,23 +330,25 @@ impl DiscordDb {
         Ok(())
     }
 
+    pub fn set_project_cwd_override(
+        &self,
+        guild_id: &str,
+        channel_id: &str,
+        path: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_session_links SET project_cwd_override = ?1 WHERE guild_id = ?2 AND channel_id = ?3",
+            params![path, guild_id, channel_id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_session_link(&self, guild_id: &str, channel_id: &str) -> Result<Option<DiscordSessionLink>> {
         self.conn
             .query_row(
-                "SELECT guild_id, channel_id, session_id, created_by_user_id, status, created_at FROM discord_session_links WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
+                "SELECT guild_id, channel_id, session_id, created_by_user_id, status, project_cwd_override, created_at FROM discord_session_links WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
                 params![guild_id, channel_id],
-                |r| {
-                    Ok(DiscordSessionLink {
-                        guild_id: r.get(0)?,
-                        channel_id: r.get(1)?,
-                        session_id: Uuid::parse_str(&r.get::<_, String>(2)?).unwrap_or_default(),
-                        created_by_user_id: r
-                            .get::<_, Option<String>>(3)?
-                            .and_then(|s| Uuid::parse_str(&s).ok()),
-                        status: r.get(4)?,
-                        created_at: parse_ts(&r.get::<_, String>(5)?),
-                    })
-                },
+                map_session_link_row,
             )
             .optional()
             .map_err(Into::into)
@@ -296,20 +356,9 @@ impl DiscordDb {
 
     pub fn get_link_status_for_session(&self, session_id: Uuid) -> Result<Vec<DiscordSessionLink>> {
         let mut stmt = self.conn.prepare(
-            "SELECT guild_id, channel_id, session_id, created_by_user_id, status, created_at FROM discord_session_links WHERE session_id = ?1",
+            "SELECT guild_id, channel_id, session_id, created_by_user_id, status, project_cwd_override, created_at FROM discord_session_links WHERE session_id = ?1",
         )?;
-        let rows = stmt.query_map(params![session_id.to_string()], |r| {
-            Ok(DiscordSessionLink {
-                guild_id: r.get(0)?,
-                channel_id: r.get(1)?,
-                session_id: Uuid::parse_str(&r.get::<_, String>(2)?).unwrap_or_default(),
-                created_by_user_id: r
-                    .get::<_, Option<String>>(3)?
-                    .and_then(|s| Uuid::parse_str(&s).ok()),
-                status: r.get(4)?,
-                created_at: parse_ts(&r.get::<_, String>(5)?),
-            })
-        })?;
+        let rows = stmt.query_map(params![session_id.to_string()], map_session_link_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -505,16 +554,43 @@ impl DiscordDb {
 
     pub fn bind_thread(&self, binding: &DiscordThreadBinding) -> Result<()> {
         self.conn.execute(
-            r#"INSERT INTO discord_thread_bindings (guild_id, channel_id, thread_id, session_id, task_id, default_shell_id, created_at)
-               VALUES (?1,?2,?3,?4,?5,?6,?7)
-               ON CONFLICT(thread_id) DO UPDATE SET task_id=excluded.task_id, default_shell_id=excluded.default_shell_id"#,
+            r#"INSERT INTO discord_thread_bindings (
+                guild_id, channel_id, thread_id, session_id, task_id, default_shell_id, term_id,
+                project_cwd, status, goal_text, git_enabled, base_branch, thread_branch, start_commit,
+                last_pane_marker, last_pane_snapshot, last_input_discord_message_id, claude_session_id, created_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                term_id=excluded.term_id,
+                project_cwd=excluded.project_cwd,
+                status=excluded.status,
+                goal_text=excluded.goal_text,
+                git_enabled=excluded.git_enabled,
+                base_branch=excluded.base_branch,
+                thread_branch=excluded.thread_branch,
+                start_commit=excluded.start_commit,
+                last_pane_marker=excluded.last_pane_marker,
+                last_pane_snapshot=excluded.last_pane_snapshot,
+                last_input_discord_message_id=excluded.last_input_discord_message_id,
+                claude_session_id=excluded.claude_session_id"#,
             params![
                 binding.guild_id,
                 binding.channel_id,
                 binding.thread_id,
                 binding.session_id.to_string(),
                 binding.task_id.to_string(),
-                binding.default_shell_id.map(|u| u.to_string()),
+                binding.term_id.to_string(),
+                binding.term_id.to_string(),
+                binding.project_cwd,
+                binding.status.as_str(),
+                binding.goal_text,
+                binding.git_enabled as i32,
+                binding.base_branch,
+                binding.thread_branch,
+                binding.start_commit,
+                binding.last_pane_marker as i64,
+                binding.last_pane_snapshot,
+                binding.last_input_discord_message_id,
+                binding.claude_session_id,
                 binding.created_at.to_rfc3339(),
             ],
         )?;
@@ -524,24 +600,247 @@ impl DiscordDb {
     pub fn get_thread_binding(&self, thread_id: &str) -> Result<Option<DiscordThreadBinding>> {
         self.conn
             .query_row(
-                "SELECT guild_id, channel_id, thread_id, session_id, task_id, default_shell_id, created_at FROM discord_thread_bindings WHERE thread_id = ?1",
+                r#"SELECT guild_id, channel_id, thread_id, session_id, task_id,
+                    COALESCE(term_id, default_shell_id), project_cwd, status, goal_text,
+                    git_enabled, base_branch, thread_branch, start_commit,
+                    last_pane_marker, last_pane_snapshot, last_input_discord_message_id,
+                    claude_session_id, created_at
+                 FROM discord_thread_bindings WHERE thread_id = ?1"#,
                 params![thread_id],
-                |r| {
-                    Ok(DiscordThreadBinding {
-                        guild_id: r.get(0)?,
-                        channel_id: r.get(1)?,
-                        thread_id: r.get(2)?,
-                        session_id: Uuid::parse_str(&r.get::<_, String>(3)?).unwrap_or_default(),
-                        task_id: Uuid::parse_str(&r.get::<_, String>(4)?).unwrap_or_default(),
-                        default_shell_id: r
-                            .get::<_, Option<String>>(5)?
-                            .and_then(|s| Uuid::parse_str(&s).ok()),
-                        created_at: parse_ts(&r.get::<_, String>(6)?),
-                    })
-                },
+                map_thread_binding_row,
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn update_thread_status(
+        &self,
+        thread_id: &str,
+        status: DiscordThreadStatus,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET status = ?1 WHERE thread_id = ?2",
+            params![status.as_str(), thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_thread_pane_marker(&self, thread_id: &str, marker: usize) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET last_pane_marker = ?1 WHERE thread_id = ?2",
+            params![marker as i64, thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_thread_pane_snapshot(&self, thread_id: &str, snapshot: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET last_pane_snapshot = ?1, last_pane_marker = ?2 WHERE thread_id = ?3",
+            params![snapshot, snapshot.chars().count() as i64, thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_thread_last_input_message(
+        &self,
+        thread_id: &str,
+        discord_message_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET last_input_discord_message_id = ?1 WHERE thread_id = ?2",
+            params![discord_message_id, thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_thread_goal_text(&self, thread_id: &str, goal: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET goal_text = ?1 WHERE thread_id = ?2",
+            params![goal, thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_thread_claude_session_id(&self, thread_id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT claude_session_id FROM discord_thread_bindings WHERE thread_id = ?1",
+                params![thread_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(|opt| opt.flatten())
+            .map_err(Into::into)
+    }
+
+    pub fn set_thread_claude_session_id(
+        &self,
+        thread_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE discord_thread_bindings SET claude_session_id = ?1 WHERE thread_id = ?2",
+            params![session_id, thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_thread_pending_questions(&self, thread_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM discord_thread_pending_questions WHERE thread_id = ?1",
+            params![thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_thread_pending_questions(
+        &self,
+        pending: &DiscordThreadPendingQuestions,
+    ) -> Result<()> {
+        self.cancel_thread_pending_questions(&pending.thread_id)?;
+        let questions_json = serde_json::to_string(&pending.questions)?;
+        let answers_json = serde_json::to_string(&pending.answers)?;
+        self.conn.execute(
+            r#"INSERT INTO discord_thread_pending_questions (id, thread_id, questions_json, answers_json, created_at)
+               VALUES (?1,?2,?3,?4,?5)"#,
+            params![
+                pending.id.to_string(),
+                pending.thread_id,
+                questions_json,
+                answers_json,
+                pending.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_thread_pending_questions(
+        &self,
+        pending_id: Uuid,
+    ) -> Result<Option<DiscordThreadPendingQuestions>> {
+        self.conn
+            .query_row(
+                "SELECT id, thread_id, questions_json, answers_json, created_at FROM discord_thread_pending_questions WHERE id = ?1",
+                params![pending_id.to_string()],
+                map_thread_pending_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn get_active_thread_pending_questions(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<DiscordThreadPendingQuestions>> {
+        self.conn
+            .query_row(
+                "SELECT id, thread_id, questions_json, answers_json, created_at FROM discord_thread_pending_questions WHERE thread_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                params![thread_id],
+                map_thread_pending_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn update_thread_pending_answers(
+        &self,
+        pending_id: Uuid,
+        answers: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
+        let answers_json = serde_json::to_string(answers)?;
+        self.conn.execute(
+            "UPDATE discord_thread_pending_questions SET answers_json = ?1 WHERE id = ?2",
+            params![answers_json, pending_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_thread_pending_questions(&self, pending_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM discord_thread_pending_questions WHERE id = ?1",
+            params![pending_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_thread_message(&self, msg: &DiscordThreadMessage) -> Result<()> {
+        self.conn.execute(
+            r#"INSERT INTO discord_thread_messages (id, thread_id, role, discord_user_id, author_name, content, created_at)
+               VALUES (?1,?2,?3,?4,?5,?6,?7)"#,
+            params![
+                msg.id.to_string(),
+                msg.thread_id,
+                msg.role.as_str(),
+                msg.discord_user_id,
+                msg.author_name,
+                msg.content,
+                msg.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_thread_messages(
+        &self,
+        thread_id: &str,
+        limit: usize,
+    ) -> Result<Vec<DiscordThreadMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, thread_id, role, discord_user_id, author_name, content, created_at
+             FROM discord_thread_messages WHERE thread_id = ?1 ORDER BY created_at ASC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![thread_id, limit as i64], map_thread_message_row)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    pub fn insert_thread_discussion(&self, entry: &DiscordThreadDiscussion) -> Result<()> {
+        self.conn.execute(
+            r#"INSERT INTO discord_thread_discussion (id, thread_id, discord_user_id, author_name, content, created_at)
+               VALUES (?1,?2,?3,?4,?5,?6)"#,
+            params![
+                entry.id.to_string(),
+                entry.thread_id,
+                entry.discord_user_id,
+                entry.author_name,
+                entry.content,
+                entry.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_thread_discussion(
+        &self,
+        thread_id: &str,
+        limit: usize,
+    ) -> Result<Vec<DiscordThreadDiscussion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, thread_id, discord_user_id, author_name, content, created_at FROM discord_thread_discussion WHERE thread_id = ?1 ORDER BY created_at ASC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![thread_id, limit as i64], |r| {
+            Ok(DiscordThreadDiscussion {
+                id: Uuid::parse_str(&r.get::<_, String>(0)?).unwrap_or_default(),
+                thread_id: r.get(1)?,
+                discord_user_id: r.get(2)?,
+                author_name: r.get(3)?,
+                content: r.get(4)?,
+                created_at: parse_ts(&r.get::<_, String>(5)?),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn list_active_thread_ids_for_channel(
+        &self,
+        guild_id: &str,
+        channel_id: &str,
+    ) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT thread_id FROM discord_thread_bindings WHERE guild_id = ?1 AND channel_id = ?2 AND status = 'active'",
+        )?;
+        let rows = stmt.query_map(params![guild_id, channel_id], |r| r.get(0))?;
+        rows.collect::<Result<Vec<String>, _>>().map_err(Into::into)
     }
 
     pub fn create_approval(&self, req: &ApprovalRequest) -> Result<()> {
@@ -781,6 +1080,80 @@ fn parse_status(s: &str) -> AgentTaskStatus {
         "cancelled" => AgentTaskStatus::Cancelled,
         _ => AgentTaskStatus::Queued,
     }
+}
+
+fn map_session_link_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordSessionLink> {
+    Ok(DiscordSessionLink {
+        guild_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        session_id: Uuid::parse_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+        created_by_user_id: r
+            .get::<_, Option<String>>(3)?
+            .and_then(|s| Uuid::parse_str(&s).ok()),
+        status: r.get(4)?,
+        project_cwd_override: r
+            .get::<_, Option<String>>(5)?
+            .filter(|s| !s.is_empty()),
+        created_at: parse_ts(&r.get::<_, String>(6)?),
+    })
+}
+
+fn map_thread_binding_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordThreadBinding> {
+    let term_raw: Option<String> = r.get(5)?;
+    let term_id = term_raw
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_default();
+    let status: String = r.get(7).unwrap_or_else(|_| "active".into());
+    Ok(DiscordThreadBinding {
+        guild_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        thread_id: r.get(2)?,
+        session_id: Uuid::parse_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+        task_id: Uuid::parse_str(&r.get::<_, String>(4)?).unwrap_or_default(),
+        term_id,
+        project_cwd: r
+            .get::<_, Option<String>>(6)?
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default(),
+        status: DiscordThreadStatus::parse(&status),
+        goal_text: r.get(8)?,
+        git_enabled: r.get::<_, i32>(9).unwrap_or(0) != 0,
+        base_branch: r.get(10)?,
+        thread_branch: r.get(11)?,
+        start_commit: r.get(12)?,
+        last_pane_marker: r.get::<_, i64>(13).unwrap_or(0) as usize,
+        last_pane_snapshot: r.get::<_, Option<String>>(14).ok().flatten().unwrap_or_default(),
+        last_input_discord_message_id: r.get(15)?,
+        claude_session_id: r.get::<_, Option<String>>(16).ok().flatten(),
+        created_at: parse_ts(&r.get::<_, String>(17)?),
+    })
+}
+
+fn map_thread_message_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordThreadMessage> {
+    Ok(DiscordThreadMessage {
+        id: Uuid::parse_str(&r.get::<_, String>(0)?).unwrap_or_default(),
+        thread_id: r.get(1)?,
+        role: DiscordThreadMessageRole::parse(&r.get::<_, String>(2)?),
+        discord_user_id: r.get(3)?,
+        author_name: r.get(4)?,
+        content: r.get(5)?,
+        created_at: parse_ts(&r.get::<_, String>(6)?),
+    })
+}
+
+fn map_thread_pending_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordThreadPendingQuestions> {
+    let questions: Vec<AskUserQuestionItem> =
+        serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default();
+    let answers: std::collections::HashMap<String, String> =
+        serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default();
+    Ok(DiscordThreadPendingQuestions {
+        id: Uuid::parse_str(&r.get::<_, String>(0)?).unwrap_or_default(),
+        thread_id: r.get(1)?,
+        questions,
+        answers,
+        created_at: parse_ts(&r.get::<_, String>(4)?),
+    })
 }
 
 fn map_task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTask> {
