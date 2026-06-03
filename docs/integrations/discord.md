@@ -85,6 +85,7 @@ Legacy `@bunny and claude …` mentions are removed.
 | `/bunny shell_new` | Create shell (`name:` optional — auto `shell N`) |
 | `/bunny shell_close` | Close shell (`shell:` required if multiple) |
 | `/bunny run` | Run shell command (Editor+ Bunny user linked) in the Web UI shell. Commands that finish within ~8s return full output; **long / persistent** processes get an immediate Discord reply with a live excerpt — full logs in the Terminal tab |
+| `/bunny run_stop` | Send **Ctrl+C** to the foreground process in the shell (default: last shell used in this channel; optional `shell:`). Stops e.g. `npm run dev` started via `/bunny run` |
 | `/bunny file` | Download a file from the shell cwd as a **Discord attachment** (full file up to 24 MB) |
 | `/bunny stream_browser_start` | Start browser + watch URL (optional `url:`; `interactive:true` for read+write) |
 | `/bunny stream_browser_stop` | Stop browser watch stream(s) in this channel (optional `url:` for one link) |

@@ -339,6 +339,18 @@ impl EventHandler for Handler {
                 .add_option(
                     CreateCommandOption::new(
                         CommandOptionType::SubCommand,
+                        "run_stop",
+                        "Stop foreground process in shell (Ctrl+C)",
+                    )
+                    .add_sub_option(CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "shell",
+                        "Shell name (default: last used in this channel)",
+                    )),
+                )
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
                         "file",
                         "Send a workspace file as Discord attachment (full file, up to 24 MB)",
                     )
@@ -783,6 +795,23 @@ async fn handle_command(
             let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             Ok(text_reply(format!("Shell **`{name}`** closed.")))
         }
+        "run_stop" => {
+            let mut body = bridge_ctx.clone();
+            if let Some(shell) = opt_str(&sub_opts, "shell") {
+                body["shell_name"] = serde_json::json!(shell);
+            }
+            let res = bunny.post_json("/shell/run/stop", &body).await?;
+            let shell = res
+                .get("shell")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+            Ok(text_reply(format!(
+                "**Shell :** `{shell}`\n\
+                 Signal **Ctrl+C** envoyé au processus en avant-plan.\n\
+                 Si le serveur ne s’arrête pas, relancez `/bunny run_stop` ou utilisez le terminal Web UI.\n\
+                 _(`/bunny stop` concerne les tâches Claude, pas les commandes `run`.)_"
+            )))
+        }
         "run" | "shell_run" => {
             let command = opt_str(&sub_opts, "command").unwrap_or("");
             let mut body = bridge_ctx.clone();
@@ -1172,7 +1201,8 @@ fn format_persistent_shell_run_reply(shell: &str, excerpt: &str) -> CommandReply
     let header = format!(
         "**Shell :** `{shell}`\n\
          **Processus long / persistant** — lancé dans le shell.\n\
-         La sortie continue dans l’onglet **Terminal** de la Web UI.\n\n\
+         La sortie continue dans l’onglet **Terminal** de la Web UI.\n\
+         Pour arrêter : `/bunny run_stop` (ou `run_stop shell:{shell}`).\n\n\
          **Extrait :**"
     );
     let body = if excerpt.trim().is_empty() || excerpt == "(no output)" {

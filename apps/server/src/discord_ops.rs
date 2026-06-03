@@ -39,6 +39,7 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/status", get(internal_status))
         .route("/shell/list", get(internal_shell_list))
         .route("/shell/run", post(internal_shell_run))
+        .route("/shell/run/stop", post(internal_shell_run_stop))
         .route("/shell/file", post(internal_shell_file))
         .route("/shell/new", post(internal_shell_new))
         .route("/shell/close", post(internal_shell_close))
@@ -268,6 +269,64 @@ async fn internal_shell_run(
         "output": output,
         "exit_code": exit_code,
         "persistent": run.persistent,
+        "shell": shell_name,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ShellRunStopRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    pub shell_name: Option<String>,
+}
+
+async fn internal_shell_run_stop(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ShellRunStopRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    let link = resolve_link(&state, &body.ctx)?;
+    let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
+    ensure_discord_control(&state, bunny_user, link.session_id)?;
+    let term_id = resolve_discord_shell(
+        &state,
+        link.session_id,
+        &body.ctx.guild_id,
+        &body.ctx.channel_id,
+        body.shell_name.as_deref(),
+    )?;
+    crate::terminals::ensure_session_terminals_live(&state, link.session_id);
+    let state_bg = Arc::clone(&state);
+    let message = tokio::task::spawn_blocking(move || {
+        crate::terminals::exec_discord_shell_interrupt(&state_bg, term_id)
+            .map_err(|e| ApiError::validation(&e.to_string()))
+    })
+    .await
+    .map_err(|e| ApiError::validation(&e.to_string()))??;
+    remember_discord_shell(&state, &body.ctx.guild_id, &body.ctx.channel_id, term_id);
+    let shell_name = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(|row| row.2);
+    audit(
+        &state,
+        &body.ctx,
+        link.session_id,
+        "/bunny run_stop",
+        "Ctrl+C",
+        "ok",
+        Some(bunny_user),
+        Some(term_id),
+        None,
+    );
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "message": message,
         "shell": shell_name,
     })))
 }

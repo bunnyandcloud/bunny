@@ -705,6 +705,32 @@ pub struct DiscordShellRunResult {
     pub persistent: bool,
 }
 
+/// Send Ctrl+C to the shell tmux pane (stops foreground process started via `/bunny run`).
+pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<String> {
+    ensure_terminal_attached(state, term_id)?;
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    let target = resolve_tmux_target(state, &record)?.ok_or_else(|| {
+        anyhow::anyhow!("interrupt requires tmux — use the Web UI terminal (Ctrl+C)")
+    })?;
+
+    for _ in 0..2 {
+        tmux::send_keys_key(&target, "C-c")?;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    state.terminals.refresh_display(term_id);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    let note = "Interruption (Ctrl+C) envoyée depuis Discord.";
+    append_discord_transcript(state, term_id, "run_stop", note);
+    Ok(note.to_string())
+}
+
 /// Run a command for Discord via the shell tmux pane (generic: quick finish or persistent process).
 pub fn exec_discord_shell_command_run(
     state: &AppState,
