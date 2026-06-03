@@ -704,6 +704,7 @@ pub async fn internal_thread_finalize(
         }
     }
 
+    let _ = terminals::cancel_thread_claude_run(&state, &body.thread_id);
     close_thread_shell(&state, binding.term_id, link.session_id)?;
 
     let status = if outcome == "goal" {

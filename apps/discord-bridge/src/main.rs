@@ -604,23 +604,20 @@ impl EventHandler for Handler {
                     });
                     return;
                 }
-                if let Some((goal, thread_id)) = parse_goal_button(&comp.data.custom_id) {
-                    if comp
-                        .create_response(
-                            &http,
-                            CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
-                        )
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
+                if let Some((goal, _thread_id)) = parse_goal_button(&comp.data.custom_id) {
                     let bunny = bunny.clone();
                     tokio::spawn(async move {
                         if let Err(e) =
                             threads::handle_goal_cancel_button(&comp, &http, &bunny, goal).await
                         {
                             tracing::error!("goal/cancel: {e}");
+                            let _ = comp
+                                .create_followup(
+                                    &http,
+                                    CreateInteractionResponseFollowup::new()
+                                        .content(format!("❌ Erreur : {e}")),
+                                )
+                                .await;
                         }
                     });
                     return;

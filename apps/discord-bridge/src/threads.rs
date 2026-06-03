@@ -698,7 +698,7 @@ pub async fn handle_goal_cancel_button(
     bunny: &BunnyClient,
     approve: bool,
 ) -> anyhow::Result<()> {
-    let parent_ch = comp.channel_id.get().to_string();
+    let parent_ch = parent_channel_id_for_id(http, comp.channel_id).await;
     let thread_id = comp.channel_id.get().to_string();
     let bctx = bridge_ctx(
         comp.guild_id,
@@ -717,7 +717,7 @@ pub async fn handle_goal_cancel_button(
     .await?;
 
     let res = bunny.post_json("/thread/finalize", &body).await?;
-    let prefix = if approve { "✅" } else { "❌" };
+    let status_emoji = if approve { "✅" } else { "❌" };
     let mut content: String = if approve {
         "Goal confirmé — shell fermé.".into()
     } else {
@@ -736,13 +736,49 @@ pub async fn handle_goal_cancel_button(
 
     let _ = comp
         .channel_id
-        .edit(
+        .edit_message(
             http,
-            serenity::builder::EditChannel::new().name(format!("{prefix}-thread")),
+            comp.message.id,
+            EditMessage::new().components(vec![]),
         )
         .await;
 
+    rename_thread_with_status(http, comp.channel_id, status_emoji).await;
+
     Ok(())
+}
+
+async fn rename_thread_with_status(http: &Http, channel_id: ChannelId, status_emoji: &str) {
+    let base_name = channel_id
+        .to_channel(http)
+        .await
+        .ok()
+        .and_then(|ch| {
+            if let serenity::model::channel::Channel::Guild(g) = ch {
+                Some(g.name)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "thread".to_string());
+    let stripped = strip_thread_status_prefix(&base_name);
+    let mut new_name = format!("{status_emoji} {stripped}");
+    if new_name.chars().count() > 100 {
+        new_name = new_name.chars().take(100).collect();
+    }
+    let _ = channel_id
+        .edit(http, serenity::builder::EditChannel::new().name(new_name))
+        .await;
+}
+
+fn strip_thread_status_prefix(name: &str) -> &str {
+    let trimmed = name.trim();
+    for prefix in ["✅ ", "❌ ", "✅", "❌"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return rest.trim_start();
+        }
+    }
+    trimmed
 }
 
 pub async fn handle_stop_reaction(
