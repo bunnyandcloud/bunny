@@ -198,6 +198,23 @@ pub fn refresh_client(target: &str) {
     let _ = run(&["refresh-client", "-t", target]);
 }
 
+/// Match tmux pane geometry to the web xterm (attach SIGWINCH is not always enough).
+pub fn resize_pane(target: &str, cols: u16, rows: u16) -> Result<()> {
+    if !target_alive(target) {
+        return Ok(());
+    }
+    run(&[
+        "resize-pane",
+        "-t",
+        target,
+        "-x",
+        &cols.to_string(),
+        "-y",
+        &rows.to_string(),
+    ])?;
+    Ok(())
+}
+
 /// Send literal keystrokes to a tmux pane (bypasses web xterm / host clipboard).
 pub fn send_keys_literal(target: &str, text: &str, enter: bool) -> Result<()> {
     if !target_alive(target) {

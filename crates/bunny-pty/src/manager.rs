@@ -202,11 +202,18 @@ impl TerminalManager {
     }
 
     pub fn resize(&self, id: Uuid, cols: u16, rows: u16) -> Result<()> {
-        let terminals = self.terminals.read();
-        let session = terminals
-            .get(&id)
-            .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
-        session.resize(cols, rows)
+        let tmux_target = {
+            let terminals = self.terminals.read();
+            let session = terminals
+                .get(&id)
+                .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+            session.resize(cols, rows)?;
+            session.tmux_target.clone()
+        };
+        if let Some(target) = tmux_target {
+            let _ = tmux::resize_pane(&target, cols, rows);
+        }
+        Ok(())
     }
 
     pub fn subscribe(&self, id: Uuid) -> Option<tokio::sync::broadcast::Receiver<TerminalOutput>> {
@@ -286,6 +293,8 @@ impl TerminalManager {
             .and_then(|s| s.tmux_target.clone())
     }
 
+    /// Force tmux to redraw the attach client. Safe only on an empty xterm (first connect,
+    /// `replay_mode: none`). During live sessions this overwrites mid-screen lines in xterm.
     pub fn refresh_display(&self, id: Uuid) {
         let terminals = self.terminals.read();
         if let Some(session) = terminals.get(&id) {

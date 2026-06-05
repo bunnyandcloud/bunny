@@ -460,7 +460,6 @@ pub fn refresh_secrets_in_running_shells(state: &AppState, session_id: Option<Uu
                     .unwrap_or(cwd);
                 match tmux::reload_shell_secrets(&target, &cwd, shell, &secret_env) {
                     Ok(()) => {
-                        state.terminals.refresh_display(record.id);
                         done = true;
                     }
                     Err(e) => tracing::warn!(
@@ -728,7 +727,6 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
         tmux::send_keys_key(&target, "C-c")?;
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    state.terminals.refresh_display(term_id);
     std::thread::sleep(std::time::Duration::from_millis(400));
 
     let note = "Interruption (Ctrl+C) envoyée depuis Discord.";
@@ -784,7 +782,6 @@ pub fn exec_discord_shell_command_run(
     let baseline = capture_pane_text(&target).unwrap_or_default();
     let wrapped = discord_run_wrap_command(command);
     tmux::send_keys_literal(&target, &wrapped, true)?;
-    state.terminals.refresh_display(term_id);
     std::thread::sleep(std::time::Duration::from_millis(350));
 
     let started = std::time::Instant::now();

@@ -670,7 +670,6 @@ fn run_claude_tmux_interactive(
     let baseline = capture_pane_stripped(&target).unwrap_or_default();
     let full_prompt = wrap_prompt(AgentTaskMode::Do, prompt);
     tmux::send_keys_literal(&target, &full_prompt, true)?;
-    state.terminals.refresh_display(term_id);
     thread::sleep(Duration::from_millis(500));
     let after_send = capture_pane_stripped(&target).unwrap_or_else(|_| baseline.clone());
 
@@ -723,7 +722,6 @@ pub fn continue_claude_after_approval(
 
     let key = if approve { "y" } else { "n" };
     tmux::send_keys_literal(&target, key, true)?;
-    state.terminals.refresh_display(ctx.term_id);
 
     if !approve {
         return Ok((
