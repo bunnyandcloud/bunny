@@ -1,6 +1,7 @@
 mod threads;
 
 use anyhow::Result;
+use base64::Engine as _;
 use bunny_i18n::{is_valid_locale_code, Locale, t};
 use serenity::all::{
     Command, CommandDataOptionValue, CommandOptionType, CreateActionRow, CreateAttachment,
@@ -130,6 +131,7 @@ impl BunnyClient {
             .unwrap_or("");
         if content_type.contains("application/json") {
             let v: serde_json::Value = res.json().await?;
+            let format = v.get("format").and_then(|x| x.as_str()).unwrap_or("text");
             let caption = v
                 .get("caption")
                 .and_then(|x| x.as_str())
@@ -140,6 +142,29 @@ impl BunnyClient {
                 .and_then(|x| x.as_str())
                 .unwrap_or("")
                 .to_string();
+            if format == "shell_text_and_browser" {
+                let shell_caption = v
+                    .get("shell_caption")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(&caption)
+                    .to_string();
+                let browser_png = v
+                    .get("browser_png_base64")
+                    .and_then(|x| x.as_str())
+                    .and_then(|b64| base64::engine::general_purpose::STANDARD.decode(b64).ok())
+                    .unwrap_or_default();
+                let browser_unavailable = v
+                    .get("browser_unavailable")
+                    .and_then(|x| x.as_str())
+                    .map(str::to_string);
+                return Ok(SnapshotPayload::ShellTextAndBrowser {
+                    caption,
+                    shell_caption,
+                    text,
+                    browser_png,
+                    browser_unavailable,
+                });
+            }
             return Ok(SnapshotPayload::Text { caption, text });
         }
         let caption = res
@@ -200,6 +225,13 @@ enum SnapshotPayload {
         bytes: Vec<u8>,
         filename: String,
     },
+    ShellTextAndBrowser {
+        caption: String,
+        shell_caption: String,
+        text: String,
+        browser_png: Vec<u8>,
+        browser_unavailable: Option<String>,
+    },
 }
 
 /// Discord reply payload (PNG stays in memory — never written to disk).
@@ -215,6 +247,13 @@ enum CommandReply {
         caption: String,
         png: Vec<u8>,
         filename: String,
+    },
+    /// Shell text (paginated) + browser PNG attachment (`full_snapshot`).
+    FullSnapshot {
+        text_pages: Vec<String>,
+        png: Vec<u8>,
+        filename: String,
+        browser_note: String,
     },
     File {
         caption: String,
@@ -749,6 +788,19 @@ async fn run_snapshot(
     }
     match bunny.post_snapshot(&body).await? {
         SnapshotPayload::Text { caption, text } => Ok(format_shell_snapshot_reply(&caption, &text)),
+        SnapshotPayload::ShellTextAndBrowser {
+            caption,
+            shell_caption,
+            text,
+            browser_png,
+            browser_unavailable,
+        } => Ok(format_full_snapshot_reply(
+            &shell_caption,
+            &text,
+            &caption,
+            browser_png,
+            browser_unavailable.as_deref(),
+        )),
         SnapshotPayload::Image {
             caption,
             bytes,
@@ -1276,6 +1328,32 @@ async fn deliver_command_reply(
             )
             .await?;
         }
+        CommandReply::FullSnapshot {
+            text_pages,
+            png,
+            filename,
+            browser_note,
+        } => {
+            let pages = cap_discord_pages(Locale::En, text_pages);
+            let Some(first) = pages.first() else {
+                cmd.edit_response(http, EditInteractionResponse::new().content(&browser_note))
+                    .await?;
+                return Ok(());
+            };
+            let content = format!("{first}\n\n{browser_note}");
+            cmd.edit_response(
+                http,
+                EditInteractionResponse::new()
+                    .content(content)
+                    .new_attachment(CreateAttachment::bytes(png, filename)),
+            )
+            .await?;
+            for page in pages.iter().skip(1) {
+                cmd.channel_id
+                    .send_message(http, CreateMessage::new().content(page))
+                    .await?;
+            }
+        }
         CommandReply::File {
             caption,
             bytes,
@@ -1303,6 +1381,42 @@ fn cap_discord_pages(locale: Locale, mut pages: Vec<String>) -> Vec<String> {
         last.push_str(&t(locale, "discord.run.web_ui_footer", &[]));
     }
     pages
+}
+
+/// `/bunny full_snapshot`: shell text like `snapshot` + browser PNG attachment.
+fn format_full_snapshot_reply(
+    shell_caption: &str,
+    text: &str,
+    full_caption: &str,
+    browser_png: Vec<u8>,
+    browser_unavailable: Option<&str>,
+) -> CommandReply {
+    let browser_note = browser_unavailable
+        .map(|e| format!("{full_caption}\nBrowser unavailable: {e}"))
+        .unwrap_or_else(|| format!("{full_caption}\nBrowser screenshot attached (not stored on disk)."));
+
+    if browser_png.is_empty() {
+        let mut reply = format_shell_snapshot_reply(shell_caption, text);
+        if let CommandReply::Text(ref mut pages) = reply {
+            if let Some(last) = pages.last_mut() {
+                last.push_str("\n\n");
+                last.push_str(&browser_note);
+            }
+        }
+        return reply;
+    }
+
+    let shell = format_shell_snapshot_reply(shell_caption, text);
+    let text_pages = match shell {
+        CommandReply::Text(pages) => pages,
+        _ => vec!["(empty shell)".into()],
+    };
+    CommandReply::FullSnapshot {
+        text_pages,
+        png: browser_png,
+        filename: "browser.png".into(),
+        browser_note,
+    }
 }
 
 /// `/bunny snapshot`: header + fenced scrollback tail (paginated for Discord limits).

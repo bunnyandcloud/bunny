@@ -1,5 +1,6 @@
 use crate::api::ApiError;
-use crate::compositor::{capture_snapshot, SnapshotTarget};
+use crate::compositor::{capture_browser_snapshot, capture_snapshot, SnapshotTarget};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use crate::state::AppState;
 use crate::task_runner;
 use crate::watch;
@@ -807,6 +808,60 @@ async fn internal_snapshot(
             "text": text,
             "caption": discord_caption,
             "lines": lines,
+        }))
+        .into_response());
+    }
+
+    if matches!(target, SnapshotTarget::All) {
+        let term_id = resolve_discord_shell(
+            &state,
+            link.session_id,
+            &body.ctx.guild_id,
+            &body.ctx.channel_id,
+            body.shell_name.as_deref(),
+        )?;
+        let lines = crate::terminals::DISCORD_SNAPSHOT_MAX_LINES;
+        let state_shell = Arc::clone(&state);
+        let shell_text = tokio::task::spawn_blocking(move || {
+            crate::terminals::discord_shell_snapshot_text(&state_shell, term_id, lines)
+        })
+        .await
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+        let shell_caption = format!("Shell — {shell_label} (last {lines} lines)");
+
+        let browser = capture_browser_snapshot(&state, link.session_id).await;
+        let (browser_png_base64, browser_unavailable) = match browser {
+            Ok(snap) => (BASE64.encode(&snap.png), None),
+            Err(e) => {
+                tracing::warn!("full_snapshot browser capture failed: {e}");
+                (String::new(), Some(e.to_string()))
+            }
+        };
+
+        let discord_caption = if browser_unavailable.is_some() {
+            format!("Full snapshot — {shell_label} (last {lines} lines, browser unavailable)")
+        } else {
+            format!("Full snapshot — {shell_label} (last {lines} lines) + browser")
+        };
+        audit(
+            &state,
+            &body.ctx,
+            link.session_id,
+            "/bunny full_snapshot",
+            &discord_caption,
+            "ok",
+            None,
+            None,
+            None,
+        );
+        return Ok(Json(serde_json::json!({
+            "format": "shell_text_and_browser",
+            "text": shell_text,
+            "caption": discord_caption,
+            "shell_caption": shell_caption,
+            "lines": lines,
+            "browser_png_base64": browser_png_base64,
+            "browser_unavailable": browser_unavailable,
         }))
         .into_response());
     }

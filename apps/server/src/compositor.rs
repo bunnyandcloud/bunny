@@ -50,6 +50,14 @@ pub async fn capture_snapshot(
     }
 }
 
+/// CDP screenshot of the session browser (for Discord `full_snapshot`).
+pub async fn capture_browser_snapshot(
+    state: &AppState,
+    session_id: Uuid,
+) -> Result<SnapshotResult> {
+    capture_browser(state, session_id).await
+}
+
 async fn capture_browser(state: &AppState, session_id: Uuid) -> Result<SnapshotResult> {
     let browser_id = find_browser_for_session(state, session_id)?;
     let cdp_port = state
