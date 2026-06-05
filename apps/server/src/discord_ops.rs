@@ -751,7 +751,7 @@ async fn internal_snapshot(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(body): Json<SnapshotRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<axum::response::Response, ApiError> {
     verify_bridge_token(&state, &headers)?;
     let link = resolve_link(&state, &body.ctx)?;
     let target = match body.target.as_deref() {
@@ -774,6 +774,42 @@ async fn internal_snapshot(
     }
 
     let shell_label = resolve_shell_label(&state, link.session_id, body.shell_name.as_deref())?;
+
+    if matches!(target, SnapshotTarget::Shell) {
+        let term_id = resolve_discord_shell(
+            &state,
+            link.session_id,
+            &body.ctx.guild_id,
+            &body.ctx.channel_id,
+            body.shell_name.as_deref(),
+        )?;
+        let lines = crate::terminals::DISCORD_SNAPSHOT_MAX_LINES;
+        let state_bg = Arc::clone(&state);
+        let text = tokio::task::spawn_blocking(move || {
+            crate::terminals::discord_shell_snapshot_text(&state_bg, term_id, lines)
+        })
+        .await
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+        let discord_caption = format!("Shell — {shell_label} (last {lines} lines)");
+        audit(
+            &state,
+            &body.ctx,
+            link.session_id,
+            "/bunny snapshot",
+            &discord_caption,
+            "ok",
+            None,
+            None,
+            None,
+        );
+        return Ok(Json(serde_json::json!({
+            "format": "text",
+            "text": text,
+            "caption": discord_caption,
+            "lines": lines,
+        }))
+        .into_response());
+    }
 
     let snap = capture_snapshot(
         &state,

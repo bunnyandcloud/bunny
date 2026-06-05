@@ -49,7 +49,7 @@ pub fn scrollback_dir(state: &AppState) -> PathBuf {
 }
 
 /// Disk snapshot + tmux scrollback (if the session/window still exists).
-fn collect_persisted_scrollback(state: &AppState, record: &TerminalRecord) -> (String, PathBuf) {
+pub(crate) fn collect_persisted_scrollback(state: &AppState, record: &TerminalRecord) -> (String, PathBuf) {
     let dir = scrollback_dir(state);
     let mut hist = scrollback::load(&dir, record.id);
     let mut cwd = scrollback::load_cwd(&dir, record.id).map(PathBuf::from);
@@ -973,6 +973,45 @@ mod discord_run_tests {
         assert!(!out.contains("allowedDevOrigins"));
         assert!(out.contains("Ready in"));
     }
+
+    #[test]
+    fn snapshot_live_fold_prefers_richer_tmux_capture() {
+        let tmux = "root@host:~/app# ls\nAGENTS.md\nREADME.md\nroot@host:~/app# ";
+        let buffer = "root@host:~/app# ";
+        let out = super::fold_live_snapshot_parts(vec![tmux.to_string(), buffer.to_string()]);
+        assert!(out.contains("AGENTS.md"));
+        assert!(out.contains("ls"));
+    }
+
+    #[test]
+    fn snapshot_merge_keeps_disk_history_over_short_tmux_capture() {
+        let disk = (0..60)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tmux = "root@host:~/app# ";
+        let out = super::merge_snapshot_sources(disk.clone(), tmux);
+        assert!(out.contains("line 0"));
+        assert!(out.contains("line 59"));
+        assert!(out.len() >= disk.len());
+    }
+
+    #[test]
+    fn snapshot_merge_appends_live_bytes_after_disk() {
+        let disk = "root@host:~/app# ls\nAGENTS.md\nREADME.md\n";
+        let live = "root@host:~/app# ls\nAGENTS.md\nREADME.md\npackage.json\nroot@host:~/app# ";
+        let out = super::merge_snapshot_sources(disk.to_string(), live);
+        assert!(out.contains("package.json"));
+    }
+
+    #[test]
+    fn prepare_snapshot_turns_tty_carriage_returns_into_lines() {
+        let raw = "root@host:~/app# ls\rAGENTS.md\rREADME.md\rroot@host:~/app# ";
+        let clean = super::prepare_snapshot_terminal_text(raw);
+        assert!(clean.contains("AGENTS.md"));
+        assert!(clean.contains("README.md"));
+        assert!(clean.contains("ls"));
+    }
 }
 
 /// Run a Discord shell command with a hard timeout (avoids hanging the API on interactive tools).
@@ -1314,6 +1353,133 @@ pub fn load_scrollback_for_replay(state: &AppState, term_id: Uuid) -> String {
     let base = scrollback::load(&dir, term_id).unwrap_or_default();
     let discord = scrollback::load_discord_sidecar(&dir, term_id);
     scrollback::merge_discord_transcript(&base, &discord)
+}
+
+/// Last N logical lines returned by Discord `/bunny snapshot` (Web UI scrollback, not a pane image).
+pub const DISCORD_SNAPSHOT_MAX_LINES: usize = 50;
+
+/// Merge persisted scrollback with shorter live sources (tmux pane or attach buffer).
+#[cfg(test)]
+fn merge_snapshot_sources(base: String, extension: &str) -> String {
+    let extension = extension.trim_end();
+    if extension.is_empty() {
+        return base;
+    }
+    scrollback::merge(
+        if base.trim().is_empty() {
+            None
+        } else {
+            Some(base)
+        },
+        extension.to_string(),
+    )
+}
+
+/// Combine live tmux / attach-buffer chunks into the current shell view.
+fn fold_live_snapshot_parts(parts: Vec<String>) -> String {
+    let mut best = String::new();
+    for part in parts {
+        let part = part.trim_end().to_string();
+        if part.is_empty() {
+            continue;
+        }
+        if best.is_empty() {
+            best = part;
+            continue;
+        }
+        if part.contains(best.trim()) {
+            best = part;
+        } else if best.contains(part.trim()) {
+            continue;
+        } else {
+            let suffix = pane_text_since_baseline(&best, &part);
+            if !suffix.trim().is_empty() && !best.contains(suffix.trim()) {
+                if !best.ends_with('\n') {
+                    best.push('\n');
+                }
+                best.push_str(&suffix);
+            }
+        }
+    }
+    best
+}
+
+/// Normalize PTY/tmux bytes into logical lines for Discord (TTY `\r` → newlines).
+fn prepare_snapshot_terminal_text(text: &str) -> String {
+    let expanded = text.replace("\r\n", "\n").replace('\r', "\n");
+    crate::compositor::normalize_terminal_text(&expanded)
+}
+
+/// Best-effort view of what is **currently** in the shell (live tmux pane + attach buffer).
+/// Persisted disk scrollback is only used when the shell is not running / has no live capture.
+pub fn terminal_display_text(state: &AppState, term_id: Uuid) -> String {
+    let _ = prepare_terminal_connection(state, term_id);
+
+    let mut live_parts: Vec<String> = Vec::new();
+
+    if let Ok(Some(row)) = state.auth.db().lock().get_terminal(term_id) {
+        let record = row_to_record(row);
+        for target in tmux_target_candidates(&record) {
+            if tmux::target_alive(&target) {
+                if let Ok(cap) = tmux::capture_pane(&target) {
+                    live_parts.push(strip_ansi_escapes(&cap));
+                }
+                break;
+            }
+        }
+    }
+
+    if let Some(end) = state.terminals.buffer_offset(term_id) {
+        if let Some(rows) = state.terminals.buffer_replay_range(term_id, 0, end) {
+            let buf: String = rows.iter().map(|(_, d)| d.as_str()).collect();
+            live_parts.push(buf);
+        }
+    }
+    if let Some(live) = state.terminals.recent_output(term_id) {
+        live_parts.push(live);
+    }
+
+    let mut text = fold_live_snapshot_parts(live_parts);
+
+    if text.trim().is_empty() {
+        if let Ok(Some(row)) = state.auth.db().lock().get_terminal(term_id) {
+            let record = row_to_record(row);
+            text = collect_persisted_scrollback(state, &record).0;
+        }
+        if text.trim().is_empty() {
+            text = load_scrollback_for_replay(state, term_id);
+        }
+    }
+
+    text
+}
+
+/// Tail of shell scrollback for Discord (redacted, ANSI-stripped, last `max_lines` lines).
+pub fn discord_shell_snapshot_text(state: &AppState, term_id: Uuid, max_lines: usize) -> String {
+    let raw = terminal_display_text(state, term_id);
+    if raw.trim().is_empty() {
+        tracing::warn!(terminal = %term_id, "discord snapshot: no scrollback from any source");
+        return String::new();
+    }
+    let redacted = state.redactor.read().redact_text(&raw);
+    let clean = prepare_snapshot_terminal_text(&redacted);
+    let excerpt = tail_logical_lines(&clean, max_lines);
+    if excerpt.trim().is_empty() {
+        tracing::warn!(
+            terminal = %term_id,
+            raw_bytes = raw.len(),
+            clean_bytes = clean.len(),
+            "discord snapshot: content lost during normalization"
+        );
+    }
+    excerpt
+}
+
+fn tail_logical_lines(text: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let take = lines.len().min(max_lines);
+    let start = lines.len().saturating_sub(take);
+    lines[start..].join("\n").trim_end().to_string()
 }
 
 /// Recent Discord transcript tail merged into shell snapshots only.

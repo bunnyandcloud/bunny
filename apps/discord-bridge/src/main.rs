@@ -110,7 +110,7 @@ impl BunnyClient {
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
 
-    async fn post_snapshot(&self, body: &serde_json::Value) -> Result<(Vec<u8>, String, String)> {
+    async fn post_snapshot(&self, body: &serde_json::Value) -> Result<SnapshotPayload> {
         let res = self
             .http
             .post(format!("{}/api/v1/internal/discord/snapshot", self.base))
@@ -123,6 +123,25 @@ impl BunnyClient {
             let text = res.text().await?;
             anyhow::bail!("snapshot failed {status}: {text}");
         }
+        let content_type = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if content_type.contains("application/json") {
+            let v: serde_json::Value = res.json().await?;
+            let caption = v
+                .get("caption")
+                .and_then(|x| x.as_str())
+                .unwrap_or("Snapshot")
+                .to_string();
+            let text = v
+                .get("text")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            return Ok(SnapshotPayload::Text { caption, text });
+        }
         let caption = res
             .headers()
             .get("x-bunny-snapshot-caption")
@@ -130,7 +149,11 @@ impl BunnyClient {
             .unwrap_or("Snapshot")
             .to_string();
         let bytes = res.bytes().await?.to_vec();
-        Ok((bytes, "snapshot.png".into(), caption))
+        Ok(SnapshotPayload::Image {
+            caption,
+            bytes,
+            filename: "snapshot.png".into(),
+        })
     }
 
     async fn post_file(&self, body: &serde_json::Value) -> Result<(Vec<u8>, String, String)> {
@@ -168,6 +191,15 @@ struct Handler {
     dev_guild_id: Option<u64>,
     bot_id: std::sync::Mutex<Option<serenity::model::id::UserId>>,
     thread_runtime: std::sync::Arc<threads::ThreadRuntime>,
+}
+
+enum SnapshotPayload {
+    Text { caption: String, text: String },
+    Image {
+        caption: String,
+        bytes: Vec<u8>,
+        filename: String,
+    },
 }
 
 /// Discord reply payload (PNG stays in memory — never written to disk).
@@ -271,7 +303,7 @@ impl EventHandler for Handler {
                     CreateCommandOption::new(
                         CommandOptionType::SubCommand,
                         "snapshot",
-                        "Shell snapshot (tmux pane)",
+                        "Shell output (last 50 lines, same as Web UI)",
                     )
                     .add_sub_option(CreateCommandOption::new(
                         CommandOptionType::String,
@@ -715,12 +747,18 @@ async fn run_snapshot(
     if let Some(url) = opt_str(sub_opts, "url") {
         body["browser_url"] = serde_json::json!(url);
     }
-    let (png, filename, caption) = bunny.post_snapshot(&body).await?;
-    Ok(CommandReply::Snapshot {
-        caption: format!("{caption} (not stored on disk)."),
-        png,
-        filename,
-    })
+    match bunny.post_snapshot(&body).await? {
+        SnapshotPayload::Text { caption, text } => Ok(format_shell_snapshot_reply(&caption, &text)),
+        SnapshotPayload::Image {
+            caption,
+            bytes,
+            filename,
+        } => Ok(CommandReply::Snapshot {
+            caption: format!("{caption} (not stored on disk)."),
+            png: bytes,
+            filename,
+        }),
+    }
 }
 
 pub(crate) async fn user_locale(bunny: &BunnyClient, bridge_ctx: &serde_json::Value) -> Locale {
@@ -1265,6 +1303,24 @@ fn cap_discord_pages(locale: Locale, mut pages: Vec<String>) -> Vec<String> {
         last.push_str(&t(locale, "discord.run.web_ui_footer", &[]));
     }
     pages
+}
+
+/// `/bunny snapshot`: header + fenced scrollback tail (paginated for Discord limits).
+fn format_shell_snapshot_reply(caption: &str, text: &str) -> CommandReply {
+    let body = if text.trim().is_empty() {
+        "(empty shell)".to_string()
+    } else {
+        let mut page = String::new();
+        page.push_str("```\n");
+        page.push_str(text);
+        if !text.ends_with('\n') {
+            page.push('\n');
+        }
+        page.push_str("```");
+        page
+    };
+    let page = format!("{caption}\n{body}");
+    CommandReply::Text(paginate_plain(&page))
 }
 
 /// Long-running `/bunny run`: prose header + single fenced excerpt (no nested markdown).
