@@ -7,7 +7,7 @@ use crate::secrets_ops::{
 };
 use crate::state::AppState;
 use crate::terminals::{
-    default_session_path_label, default_shell_cwd, ensure_session_terminals_live, persist_terminal,
+    default_session_path_label, default_shell_cwd, persist_terminal,
     remove_terminal_record, teardown_session,
 };
 use crate::webrtc::{IceCandidatePayload, SdpPayload, WebRtcConfigResponse};
@@ -260,7 +260,7 @@ async fn auth_mfa_verify(
         .auth
         .verify_mfa_login_with_failure(challenge, &body.code, body.device_id.as_deref())
         .map_err(map_auth_error)?;
-    let mut out_jar = CookieJar::new()
+    let out_jar = CookieJar::new()
         .add(session_cookie(&result.session_token))
         .remove(Cookie::from("bunny_mfa_challenge"));
     Ok((
@@ -1064,7 +1064,7 @@ async fn terminal_resize(
 
 async fn terminal_restart(
     State(_state): State<Arc<AppState>>,
-    Extension(user): Extension<Uuid>,
+    Extension(_user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     Ok(Json(serde_json::json!({ "restarting": true, "id": id })))
@@ -2005,7 +2005,11 @@ pub struct TimelineItem {
     pub ts: String,
 }
 #[derive(Deserialize)]
-pub struct VoiceIntentRequest { pub transcript: String, pub target: Option<String> }
+pub struct VoiceIntentRequest {
+    pub transcript: String,
+    #[allow(dead_code)]
+    pub target: Option<String>,
+}
 #[derive(Serialize)]
 pub struct VoiceIntentResponse {
     pub proposal: String,

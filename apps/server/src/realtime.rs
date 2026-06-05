@@ -31,16 +31,8 @@ impl RealtimeHub {
         }
     }
 
-    pub fn publish_json(&self, session_id: Uuid, json: String) {
-        let _ = self.sender(session_id).send(json);
-    }
-
     pub fn subscribe(&self, session_id: Uuid) -> broadcast::Receiver<String> {
         self.sender(session_id).subscribe()
-    }
-
-    pub fn remove_session(&self, session_id: Uuid) {
-        self.channels.write().remove(&session_id);
     }
 }
 

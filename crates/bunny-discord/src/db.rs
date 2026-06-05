@@ -1,8 +1,8 @@
 use crate::models::{
     AgentTask, AgentTaskMode, AgentTaskStatus, ApprovalRequest, AskUserQuestionItem,
-    DiscordAuditEntry, DiscordFollow, DiscordInstallation, DiscordLinkCode, DiscordSessionLink,
+    DiscordAuditEntry, DiscordFollow, DiscordSessionLink,
     DiscordThreadBinding, DiscordThreadDiscussion, DiscordThreadMessage, DiscordThreadMessageRole,
-    DiscordThreadPendingQuestions, DiscordThreadStatus, DiscordUserLink, WatchSession,
+    DiscordThreadPendingQuestions, DiscordThreadStatus, WatchSession,
 };
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};

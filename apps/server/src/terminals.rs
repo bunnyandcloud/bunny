@@ -17,6 +17,7 @@ pub struct TerminalRecord {
     pub shell: String,
     pub init_command: Option<String>,
     pub cwd: String,
+    #[allow(dead_code)]
     pub status: String,
     pub cols: u16,
     pub rows: u16,
@@ -228,11 +229,6 @@ pub fn prepare_terminal_connection(state: &AppState, id: Uuid) -> Result<()> {
         .get_terminal(id)?
         .ok_or_else(|| anyhow::anyhow!("terminal not in database"))?;
     attach_terminal_record(state, &row_to_record(row))
-}
-
-/// Load terminal row from DB and attach to tmux if still alive.
-pub fn try_reattach_terminal(state: &AppState, id: Uuid) -> Result<()> {
-    prepare_terminal_connection(state, id)
 }
 
 fn sync_status_to_db(state: &AppState, id: Uuid, status: TerminalStatus) {
@@ -729,7 +725,7 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
     }
     std::thread::sleep(std::time::Duration::from_millis(400));
 
-    let note = "Interruption (Ctrl+C) envoyée depuis Discord.";
+    let note = "Interruption (Ctrl+C) sent from Discord.";
     append_discord_transcript(
         state,
         term_id,
@@ -1320,19 +1316,6 @@ pub fn load_scrollback_for_replay(state: &AppState, term_id: Uuid) -> String {
     scrollback::merge_discord_transcript(&base, &discord)
 }
 
-/// WebSocket full replay: keep the longer tmux history, always append missing Discord sidecar lines.
-pub fn build_terminal_replay(state: &AppState, term_id: Uuid, live_buffer: &str) -> String {
-    let dir = scrollback_dir(state);
-    let disk = load_scrollback_for_replay(state, term_id);
-    let sidecar = scrollback::load_discord_sidecar(&dir, term_id);
-    let base = if live_buffer.len() > disk.len() {
-        live_buffer
-    } else {
-        &disk
-    };
-    scrollback::merge_discord_transcript(base, &sidecar)
-}
-
 /// Recent Discord transcript tail merged into shell snapshots only.
 pub fn discord_transcript_for_snapshot(state: &AppState, term_id: Uuid) -> String {
     let path = discord_transcript_path(state, term_id);
@@ -1342,25 +1325,6 @@ pub fn discord_transcript_for_snapshot(state: &AppState, term_id: Uuid) -> Strin
         full
     } else {
         full[full.len() - TAIL..].to_string()
-    }
-}
-
-/// Insert Discord transcript above the shell prompt line for PNG snapshots.
-pub fn merge_discord_transcript_into_pane(pane: &str, discord: &str) -> String {
-    let discord = discord.trim();
-    if discord.is_empty() {
-        return pane.to_string();
-    }
-    let pane = pane.trim_end();
-    if pane.contains("[discord] $") {
-        return format!("{pane}\n");
-    }
-    match pane.rfind('\n') {
-        Some(i) => {
-            let (head, prompt) = pane.split_at(i);
-            format!("{head}\n{discord}\n{}", prompt.trim_start_matches('\n'))
-        }
-        None => format!("{discord}\n{pane}\n"),
     }
 }
 

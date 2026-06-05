@@ -6,7 +6,6 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use bunny_auth::AuthenticatedSession;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -52,14 +51,6 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
         }
     }
     None
-}
-
-pub fn user_from_extensions(req: &Request<Body>) -> Option<Uuid> {
-    req.extensions().get::<Uuid>().copied()
-}
-
-pub fn auth_session_from_extensions(req: &Request<Body>) -> Option<AuthenticatedSession> {
-    req.extensions().get::<AuthenticatedSession>().cloned()
 }
 
 pub async fn require_bridge(

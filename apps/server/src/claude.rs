@@ -567,18 +567,6 @@ pub fn extract_oauth_code_from_callback_url(url: &str) -> Option<String> {
     None
 }
 
-/// Parse full paste code from Claude "Authentication Code" page body (includes `#` suffix).
-pub fn extract_oauth_code_from_page_text(text: &str) -> Option<String> {
-    for token in text.split_whitespace() {
-        if token.contains('#') {
-            if let Some(code) = normalize_oauth_code(token.trim_matches(|c| c == '"' || c == '\'' || c == '.' || c == ',')) {
-                return Some(code);
-            }
-        }
-    }
-    None
-}
-
 async fn detect_code_from_cdp_json_list(cdp_port: u16) -> Option<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))

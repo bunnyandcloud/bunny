@@ -10,13 +10,11 @@ use bunny_browser::BrowserManager;
 use bunny_core::config::BunnyConfig;
 use bunny_core::redaction::Redactor;
 use bunny_pty::TerminalManager;
-use bunny_relay::supervisor::ProcessSupervisor;
 use bunny_push::FcmClient;
 use bunny_secrets::SecretsVault;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -26,14 +24,12 @@ pub struct AppState {
     pub terminals: TerminalManager,
     pub browsers: BrowserManager,
     pub redactor: RwLock<Redactor>,
-    pub supervisor: RwLock<ProcessSupervisor>,
     pub previews: RwLock<HashMap<Uuid, PreviewState>>,
     pub terminal_sessions: RwLock<HashMap<Uuid, Uuid>>,
     pub browser_sessions: RwLock<HashMap<Uuid, Uuid>>,
     pub cdp_collectors: RwLock<HashMap<Uuid, CdpCollectorHandle>>,
     pub realtime: Arc<RealtimeHub>,
     pub watch_hub: Arc<WatchHub>,
-    pub timeline_seq: AtomicU64,
     pub data_dir: String,
     pub secrets: Mutex<SecretsVault>,
     /// Passphrase kept in memory while vault is unlocked via API (cleared on lock).
@@ -119,17 +115,12 @@ impl AppState {
             claude_auth: Mutex::new(AuthFlow::default()),
             discord: ParkingMutex::new(discord),
             thread_claude_pids: Mutex::new(HashMap::new()),
-            supervisor: RwLock::new(ProcessSupervisor::new(
-                config.recovery.process_supervisor.max_restarts,
-                config.recovery.process_supervisor.restart_window_seconds,
-            )),
             previews: RwLock::new(HashMap::new()),
             terminal_sessions: RwLock::new(HashMap::new()),
             browser_sessions: RwLock::new(HashMap::new()),
             cdp_collectors: RwLock::new(HashMap::new()),
             realtime: Arc::new(RealtimeHub::new()),
             watch_hub: Arc::new(WatchHub::new()),
-            timeline_seq: AtomicU64::new(0),
             data_dir: data_dir.clone(),
             config,
         })

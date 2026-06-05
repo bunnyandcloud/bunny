@@ -9,6 +9,7 @@ use tokio::process::Child;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+#[allow(dead_code)]
 pub struct CdpCollectorHandle {
     pub child: Child,
     pub browser_id: Uuid,

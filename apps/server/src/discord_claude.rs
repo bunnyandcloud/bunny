@@ -177,12 +177,6 @@ pub struct ClaudeJsonParse {
     pub ask_user_questions: Option<Vec<AskUserQuestionItem>>,
 }
 
-/// Parse `claude -p --output-format json` for Discord (threads + slash commands).
-pub fn format_claude_json_for_discord(raw: &str) -> (String, Option<String>) {
-    let p = parse_claude_json_for_discord(raw);
-    (p.display_text, p.session_id)
-}
-
 pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
     let trimmed = raw.trim();
     let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
@@ -390,6 +384,7 @@ const THREAD_TRANSCRIPT_MAX_MESSAGES: usize = 50;
 
 pub struct ThreadClaudeResult {
     pub output: String,
+    #[allow(dead_code)]
     pub exit_code: i32,
     pub needs_approval: bool,
     pub approval_summary: Option<String>,

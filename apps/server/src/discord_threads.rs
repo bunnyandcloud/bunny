@@ -72,6 +72,7 @@ pub struct ThreadInputResponse {
 #[derive(Deserialize)]
 pub struct ThreadIdRequest {
     #[serde(flatten)]
+    #[allow(dead_code)]
     pub ctx: BridgeContext,
     pub thread_id: String,
 }
@@ -960,8 +961,3 @@ fn require_active_thread(state: &AppState, thread_id: &str) -> Result<DiscordThr
     Ok(binding)
 }
 
-pub fn thread_data_dir(state: &AppState, thread_id: &str) -> PathBuf {
-    PathBuf::from(state.config.expand_data_dir())
-        .join("discord-attachments")
-        .join(thread_id)
-}

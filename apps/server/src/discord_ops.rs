@@ -5,7 +5,7 @@ use crate::task_runner;
 use crate::watch;
 use axum::{
     extract::{Extension, Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -13,7 +13,7 @@ use axum::{
 use bunny_auth::AuthenticatedSession;
 use bunny_core::permissions::{role_can, Action};
 use bunny_i18n::Locale;
-use bunny_discord::{db::hash_token, AgentTaskMode, DiscordAuditEntry, DiscordSessionLink};
+use bunny_discord::{AgentTaskMode, DiscordAuditEntry, DiscordSessionLink};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -1084,6 +1084,7 @@ async fn run_agent(
 #[derive(Deserialize)]
 pub struct TaskStopRequest {
     #[serde(flatten)]
+    #[allow(dead_code)]
     pub ctx: BridgeContext,
     pub task_id: String,
 }
@@ -1355,6 +1356,7 @@ impl IntoResponse for RedirectResponse {
 #[derive(Deserialize)]
 pub struct OAuthCallbackQuery {
     pub code: Option<String>,
+    #[allow(dead_code)]
     pub state: Option<String>,
 }
 
@@ -1441,7 +1443,7 @@ pub(crate) fn resolve_link(state: &AppState, ctx: &BridgeContext) -> Result<Disc
 }
 
 pub(crate) fn resolve_bunny_user(state: &AppState, ctx: &BridgeContext) -> Result<Uuid, ApiError> {
-    let mut discord = state.discord.lock();
+    let discord = state.discord.lock();
     if let Some(user_id) = discord
         .get_bunny_user_for_discord(&ctx.discord_user_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?
@@ -1718,16 +1720,3 @@ async fn internal_git_route(
     crate::discord_threads::internal_git_command(state, body).await
 }
 
-pub fn generate_bridge_token() -> (String, String) {
-    let token: String = (0..32)
-        .map(|_| {
-            let v = rand::random::<u8>() % 36;
-            if v < 10 {
-                (b'0' + v) as char
-            } else {
-                (b'a' + v - 10) as char
-            }
-        })
-        .collect();
-    (token.clone(), hash_token(&token))
-}

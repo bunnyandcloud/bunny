@@ -34,6 +34,7 @@ struct DiscordSection {
 struct BunnySection {
     internal_url: String,
     bridge_token: String,
+    #[allow(dead_code)]
     public_url: Option<String>,
 }
 
@@ -197,16 +198,6 @@ fn text_reply(content: impl Into<String>) -> CommandReply {
 /// Discord hard limit; stay slightly under for markdown edge cases.
 const DISCORD_PAGE_LIMIT: usize = 1990;
 const MAX_DISCORD_PAGES: usize = 10;
-
-fn ctx_from_interaction(cmd: &serenity::model::application::CommandInteraction) -> serde_json::Value {
-    let channel_id = cmd.channel_id.get().to_string();
-    serde_json::json!({
-        "guild_id": cmd.guild_id.map(|g| g.get().to_string()).unwrap_or_default(),
-        "channel_id": channel_id,
-        "thread_id": channel_id,
-        "discord_user_id": cmd.user.id.get().to_string(),
-    })
-}
 
 async fn ctx_from_interaction_resolved(
     http: &serenity::http::Http,

@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::ws;
 use axum::{
     body::Body,
-    extract::{Extension, FromRequest, Path, Request, State, WebSocketUpgrade},
+    extract::{Extension, FromRequest, Path, State, WebSocketUpgrade},
     http::{header, HeaderMap, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::any,
