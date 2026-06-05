@@ -572,6 +572,13 @@ pub async fn run_doctor() -> Result<()> {
     } else {
         println!("  ⚠ tmux not found — install tmux for persistent shells");
     }
+    if command_works("git", &["--version"]) {
+        println!("  ✓ git (Discord thread branches, `/bunny git`)");
+    } else {
+        println!(
+            "  ⚠ git not found — install git for Discord git commands (./scripts/install-prerequisites.sh on Debian/Ubuntu)"
+        );
+    }
     if crate::webrtc::sidecar_script_path().is_some() {
         println!("  ✓ webrtc-sidecar script");
     } else {
