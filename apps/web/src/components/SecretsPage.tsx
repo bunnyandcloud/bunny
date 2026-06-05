@@ -13,7 +13,8 @@ import {
   type VaultStatus,
 } from '../lib/api';
 import { copyToClipboard } from '../lib/copyToClipboard';
-import LogoutButton from './LogoutButton';
+import { useT } from '../i18n';
+import AppTopBar from './AppTopBar';
 
 interface Props {
   email: string;
@@ -24,6 +25,7 @@ type Scope = 'system' | 'project' | 'session';
 const SCOPES: Scope[] = ['system', 'project', 'session'];
 
 export default function SecretsPage({ email }: Props) {
+  const tr = useT();
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [sessions, setSessions] = useState<Array<{ id: string; name: string }>>([]);
@@ -229,22 +231,10 @@ export default function SecretsPage({ email }: Props) {
     <div className="min-h-screen flex flex-col p-6 max-w-3xl mx-auto gap-6">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl text-bunny-accent">Secrets vault</h1>
-          <p className="text-bunny-muted text-sm mt-1">
-            Manage encrypted secrets injected as <code className="text-gray-300">BUNNY_SECRET_*</code>{' '}
-            env vars in terminals.
-          </p>
+          <h1 className="text-xl text-bunny-accent">{tr('web.secrets.title')}</h1>
+          <p className="text-bunny-muted text-sm mt-1">{tr('web.secrets.subtitle')}</p>
         </div>
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => { location.href = '/'; }}
-            className="text-sm text-bunny-muted hover:text-bunny-accent"
-          >
-            ← Sessions
-          </button>
-          <LogoutButton />
-        </div>
+        <AppTopBar />
       </header>
 
       {error && (
@@ -254,7 +244,7 @@ export default function SecretsPage({ email }: Props) {
       )}
 
       {loading ? (
-        <p className="text-bunny-muted text-sm">Loading…</p>
+        <p className="text-bunny-muted text-sm">{tr('web.common.loading')}</p>
       ) : status ? (
         <>
           <section className="border border-bunny-border rounded p-4 bg-bunny-panel space-y-2">

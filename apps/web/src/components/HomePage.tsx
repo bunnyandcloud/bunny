@@ -9,8 +9,9 @@ import {
   startClaudeAuth,
   type ClaudeStatus,
 } from '../lib/api';
+import { useT } from '../i18n';
+import AppTopBar from './AppTopBar';
 import InlineRename from './InlineRename';
-import LogoutButton from './LogoutButton';
 
 interface SessionItem {
   id: string;
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
+  const tr = useT();
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -61,8 +63,8 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
     if (!installing && claude.auth.phase !== 'waiting_url' && claude.auth.phase !== 'waiting_code') {
       return;
     }
-    const t = setInterval(refreshClaude, 1500);
-    return () => clearInterval(t);
+    const timer = setInterval(refreshClaude, 1500);
+    return () => clearInterval(timer);
   }, [claude, refreshClaude]);
 
   async function handleNewSession() {
@@ -94,13 +96,13 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
           setClaude(s);
           if (s.installed) break;
           if (s.install.state === 'failed') {
-            throw new Error(s.install.error || 'Claude installation failed');
+            throw new Error(s.install.error || tr('web.home.claudeInstallFailed'));
           }
           attempts += 1;
         }
         const final = await getClaudeStatus();
         if (!final.installed) {
-          throw new Error('Claude installation timed out');
+          throw new Error(tr('web.home.claudeInstallTimeout'));
         }
       }
       const { session_id } = await startClaudeAuth();
@@ -113,11 +115,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
 
   async function handleDeleteSession(id: string, e: MouseEvent) {
     e.stopPropagation();
-    if (
-      !window.confirm(
-        'Delete this session? All shells will be stopped and removed.',
-      )
-    ) {
+    if (!window.confirm(tr('web.home.deleteSessionConfirm'))) {
       return;
     }
     setDeletingId(id);
@@ -135,11 +133,13 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-6">
       <div className="w-full max-w-lg flex justify-end">
-        <LogoutButton />
+        <AppTopBar />
       </div>
       <div className="text-center space-y-1">
-        <h1 className="text-xl text-bunny-accent">Welcome, {email}</h1>
-        <p className="text-bunny-muted text-sm">Start or resume a remote dev session.</p>
+        <h1 className="text-xl text-bunny-accent">
+          {tr('web.home.welcome', { email })}
+        </h1>
+        <p className="text-bunny-muted text-sm">{tr('web.home.subtitle')}</p>
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-3">
@@ -150,7 +150,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
             disabled={creating}
             className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
           >
-            {creating ? 'Creating…' : 'New session'}
+            {creating ? tr('web.home.creating') : tr('web.home.newSession')}
           </button>
         ) : null}
         <button
@@ -158,17 +158,15 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
           onClick={() => { location.href = '/security'; }}
           className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
         >
-          Security
+          {tr('web.home.security')}
         </button>
         {isOwner && (
           <button
             type="button"
-            onClick={() => {
-              location.href = '/team';
-            }}
+            onClick={() => { location.href = '/team'; }}
             className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
           >
-            Team
+            {tr('web.home.team')}
           </button>
         )}
         {isOwner && (
@@ -177,7 +175,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
             onClick={() => { location.href = '/secrets'; }}
             className="px-5 py-2.5 rounded border border-bunny-border text-gray-200 font-medium text-sm hover:bg-bunny-panel"
           >
-            Secrets vault
+            {tr('web.home.secretsVault')}
           </button>
         )}
         {claude && !claude.authenticated && (
@@ -194,15 +192,16 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
             {claudeBusy ||
             claude.install.state === 'installing' ||
             claude.install.state === 'downloading'
-              ? 'Setting up…'
-              : 'Setup Claude'}
+              ? tr('web.home.settingUp')
+              : tr('web.home.setupClaude')}
           </button>
         )}
       </div>
 
       {claude?.authenticated && (
         <p className="text-xs text-emerald-400 text-center">
-          Claude Code ready{claude.version ? ` · ${claude.version}` : ''}
+          {tr('web.home.claudeReady')}
+          {claude.version ? ` · ${claude.version}` : ''}
         </p>
       )}
 
@@ -218,12 +217,12 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
 
       <div className="w-full max-w-lg">
         <h2 className="text-xs uppercase tracking-wide text-bunny-muted mb-2">
-          Recent sessions
+          {tr('web.home.recentSessions')}
         </h2>
         {loading ? (
-          <p className="text-bunny-muted text-sm">Loading…</p>
+          <p className="text-bunny-muted text-sm">{tr('web.common.loading')}</p>
         ) : sessions.length === 0 ? (
-          <p className="text-bunny-muted text-sm">No sessions yet.</p>
+          <p className="text-bunny-muted text-sm">{tr('web.home.noSessions')}</p>
         ) : (
           <ul className="divide-y divide-bunny-border border border-bunny-border rounded overflow-hidden">
             {sessions.map((s) => (
@@ -240,7 +239,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
                     <InlineRename
                       value={s.name}
                       className="font-medium max-w-full"
-                      title="Double-click to rename session"
+                      title={tr('web.home.renameHint')}
                       onSave={async (name) => {
                         const updated = await renameSession(s.id, name);
                         setSessions((prev) =>
@@ -258,8 +257,8 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
                 </button>
                 <button
                   type="button"
-                  title="Delete session"
-                  aria-label="Delete session"
+                  title={tr('web.home.deleteSession')}
+                  aria-label={tr('web.home.deleteSession')}
                   disabled={deletingId === s.id}
                   onClick={(e) => handleDeleteSession(s.id, e)}
                   className="px-3 text-bunny-muted hover:text-red-400 hover:bg-bunny-panel disabled:opacity-50 shrink-0"

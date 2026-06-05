@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { unlockSecretsVault } from '../lib/api';
+import { useT } from '../i18n';
 
 interface Props {
   open: boolean;
@@ -15,6 +16,7 @@ export default function VaultUnlockModal({
   onUnlocked,
   sessionId,
 }: Props) {
+  const tr = useT();
   const [passphrase, setPassphrase] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,16 +55,16 @@ export default function VaultUnlockModal({
     >
       <div className="w-full max-w-sm rounded border border-bunny-border bg-bunny-panel p-4 space-y-3 shadow-xl">
         <h2 id="vault-unlock-title" className="text-sm font-medium text-gray-200">
-          Unlock secrets vault
+          {tr('web.vault.unlockTitle')}
         </h2>
         <p className="text-bunny-muted text-xs">
           {sessionId
-            ? 'Les shells ouverts dans cette session seront rechargés (sans afficher les valeurs).'
-            : 'Les shells en cours seront rechargés (sans afficher les valeurs).'}
+            ? tr('web.vault.unlockHintSession')
+            : tr('web.vault.unlockHintGlobal')}
         </p>
         <form onSubmit={handleSubmit} className="space-y-3">
           <label className="block text-sm">
-            <span className="text-bunny-muted">Passphrase</span>
+            <span className="text-bunny-muted">{tr('web.vault.passphrase')}</span>
             <input
               type="password"
               required
@@ -85,14 +87,14 @@ export default function VaultUnlockModal({
               onClick={handleClose}
               className="px-3 py-1.5 text-sm text-bunny-muted hover:text-gray-200 disabled:opacity-50"
             >
-              Cancel
+              {tr('web.common.cancel')}
             </button>
             <button
               type="submit"
               disabled={busy}
               className="px-3 py-1.5 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
             >
-              {busy ? 'Unlocking…' : 'Unlock'}
+              {busy ? tr('web.vault.unlocking') : tr('web.vault.unlockButton')}
             </button>
           </div>
         </form>

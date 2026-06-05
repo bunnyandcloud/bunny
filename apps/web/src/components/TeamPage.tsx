@@ -7,13 +7,15 @@ import {
   updateUserAdmin,
   type TeamUser,
 } from '../lib/api';
-import LogoutButton from './LogoutButton';
+import { useT } from '../i18n';
+import AppTopBar from './AppTopBar';
 
 type SessionRole = 'admin' | 'editor' | 'viewer';
 const SESSION_ROLES: SessionRole[] = ['admin', 'editor', 'viewer'];
 
 export default function TeamPage(props: { email: string }) {
   const { email } = props;
+  const tr = useT();
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +50,9 @@ export default function TeamPage(props: { email: string }) {
     setError(null);
     listUsersAdmin()
       .then(setUsers)
-      .catch((e) => setError(apiErrorMessage(e, 'Cannot load users')))
+      .catch((e) => setError(apiErrorMessage(e, tr('web.team.loadFailed'))))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tr]);
 
   useEffect(() => {
     refresh();
@@ -73,7 +75,7 @@ export default function TeamPage(props: { email: string }) {
       setCreatedInvite({ token: res.token, email });
       setInviteEmail('');
     } catch (err) {
-      setError(apiErrorMessage(err, 'Invite failed'));
+      setError(apiErrorMessage(err, tr('web.team.inviteFailed')));
     } finally {
       setSaving(null);
     }
@@ -100,7 +102,7 @@ export default function TeamPage(props: { email: string }) {
       });
       await refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, 'Update failed'));
+      setError(apiErrorMessage(err, tr('web.team.updateFailed')));
     } finally {
       setSaving(null);
     }
@@ -108,9 +110,7 @@ export default function TeamPage(props: { email: string }) {
 
   async function removeUser(user: TeamUser) {
     if (
-      !window.confirm(
-        `Remove ${user.email}? They will be signed out and lose access to all sessions.`,
-      )
+      !window.confirm(tr('web.team.removeConfirm', { email: user.email }))
     ) {
       return;
     }
@@ -120,7 +120,7 @@ export default function TeamPage(props: { email: string }) {
       await revokeTeamUser(user.id);
       await refresh();
     } catch (err) {
-      setError(apiErrorMessage(err, 'Remove failed'));
+      setError(apiErrorMessage(err, tr('web.team.revokeFailed')));
     } finally {
       setSaving(null);
     }
@@ -136,15 +136,15 @@ export default function TeamPage(props: { email: string }) {
           }}
           className="text-bunny-accent font-bold hover:opacity-80"
         >
-          ← Home
+          {tr('web.team.home')}
         </button>
-        <LogoutButton />
+        <AppTopBar />
       </div>
 
       <div className="w-full max-w-5xl space-y-1">
-        <h1 className="text-xl text-bunny-accent">Team</h1>
+        <h1 className="text-xl text-bunny-accent">{tr('web.team.title')}</h1>
         <p className="text-bunny-muted text-sm">
-          Manage users, global permissions, and default session roles. Signed in as {email}.
+          {tr('web.team.subtitle')} {tr('web.team.signedInAs', { email })}
         </p>
       </div>
 
@@ -158,10 +158,10 @@ export default function TeamPage(props: { email: string }) {
         onSubmit={onInviteSubmit}
         className="w-full max-w-5xl border border-bunny-border rounded p-4 space-y-3 bg-bunny-panel"
       >
-        <h2 className="text-sm font-medium text-gray-200">Invite user</h2>
+        <h2 className="text-sm font-medium text-gray-200">{tr('web.team.inviteUser')}</h2>
         <div className="flex flex-wrap gap-3 items-end">
           <label className="block text-xs text-bunny-muted flex-1 min-w-[12rem]">
-            Email
+            {tr('web.common.email')}
             <input
               type="email"
               value={inviteEmail}
@@ -172,7 +172,7 @@ export default function TeamPage(props: { email: string }) {
             />
           </label>
           <label className="block text-xs text-bunny-muted">
-            Default session role
+            {tr('web.team.defaultRole')}
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value as SessionRole)}
@@ -190,7 +190,7 @@ export default function TeamPage(props: { email: string }) {
             disabled={saving === 'invite'}
             className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium disabled:opacity-50"
           >
-            {saving === 'invite' ? 'Creating…' : 'Create invite link'}
+            {saving === 'invite' ? tr('web.team.creating') : tr('web.team.createInviteLink')}
           </button>
         </div>
         <div className="flex flex-wrap gap-4 text-xs text-bunny-muted">
@@ -200,7 +200,7 @@ export default function TeamPage(props: { email: string }) {
               checked={inviteCreateSessions}
               onChange={(e) => setInviteCreateSessions(e.target.checked)}
             />
-            Create sessions
+            {tr('web.team.canCreateSessions')}
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -208,7 +208,7 @@ export default function TeamPage(props: { email: string }) {
               checked={inviteClaude}
               onChange={(e) => setInviteClaude(e.target.checked)}
             />
-            Install Claude
+            {tr('web.team.canInstallClaude')}
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -216,15 +216,15 @@ export default function TeamPage(props: { email: string }) {
               checked={inviteVault}
               onChange={(e) => setInviteVault(e.target.checked)}
             />
-            Manage vault
+            {tr('web.team.canManageVault')}
           </label>
         </div>
         {inviteLink ? (
           <div className="text-xs space-y-1 border-t border-bunny-border pt-3">
             <p className="text-emerald-300">
-              Invitation created for <strong>{createdInvite?.email}</strong>
+              {tr('web.team.invitationCreated', { email: createdInvite?.email ?? '' })}
             </p>
-            <p className="text-bunny-muted">Share this link (valid 7 days):</p>
+            <p className="text-bunny-muted">{tr('web.team.shareLink')}</p>
             <input
               readOnly
               value={inviteLink}
@@ -238,7 +238,7 @@ export default function TeamPage(props: { email: string }) {
                 void navigator.clipboard.writeText(inviteLink);
               }}
             >
-              Copy link
+              {tr('web.team.copyLink')}
             </button>
           </div>
         ) : null}
@@ -246,19 +246,19 @@ export default function TeamPage(props: { email: string }) {
 
       <div className="w-full max-w-5xl border border-bunny-border rounded overflow-x-auto">
         <div className="grid grid-cols-[minmax(10rem,1.4fr)_repeat(4,minmax(5rem,0.7fr))_minmax(6rem,0.8fr)_4rem] gap-2 px-3 py-2 bg-bunny-panel text-xs text-bunny-muted border-b border-bunny-border min-w-[44rem]">
-          <div>User</div>
-          <div>Status</div>
-          <div>Sessions</div>
-          <div>Claude</div>
-          <div>Vault</div>
-          <div>Default role</div>
+          <div>{tr('web.team.colUser')}</div>
+          <div>{tr('web.team.colStatus')}</div>
+          <div>{tr('web.team.colSessions')}</div>
+          <div>{tr('web.team.colClaude')}</div>
+          <div>{tr('web.team.colVault')}</div>
+          <div>{tr('web.team.colRole')}</div>
           <div />
         </div>
 
         {loading ? (
-          <div className="p-3 text-sm text-bunny-muted">Loading…</div>
+          <div className="p-3 text-sm text-bunny-muted">{tr('web.common.loading')}</div>
         ) : users.length === 0 ? (
-          <div className="p-3 text-sm text-bunny-muted">No users.</div>
+          <div className="p-3 text-sm text-bunny-muted">{tr('web.team.noUsers')}</div>
         ) : (
           users.map((u) => {
             const locked = u.is_system_owner || u.disabled;
@@ -270,14 +270,14 @@ export default function TeamPage(props: { email: string }) {
                 <div className="min-w-0">
                   <div className="text-sm text-gray-200 truncate">{u.email}</div>
                   {u.is_system_owner ? (
-                    <div className="text-[11px] text-bunny-accent">system owner</div>
+                    <div className="text-[11px] text-bunny-accent">{tr('web.team.systemOwner')}</div>
                   ) : null}
                 </div>
                 <div className="text-xs">
                   {u.disabled ? (
-                    <span className="text-red-300">disabled</span>
+                    <span className="text-red-300">{tr('web.team.disabled')}</span>
                   ) : (
-                    <span className="text-emerald-300">active</span>
+                    <span className="text-emerald-300">{tr('web.team.active')}</span>
                   )}
                 </div>
                 <div>
@@ -290,7 +290,7 @@ export default function TeamPage(props: { email: string }) {
                         void saveUser(u, { can_create_sessions: e.target.checked })
                       }
                     />
-                    create
+                    {tr('web.team.create')}
                   </label>
                 </div>
                 <div>
@@ -303,7 +303,7 @@ export default function TeamPage(props: { email: string }) {
                         void saveUser(u, { can_install_claude: e.target.checked })
                       }
                     />
-                    install
+                    {tr('web.team.install')}
                   </label>
                 </div>
                 <div>
@@ -316,7 +316,7 @@ export default function TeamPage(props: { email: string }) {
                         void saveUser(u, { can_manage_vault: e.target.checked })
                       }
                     />
-                    manage
+                    {tr('web.team.manage')}
                   </label>
                 </div>
                 <div>
@@ -347,7 +347,7 @@ export default function TeamPage(props: { email: string }) {
                       onClick={() => void removeUser(u)}
                       className="text-xs text-red-300 hover:text-red-200 disabled:opacity-50"
                     >
-                      {saving === u.id ? '…' : 'Remove'}
+                      {saving === u.id ? '…' : tr('web.team.remove')}
                     </button>
                   ) : null}
                 </div>

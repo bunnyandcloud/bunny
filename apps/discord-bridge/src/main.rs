@@ -1,6 +1,7 @@
 mod threads;
 
 use anyhow::Result;
+use bunny_i18n::{is_valid_locale_code, Locale, t};
 use serenity::all::{
     Command, CommandDataOptionValue, CommandOptionType, CreateActionRow, CreateAttachment,
     CreateButton, CreateCommand, CreateCommandOption,
@@ -262,6 +263,19 @@ impl EventHandler for Handler {
                     "status",
                     "Link status",
                 ))
+                .add_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::SubCommand,
+                        "language",
+                        "Set UI language (en/fr)",
+                    )
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "locale", "en or fr")
+                            .required(true)
+                            .add_string_choice("English", "en")
+                            .add_string_choice("French", "fr"),
+                    ),
+                )
                 .add_option(
                     CreateCommandOption::new(
                         CommandOptionType::SubCommand,
@@ -648,6 +662,7 @@ impl EventHandler for Handler {
                         "thread_id": comp.channel_id.get().to_string(),
                         "discord_user_id": comp.user.id.get().to_string(),
                     });
+                    let loc = user_locale(&bunny, &bridge_ctx).await;
                     let mut body = bridge_ctx;
                     body["approval_id"] = serde_json::json!(approval_id);
                     body["approve"] = serde_json::json!(approve);
@@ -657,7 +672,7 @@ impl EventHandler for Handler {
                     let followup = match result {
                         Ok(res) => {
                             if !approve {
-                                text_reply("Refusé.")
+                                text_reply(t(loc, "discord.approval.denied", &[]))
                             } else if res.get("output").and_then(|v| v.as_str()).is_some() {
                                 let mode = res
                                     .get("mode")
@@ -674,7 +689,7 @@ impl EventHandler for Handler {
                                     "output": res.get("output").and_then(|v| v.as_str()).unwrap_or(""),
                                 })))
                             } else {
-                                text_reply("Approuvé.")
+                                text_reply(t(loc, "discord.approval.approved", &[]))
                             }
                         }
                         Err(e) => text_reply(format!("Error: {e}")),
@@ -717,13 +732,27 @@ async fn run_snapshot(
     })
 }
 
+pub(crate) async fn user_locale(bunny: &BunnyClient, bridge_ctx: &serde_json::Value) -> Locale {
+    let q = query_ctx(bridge_ctx);
+    let q_ref: Vec<(&str, String)> = q.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    for path in ["/status", "/user-locale"] {
+        if let Ok(res) = bunny.get_json(path, &q_ref).await {
+            if let Some(l) = res.get("locale").and_then(|v| v.as_str()) {
+                return Locale::from_db(l);
+            }
+        }
+    }
+    Locale::En
+}
+
 async fn handle_command(
     bunny: &BunnyClient,
     cmd: &serenity::model::application::CommandInteraction,
     bridge_ctx: &serde_json::Value,
 ) -> Result<CommandReply> {
+    let locale = user_locale(bunny, bridge_ctx).await;
     if cmd.data.name != "bunny" {
-        return Ok(text_reply("Unknown command"));
+        return Ok(text_reply(t(locale, "discord.unknown_command", &[])));
     }
     let (sub_name, sub_opts) = subcommand_opts(cmd)?;
     match sub_name.as_str() {
@@ -732,14 +761,53 @@ async fn handle_command(
             let mut body = bridge_ctx.clone();
             body["code"] = serde_json::json!(code);
             let res = bunny.post_json("/link", &body).await?;
-            Ok(text_reply(format!(
-                "Linked to Bunny session `{}`",
-                res.get("session_id").and_then(|v| v.as_str()).unwrap_or("?")
+            Ok(text_reply(t(
+                locale,
+                "discord.link.success",
+                &[(
+                    "session_id",
+                    res.get("session_id").and_then(|v| v.as_str()).unwrap_or("?"),
+                )],
             )))
         }
         "unlink" => {
             bunny.post_json("/unlink", bridge_ctx).await?;
-            Ok(text_reply("Channel unlinked."))
+            Ok(text_reply(t(locale, "discord.unlink.success", &[])))
+        }
+        "language" => {
+            let loc_str = opt_str(&sub_opts, "locale").unwrap_or("");
+            if !is_valid_locale_code(loc_str) {
+                return Ok(text_reply(t(locale, "discord.language.invalid", &[])));
+            }
+            let mut body = bridge_ctx.clone();
+            body["locale"] = serde_json::json!(loc_str);
+            let res = bunny.post_json("/locale", &body).await;
+            match res {
+                Ok(v) => {
+                    let msg = v
+                        .get("message")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| {
+                            t(
+                                Locale::from_db(loc_str),
+                                "discord.language.updated",
+                                &[("locale", loc_str)],
+                            )
+                        });
+                    Ok(text_reply(msg))
+                }
+                Err(e) => {
+                    let hint = if e.to_string().contains("403")
+                        || e.to_string().contains("discord_not_linked")
+                    {
+                        t(locale, "discord.language.not_linked", &[])
+                    } else {
+                        format!("Error: {e}")
+                    };
+                    Ok(text_reply(hint))
+                }
+            }
         }
         "status" => {
             let q = query_ctx(bridge_ctx);
@@ -756,20 +824,24 @@ async fn handle_command(
             let q = query_ctx(bridge_ctx);
             let q_ref: Vec<(&str, String)> = q.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
             let res = bunny.get_json("/shell/list", &q_ref).await?;
-            let mut lines = vec!["**Shells**".into()];
+            let mut lines = vec![t(locale, "discord.shell_list.title", &[])];
             if let Some(items) = res.as_array() {
                 if items.is_empty() {
-                    lines.push("_No shell — open one in the Web UI first._".into());
+                    lines.push(t(locale, "discord.shell_list.empty", &[]));
                 }
                 for item in items {
                     let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                     let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                     let default = item.get("default").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let tag = if default { " _(default)_" } else { "" };
+                    let tag = if default {
+                        t(locale, "discord.shell_list.default_tag", &[])
+                    } else {
+                        String::new()
+                    };
                     lines.push(format!("• `{name}` ({status}){tag}"));
                 }
-                lines.push("Use `/bunny run shell:<name> command:...`".into());
-                lines.push("`/bunny shell_new` · `/bunny shell_close shell:<name>`".into());
+                lines.push(t(locale, "discord.shell_list.hint_run", &[]));
+                lines.push(t(locale, "discord.shell_list.hint_manage", &[]));
             }
             Ok(text_reply(lines.join("\n")))
         }
@@ -784,8 +856,10 @@ async fn handle_command(
                 .get("terminal_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            Ok(text_reply(format!(
-                "Shell **`{name}`** created (`{id}`).\nOpen the Web UI Terminal tab to interact."
+            Ok(text_reply(t(
+                locale,
+                "discord.shell_new.created",
+                &[("name", name), ("id", id)],
             )))
         }
         "shell_close" => {
@@ -795,7 +869,7 @@ async fn handle_command(
             }
             let res = bunny.post_json("/shell/close", &body).await?;
             let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            Ok(text_reply(format!("Shell **`{name}`** closed.")))
+            Ok(text_reply(t(locale, "discord.shell_close.closed", &[("name", name)])))
         }
         "run_stop" => {
             let mut body = bridge_ctx.clone();
@@ -807,12 +881,7 @@ async fn handle_command(
                 .get("shell")
                 .and_then(|v| v.as_str())
                 .unwrap_or("default");
-            Ok(text_reply(format!(
-                "**Shell :** `{shell}`\n\
-                 Signal **Ctrl+C** envoyé au processus en avant-plan.\n\
-                 Si le serveur ne s’arrête pas, relancez `/bunny run_stop` ou utilisez le terminal Web UI.\n\
-                 _(`/bunny stop` concerne les tâches Claude, pas les commandes `run`.)_"
-            )))
+            Ok(text_reply(t(locale, "discord.run_stop.body", &[("shell", shell)])))
         }
         "run" | "shell_run" => {
             let command = opt_str(&sub_opts, "command").unwrap_or("");
@@ -835,14 +904,14 @@ async fn handle_command(
                     .and_then(|v| v.as_str())
                     .unwrap_or("default");
                 let text = if output.trim().is_empty() {
-                    "(no output)".to_string()
+                    t(locale, "discord.run.no_output", &[])
                 } else {
                     output.trim().to_string()
                 };
                 if persistent {
-                    Ok(format_persistent_shell_run_reply(shell, &text))
+                    Ok(format_persistent_shell_run_reply(locale, shell, &text))
                 } else {
-                    Ok(format_shell_run_reply(shell, &text, exit_code))
+                    Ok(format_shell_run_reply(locale, shell, &text, exit_code))
                 }
             } else {
                 Ok(text_reply(format!(
@@ -933,25 +1002,23 @@ async fn handle_command(
                 .post_json_timeout(&path, &body, Duration::from_secs(180))
                 .await?;
             if res.get("needs_approval").and_then(|v| v.as_bool()) == Some(true) {
-                return Ok(format_approval_reply(&res));
+                return Ok(format_approval_reply(locale, &res));
             }
             Ok(CommandReply::Text(format_agent_reply_pages(&res)))
         }
         "claude_reset" => {
             bunny.post_json("/claude/reset", bridge_ctx).await?;
-            Ok(text_reply(
-                "Conversation Claude réinitialisée pour ce canal (`ask`/`plan` repartiront de zéro). Le shell interactif (`do`) reste dans le terminal tant que vous ne quittez pas Claude.",
-            ))
+            Ok(text_reply(t(locale, "discord.claude_reset.done", &[])))
         }
         "project" => {
             let path = opt_str(&sub_opts, "path");
-            threads::run_project_command(bunny, bridge_ctx, path).await
+            threads::run_project_command(bunny, bridge_ctx, path, locale).await
         }
         "git" => {
             let action = opt_str(&sub_opts, "action").unwrap_or("status");
             let branch = opt_str(&sub_opts, "branch");
             let path = opt_str(&sub_opts, "path");
-            threads::run_git_command(bunny, bridge_ctx, action, branch, path).await
+            threads::run_git_command(bunny, bridge_ctx, action, branch, path, locale).await
         }
         "stop" => {
             let task_id = opt_str(&sub_opts, "task_id").unwrap_or("");
@@ -960,7 +1027,11 @@ async fn handle_command(
             bunny.post_json("/task/stop", &body).await?;
             Ok(text_reply("Task stop requested."))
         }
-        _ => Ok(text_reply(format!("Unknown subcommand: {}", sub_name))),
+        _ => Ok(text_reply(t(
+            locale,
+            "discord.unknown_subcommand",
+            &[("name", &sub_name)],
+        ))),
     }
 }
 
@@ -1061,7 +1132,7 @@ async fn deliver_component_followup(
 
     match reply {
         CommandReply::Text(pages) => {
-            for page in cap_discord_pages(pages) {
+            for page in cap_discord_pages(Locale::En, pages) {
                 comp.create_followup(
                     http,
                     CreateInteractionResponseFollowup::new().content(page),
@@ -1091,7 +1162,7 @@ async fn deliver_command_reply_as_followup(
 ) -> Result<()> {
     match reply {
         CommandReply::Text(pages) => {
-            for page in cap_discord_pages(pages) {
+            for page in cap_discord_pages(Locale::En, pages) {
                 comp.create_followup(
                     http,
                     CreateInteractionResponseFollowup::new().content(page),
@@ -1111,7 +1182,7 @@ async fn deliver_command_reply(
 ) -> Result<()> {
     match reply {
         CommandReply::Text(pages) => {
-            let pages = cap_discord_pages(pages);
+            let pages = cap_discord_pages(Locale::En, pages);
             let Some(first) = pages.first() else {
                 cmd.edit_response(http, EditInteractionResponse::new().content("(empty)"))
                     .await?;
@@ -1144,7 +1215,7 @@ async fn deliver_command_reply(
             }
         }
         CommandReply::PendingApproval { pages, approval_id } => {
-            let pages = cap_discord_pages(pages);
+            let pages = cap_discord_pages(Locale::En, pages);
             let Some(first) = pages.first() else {
                 cmd.edit_response(http, EditInteractionResponse::new().content("(empty)"))
                     .await?;
@@ -1193,28 +1264,24 @@ async fn deliver_command_reply(
     Ok(())
 }
 
-fn cap_discord_pages(mut pages: Vec<String>) -> Vec<String> {
+fn cap_discord_pages(locale: Locale, mut pages: Vec<String>) -> Vec<String> {
     if pages.len() <= MAX_DISCORD_PAGES {
         return pages;
     }
     pages.truncate(MAX_DISCORD_PAGES);
     if let Some(last) = pages.last_mut() {
-        last.push_str("\n\n_(suite dans le terminal Web UI — limite Discord)_");
+        last.push_str("\n\n");
+        last.push_str(&t(locale, "discord.run.web_ui_footer", &[]));
     }
     pages
 }
 
 /// Long-running `/bunny run`: prose header + single fenced excerpt (no nested markdown).
-fn format_persistent_shell_run_reply(shell: &str, excerpt: &str) -> CommandReply {
-    let header = format!(
-        "**Shell :** `{shell}`\n\
-         **Processus long / persistant** — lancé dans le shell.\n\
-         La sortie continue dans l’onglet **Terminal** de la Web UI.\n\
-         Pour arrêter : `/bunny run_stop` (ou `run_stop shell:{shell}`).\n\n\
-         **Extrait :**"
-    );
-    let body = if excerpt.trim().is_empty() || excerpt == "(no output)" {
-        "_(pas encore de sortie)_".to_string()
+fn format_persistent_shell_run_reply(locale: Locale, shell: &str, excerpt: &str) -> CommandReply {
+    let header = t(locale, "discord.run.persistent_header", &[("shell", shell)]);
+    let no_out = t(locale, "discord.run.no_output", &[]);
+    let body = if excerpt.trim().is_empty() || excerpt == no_out.as_str() {
+        t(locale, "discord.run.no_output_yet", &[])
     } else {
         let mut page = String::new();
         page.push_str("```\n");
@@ -1226,17 +1293,24 @@ fn format_persistent_shell_run_reply(shell: &str, excerpt: &str) -> CommandReply
         page
     };
     let page = format!("{header}\n{body}");
-    CommandReply::Text(cap_discord_pages(vec![page]))
+    CommandReply::Text(cap_discord_pages(locale, vec![page]))
 }
 
 /// Paginate shell output so each Discord message stays under 2000 chars.
-fn format_shell_run_reply(shell: &str, text: &str, exit_code: i64) -> CommandReply {
+fn format_shell_run_reply(locale: Locale, shell: &str, text: &str, exit_code: i64) -> CommandReply {
     let suffix = if exit_code == 0 {
         String::new()
     } else {
-        format!("\n_(exit {exit_code})_")
+        format!(
+            "\n{}",
+            t(
+                locale,
+                "discord.shell_run.exit",
+                &[("code", &exit_code.to_string())]
+            )
+        )
     };
-    let header = format!("**Shell:** `{shell}`");
+    let header = t(locale, "discord.shell_run.header", &[("shell", shell)]);
     // Leave room for header, fences, and "(suite N/M)" on follow-up messages.
     let chunk_budget = 1700usize;
     let chunks = if text.contains("```") {
@@ -1260,7 +1334,17 @@ fn format_shell_run_reply(shell: &str, text: &str, exit_code: i64) -> CommandRep
             }
             page.push_str("\n\n");
         } else {
-            page.push_str(&format!("(suite {}/{total})\n\n", i + 1));
+            page.push_str(&format!(
+                "{}\n\n",
+                t(
+                    locale,
+                    "discord.shell_run.continuation",
+                    &[
+                        ("current", &(i + 1).to_string()),
+                        ("total", &total.to_string()),
+                    ],
+                )
+            ));
         }
         page.push_str("```\n");
         page.push_str(chunk);
@@ -1277,10 +1361,10 @@ fn format_shell_run_reply(shell: &str, text: &str, exit_code: i64) -> CommandRep
             }
         }
     }
-    CommandReply::Text(cap_discord_pages(pages))
+    CommandReply::Text(cap_discord_pages(locale, pages))
 }
 
-fn format_approval_reply(res: &serde_json::Value) -> CommandReply {
+fn format_approval_reply(locale: Locale, res: &serde_json::Value) -> CommandReply {
     let approval_id = res
         .get("approval_id")
         .and_then(|v| v.as_str())
@@ -1291,10 +1375,17 @@ fn format_approval_reply(res: &serde_json::Value) -> CommandReply {
     let summary = res
         .get("summary")
         .and_then(|v| v.as_str())
-        .unwrap_or("Action nécessitant votre accord.");
-    let header = format!("**Permission requise** · Claude {mode} · shell `{shell}`");
-    let body = format_claude_markdown_for_discord(summary);
-    let pages = paginate_discord_reply(&header, &body, "\n\n_Appuyez sur un bouton ci-dessous._");
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| t(locale, "discord.approval.summary_default", &[]));
+    let header = t(
+        locale,
+        "discord.approval.header",
+        &[("mode", mode), ("shell", shell)],
+    );
+    let body = format_claude_markdown_for_discord(&summary);
+    let footer = format!("\n\n{}", t(locale, "discord.approval.footer", &[]));
+    let pages = paginate_discord_reply(&header, &body, &footer);
     CommandReply::PendingApproval {
         pages,
         approval_id,

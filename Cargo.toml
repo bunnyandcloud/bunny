@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/server",
+    "crates/bunny-i18n",
     "crates/bunny-core",
     "crates/bunny-auth",
     "crates/bunny-pty",
@@ -21,6 +22,7 @@ repository = "https://github.com/bunny-dev/bunny"
 
 [workspace.dependencies]
 anyhow = "1"
+bunny-i18n = { path = "crates/bunny-i18n" }
 argon2 = "0.5"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["ws", "macros"] }

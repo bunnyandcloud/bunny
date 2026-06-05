@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { apiErrorMessage, getWatchMeta, grantWatchAccess, watchNovncUrl } from '../lib/api';
+import LanguageSelect from './LanguageSelect';
+import { effectiveLocale, guessBrowserLocale, readStoredLocale, t } from '../i18n';
 
 export default function WatchPage({ token }: { token: string }) {
+  const locale = effectiveLocale(readStoredLocale() ?? guessBrowserLocale());
   const [meta, setMeta] = useState<Awaited<ReturnType<typeof getWatchMeta>> | null>(null);
   const [error, setError] = useState('');
   const [browserId, setBrowserId] = useState<string | null>(null);
@@ -20,7 +23,7 @@ export default function WatchPage({ token }: { token: string }) {
         setError('');
         await grantWatchAccess(token, {});
       } catch (e) {
-        if (!cancelled) setError(apiErrorMessage(e, 'Watch stream ended or unavailable'));
+        if (!cancelled) setError(apiErrorMessage(e, t(locale, 'web.watch.unavailable')));
       }
     };
 
@@ -33,12 +36,15 @@ export default function WatchPage({ token }: { token: string }) {
       cancelled = true;
       window.clearInterval(poll);
     };
-  }, [token]);
+  }, [token, locale]);
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-red-400 p-6">
-        {error}
+      <div className="min-h-screen flex flex-col">
+        <div className="absolute top-4 right-4 z-10">
+          <LanguageSelect />
+        </div>
+        <div className="flex-1 flex items-center justify-center text-red-400 p-6">{error}</div>
       </div>
     );
   }
@@ -46,36 +52,40 @@ export default function WatchPage({ token }: { token: string }) {
   if (!meta) {
     return (
       <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-        Loading watch…
+        {t(locale, 'web.common.loadingWatch')}
       </div>
     );
   }
 
+  const modeLabel = interactive
+    ? t(locale, 'web.watch.interactive')
+    : t(locale, 'web.watch.readOnly');
+
   return (
     <div className="min-h-screen bg-bunny-bg text-gray-200 flex flex-col">
-      <header className="border-b border-bunny-border px-4 py-2 flex items-center justify-between text-sm shrink-0">
+      <header className="border-b border-bunny-border px-4 py-2 flex items-center justify-between text-sm shrink-0 gap-2">
         <span>
-          Bunny watch · layout <strong>{meta.layout}</strong> ·{' '}
-          {interactive ? (
-            <strong className="text-amber-300">interactive</strong>
-          ) : (
-            'read-only'
-          )}
+          {t(locale, 'web.watch.header', { layout: meta.layout, mode: modeLabel })}
         </span>
-        <span className="text-bunny-muted text-xs">
-          expires {new Date(meta.expires_at).toLocaleString()}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-bunny-muted text-xs">
+            {t(locale, 'web.watch.expires', {
+              date: new Date(meta.expires_at).toLocaleString(),
+            })}
+          </span>
+          <LanguageSelect />
+        </div>
       </header>
       <main className="flex-1 min-h-0 relative bg-black">
         {browserId ? (
           <iframe
-            title="Bunny watch"
+            title={t(locale, 'web.watch.iframeTitle')}
             src={watchNovncUrl(token, { interactive })}
             className="absolute inset-0 w-full h-full border-0"
           />
         ) : (
           <p className="absolute inset-0 flex items-center justify-center text-bunny-muted">
-            No browser stream in this session.
+            {t(locale, 'web.watch.noBrowser')}
           </p>
         )}
       </main>

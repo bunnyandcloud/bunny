@@ -1,9 +1,13 @@
+import { useT } from '../i18n';
+
 interface Props {
   onUnlock: () => void;
   compact?: boolean;
 }
 
 export default function SecretsVaultBanner({ onUnlock, compact }: Props) {
+  const tr = useT();
+
   return (
     <div
       className={
@@ -13,15 +17,13 @@ export default function SecretsVaultBanner({ onUnlock, compact }: Props) {
       }
       role="status"
     >
-      <span>
-        Secrets vault locked — les terminaux n&apos;ont pas accès aux secrets.
-      </span>
+      <span>{tr('web.vault.bannerLocked')}</span>
       <button
         type="button"
         onClick={onUnlock}
         className="text-bunny-accent font-medium hover:underline shrink-0"
       >
-        Unlock
+        {tr('web.vault.unlockButton')}
       </button>
     </div>
   );

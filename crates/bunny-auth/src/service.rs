@@ -85,14 +85,14 @@ impl AuthService {
         Ok(self.db.lock().user_count()? == 0)
     }
 
-    pub fn bootstrap_owner(&self, email: &str, password: &str) -> Result<Uuid> {
+    pub fn bootstrap_owner(&self, email: &str, password: &str, preferred_locale: &str) -> Result<Uuid> {
         let db = self.db.lock();
         if db.user_count()? > 0 {
             return Err(anyhow!("owner already exists"));
         }
         let id = Uuid::new_v4();
         let hash = hash_password(password)?;
-        db.create_user(id, email, &hash)?;
+        db.create_user(id, email, &hash, preferred_locale)?;
         db.set_system_owner_id(id)?;
         db.insert_audit(
             Uuid::new_v4(),
@@ -102,6 +102,14 @@ impl AuthService {
             None,
         )?;
         Ok(id)
+    }
+
+    pub fn set_user_locale(&self, user_id: Uuid, locale: &str) -> Result<()> {
+        self.db.lock().set_user_locale(user_id, locale)
+    }
+
+    pub fn get_user_locale(&self, user_id: Uuid) -> Result<String> {
+        self.db.lock().get_user_locale(user_id)
     }
 
     pub fn login(&self, email: &str, password: &str, device_id: Option<&str>) -> Result<LoginStep> {
@@ -602,7 +610,7 @@ impl AuthService {
                 None => {
                     let id = Uuid::new_v4();
                     let hash = hash_password(password)?;
-                    db.create_user(id, email, &hash)?;
+                    db.create_user(id, email, &hash, "en")?;
                     id
                 }
             };
@@ -647,7 +655,7 @@ impl AuthService {
 
         let user_id = Uuid::new_v4();
         let hash = hash_password(password)?;
-        db.create_user(user_id, email, &hash)?;
+        db.create_user(user_id, email, &hash, "en")?;
         db.apply_user_team_profile_on_create(
             user_id,
             inv.can_install_claude,
@@ -774,7 +782,7 @@ mod tests {
     #[test]
     fn login_with_mfa_requires_second_step() {
         let (auth, _dir) = temp_auth();
-        let id = auth.bootstrap_owner("a@b.com", "pw").unwrap();
+        let id = auth.bootstrap_owner("a@b.com", "pw", "en").unwrap();
         auth.mfa_setup_begin(id).unwrap();
         let db_guard = auth.db();
         let db = db_guard.lock();
@@ -793,12 +801,12 @@ mod tests {
     #[test]
     fn system_owner_is_bootstrap_user_not_lowest_uuid() {
         let (auth, _dir) = temp_auth();
-        let bootstrap = auth.bootstrap_owner("owner@example.com", "pw").unwrap();
+        let bootstrap = auth.bootstrap_owner("owner@example.com", "pw", "en").unwrap();
         let db_arc = auth.db();
         let db = db_arc.lock();
         // UUID that sorts before the bootstrap id lexicographically.
         let later = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
-        db.create_user(later, "invited@example.com", "hash").unwrap();
+        db.create_user(later, "invited@example.com", "hash", "en").unwrap();
         drop(db);
         assert_eq!(auth.owner_id().unwrap(), bootstrap);
     }

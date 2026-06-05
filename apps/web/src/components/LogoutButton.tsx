@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useT } from '../i18n';
 import { useAuth } from '../store/auth';
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 
 export default function LogoutButton({ className = '' }: Props) {
   const logout = useAuth((s) => s.logout);
+  const tr = useT();
   const [busy, setBusy] = useState(false);
 
   async function handleLogout() {
@@ -29,7 +31,7 @@ export default function LogoutButton({ className = '' }: Props) {
         'text-sm text-bunny-muted hover:text-gray-200 disabled:opacity-50'
       }
     >
-      {busy ? 'Signing out…' : 'Sign out'}
+      {busy ? tr('web.common.signingOut') : tr('web.common.signOut')}
     </button>
   );
 }

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { acceptInvitation, apiErrorMessage, type LoginResponse } from '../lib/api';
+import { useT } from '../i18n';
 import { useAuth } from '../store/auth';
 
 function readInviteParams() {
@@ -12,6 +13,7 @@ function readInviteParams() {
 }
 
 export default function LoginPage() {
+  const tr = useT();
   const login = useAuth((s) => s.login);
   const completeMfa = useAuth((s) => s.completeMfa);
   const check = useAuth((s) => s.check);
@@ -47,11 +49,11 @@ export default function LoginPage() {
     e.preventDefault();
     if (!inviteToken || loading) return;
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError(tr('web.login.passwordMismatch'));
       return;
     }
     if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setError(tr('web.login.passwordMinLength'));
       return;
     }
     setLoading(true);
@@ -66,7 +68,7 @@ export default function LoginPage() {
       const next = readInviteParams().next;
       location.href = next || (res.session_id ? `/s/${res.session_id}` : '/');
     } catch (err) {
-      setError(apiErrorMessage(err, 'Invitation acceptance failed'));
+      setError(apiErrorMessage(err, tr('web.login.inviteFailed')));
     } finally {
       setLoading(false);
     }
@@ -87,7 +89,7 @@ export default function LoginPage() {
         redirectAfterAuth();
       }
     } catch (err) {
-      setError(apiErrorMessage(err, 'Login failed'));
+      setError(apiErrorMessage(err, tr('web.login.failed')));
     } finally {
       setLoading(false);
     }
@@ -102,12 +104,7 @@ export default function LoginPage() {
       await completeMfa(mfaCode.trim(), mfaChallenge.token);
       redirectAfterAuth();
     } catch (err) {
-      setError(
-        apiErrorMessage(
-          err,
-          'Invalid code. Check your authenticator app or recovery code and try again.',
-        ),
-      );
+      setError(apiErrorMessage(err, tr('web.login.mfaInvalid')));
     } finally {
       setLoading(false);
     }
@@ -120,9 +117,11 @@ export default function LoginPage() {
           onSubmit={onMfaSubmit}
           className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
         >
-          <h1 className="text-2xl font-bold text-bunny-accent">Two-factor authentication</h1>
+          <h1 className="text-2xl font-bold text-bunny-accent">
+            {tr('web.login.mfaTitle')}
+          </h1>
           <p className="text-bunny-muted text-sm">
-            Enter the code from your authenticator app for {mfaChallenge.email}.
+            {tr('web.login.mfaHint', { email: mfaChallenge.email })}
           </p>
           {error ? (
             <p className="text-red-400 text-sm" role="alert">
@@ -133,7 +132,9 @@ export default function LoginPage() {
             type="text"
             inputMode={useRecovery ? 'text' : 'numeric'}
             autoComplete="one-time-code"
-            placeholder={useRecovery ? 'Recovery code' : '6-digit code'}
+            placeholder={
+              useRecovery ? tr('web.login.recoveryCode') : tr('web.login.sixDigitCode')
+            }
             value={mfaCode}
             onChange={(e) => setMfaCode(e.target.value)}
             disabled={loading}
@@ -148,14 +149,14 @@ export default function LoginPage() {
               setMfaCode('');
             }}
           >
-            {useRecovery ? 'Use authenticator code instead' : 'Use a recovery code'}
+            {useRecovery ? tr('web.login.useAuthenticator') : tr('web.login.useRecovery')}
           </button>
           <button
             type="submit"
             disabled={loading}
             className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? 'Verifying…' : 'Verify'}
+            {loading ? tr('web.login.verifying') : tr('web.login.verify')}
           </button>
           <button
             type="button"
@@ -168,7 +169,7 @@ export default function LoginPage() {
               setLoading(false);
             }}
           >
-            Back to sign in
+            {tr('web.login.backToSignIn')}
           </button>
         </form>
       </div>
@@ -182,16 +183,16 @@ export default function LoginPage() {
           onSubmit={onAcceptInviteSubmit}
           className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
         >
-          <h1 className="text-2xl font-bold text-bunny-accent">Accept invitation</h1>
-          <p className="text-bunny-muted text-sm">
-            Create your account to join the session. You do not need an existing password.
-          </p>
+          <h1 className="text-2xl font-bold text-bunny-accent">
+            {tr('web.login.inviteTitle')}
+          </h1>
+          <p className="text-bunny-muted text-sm">{tr('web.login.inviteSubtitle')}</p>
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <label className="block text-xs text-bunny-muted">
-            Email
+            {tr('web.common.email')}
             <input
               type="email"
-              placeholder="Email"
+              placeholder={tr('web.common.email')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               readOnly={Boolean(inviteParams.inviteEmail)}
@@ -200,10 +201,10 @@ export default function LoginPage() {
             />
           </label>
           <label className="block text-xs text-bunny-muted">
-            Choose a password
+            {tr('web.login.choosePassword')}
             <input
               type="password"
-              placeholder="New password (min. 8 characters)"
+              placeholder={tr('web.login.newPasswordPlaceholder')}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
@@ -213,10 +214,10 @@ export default function LoginPage() {
             />
           </label>
           <label className="block text-xs text-bunny-muted">
-            Confirm password
+            {tr('web.login.confirmPassword')}
             <input
               type="password"
-              placeholder="Confirm password"
+              placeholder={tr('web.login.confirmPassword')}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
@@ -230,10 +231,10 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
           >
-            {loading ? 'Creating account…' : 'Create account & join'}
+            {loading ? tr('web.login.creatingAccount') : tr('web.login.createAndJoin')}
           </button>
           <p className="text-xs text-bunny-muted text-center">
-            Already have an account?{' '}
+            {tr('web.login.alreadyHaveAccount')}{' '}
             <button
               type="button"
               className="text-bunny-accent hover:underline"
@@ -241,7 +242,7 @@ export default function LoginPage() {
                 location.href = '/';
               }}
             >
-              Sign in instead
+              {tr('web.login.signInInstead')}
             </button>
           </p>
         </form>
@@ -255,14 +256,12 @@ export default function LoginPage() {
         onSubmit={onPasswordSubmit}
         className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
       >
-        <h1 className="text-2xl font-bold text-bunny-accent">bunny</h1>
-        <p className="text-bunny-muted text-sm">
-          Authentication required. No anonymous access.
-        </p>
+        <h1 className="text-2xl font-bold text-bunny-accent">{tr('web.login.title')}</h1>
+        <p className="text-bunny-muted text-sm">{tr('web.login.subtitle')}</p>
         {error && <p className="text-red-400 text-sm">{error}</p>}
         <input
           type="email"
-          placeholder="Email"
+          placeholder={tr('web.common.email')}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
@@ -270,7 +269,7 @@ export default function LoginPage() {
         />
         <input
           type="password"
-          placeholder="Password"
+          placeholder={tr('web.common.password')}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
@@ -281,7 +280,7 @@ export default function LoginPage() {
           disabled={loading}
           className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
         >
-          {loading ? 'Signing in…' : 'Sign in'}
+          {loading ? tr('web.login.signingIn') : tr('web.login.signIn')}
         </button>
       </form>
     </div>

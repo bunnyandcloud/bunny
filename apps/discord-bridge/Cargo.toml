@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+bunny-i18n = { workspace = true }
 bunny-discord = { path = "../../crates/bunny-discord" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 serde.workspace = true

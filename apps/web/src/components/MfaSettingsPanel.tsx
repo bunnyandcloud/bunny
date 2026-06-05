@@ -6,6 +6,7 @@ import {
   mfaSetup,
   mfaStatus,
 } from '../lib/api';
+import { useT } from '../i18n';
 
 interface Props {
   email: string;
@@ -14,6 +15,7 @@ interface Props {
 type Step = 'idle' | 'setup' | 'recovery' | 'disable';
 
 export default function MfaSettingsPanel({ email }: Props) {
+  const tr = useT();
   const [enabled, setEnabled] = useState(false);
   const [recoveryRemaining, setRecoveryRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export default function MfaSettingsPanel({ email }: Props) {
       const msg = String(e);
       if (msg.includes('recent authentication') || msg.includes('FORBIDDEN')) {
         if (!password) {
-          setError('Enter your password to continue.');
+          setError(tr('web.mfa.needPassword'));
           throw e;
         }
         return fn(password);
@@ -124,7 +126,7 @@ export default function MfaSettingsPanel({ email }: Props) {
   }
 
   if (loading) {
-    return <p className="text-bunny-muted text-sm">Loading security settings…</p>;
+    return <p className="text-bunny-muted text-sm">{tr('web.mfa.loading')}</p>;
   }
 
   const qrUrl = otpauthUri
@@ -134,33 +136,30 @@ export default function MfaSettingsPanel({ email }: Props) {
   return (
     <div className="w-full max-w-lg space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-gray-100">Two-factor authentication</h2>
-        <p className="text-bunny-muted text-sm mt-1">
-          Compatible with Google Authenticator, Microsoft Authenticator, GitHub Mobile, and other
-          TOTP apps.
-        </p>
+        <h2 className="text-lg font-semibold text-gray-100">{tr('web.mfa.title')}</h2>
+        <p className="text-bunny-muted text-sm mt-1">{tr('web.mfa.compatHint')}</p>
       </div>
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
       <p className="text-sm">
-        Status:{' '}
+        {tr('web.mfa.statusLabel')}{' '}
         <span className={enabled ? 'text-emerald-400' : 'text-bunny-muted'}>
-          {enabled ? 'Enabled' : 'Disabled'}
+          {enabled ? tr('web.mfa.enabledLabel') : tr('web.mfa.disabledLabel')}
         </span>
         {enabled && (
-          <span className="text-bunny-muted"> · {recoveryRemaining} recovery codes left</span>
+          <span className="text-bunny-muted">
+            {tr('web.mfa.recoveryLeft', { count: String(recoveryRemaining) })}
+          </span>
         )}
       </p>
 
       {!enabled && step !== 'setup' && (
         <form onSubmit={startSetup} className="space-y-3 border border-bunny-border rounded-lg p-4">
-          <p className="text-sm text-bunny-muted">
-            Re-enter your password if your session is older than 5 minutes.
-          </p>
+          <p className="text-sm text-bunny-muted">{tr('web.mfa.passwordPrompt')}</p>
           <input
             type="password"
-            placeholder="Password (if prompted)"
+            placeholder={tr('web.mfa.passwordIfPrompted')}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
@@ -170,7 +169,7 @@ export default function MfaSettingsPanel({ email }: Props) {
             disabled={busy}
             className="px-4 py-2 bg-bunny-accent text-bunny-bg rounded text-sm font-medium disabled:opacity-50"
           >
-            Set up authenticator
+            {tr('web.mfa.setupAuthenticator')}
           </button>
         </form>
       )}
@@ -178,18 +177,16 @@ export default function MfaSettingsPanel({ email }: Props) {
       {step === 'setup' && (
         <form onSubmit={confirmEnable} className="space-y-4 border border-bunny-border rounded-lg p-4">
           {qrUrl && (
-            <img src={qrUrl} alt="QR code for authenticator app" className="mx-auto rounded bg-white p-2" />
+            <img src={qrUrl} alt={tr('web.mfa.qrAlt')} className="mx-auto rounded bg-white p-2" />
           )}
-          <p className="text-xs text-amber-400">
-            Never share this secret. It is shown only during setup.
-          </p>
+          <p className="text-xs text-amber-400">{tr('web.mfa.secretWarning')}</p>
           <div className="text-xs font-mono break-all text-bunny-muted">
-            Manual entry: {secretBase32}
+            {tr('web.mfa.manualEntry')} {secretBase32}
           </div>
           <input
             type="text"
             inputMode="numeric"
-            placeholder="6-digit code from app"
+            placeholder={tr('web.mfa.sixDigitFromApp')}
             value={confirmCode}
             onChange={(e) => setConfirmCode(e.target.value)}
             className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded font-mono"
@@ -197,7 +194,7 @@ export default function MfaSettingsPanel({ email }: Props) {
           />
           <input
             type="password"
-            placeholder="Password (if prompted)"
+            placeholder={tr('web.mfa.passwordIfPrompted')}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
@@ -207,16 +204,14 @@ export default function MfaSettingsPanel({ email }: Props) {
             disabled={busy}
             className="w-full py-2 bg-bunny-accent text-bunny-bg rounded font-medium disabled:opacity-50"
           >
-            Confirm and enable
+            {tr('web.mfa.confirmEnable')}
           </button>
         </form>
       )}
 
       {step === 'recovery' && recoveryCodes.length > 0 && (
         <div className="border border-amber-600/50 rounded-lg p-4 space-y-3 bg-amber-950/20">
-          <p className="text-sm text-amber-200 font-medium">
-            Save these recovery codes now. They will not be shown again.
-          </p>
+          <p className="text-sm text-amber-200 font-medium">{tr('web.mfa.recoverySaveNow')}</p>
           <ul className="font-mono text-sm space-y-1">
             {recoveryCodes.map((c) => (
               <li key={c}>{c}</li>
@@ -230,7 +225,7 @@ export default function MfaSettingsPanel({ email }: Props) {
               setRecoveryCodes([]);
             }}
           >
-            I have saved them
+            {tr('web.mfa.savedThem')}
           </button>
         </div>
       )}
@@ -238,17 +233,17 @@ export default function MfaSettingsPanel({ email }: Props) {
       {enabled && step !== 'setup' && (
         <div className="space-y-4 border border-bunny-border rounded-lg p-4">
           <form onSubmit={handleRegenerate} className="space-y-2">
-            <p className="text-sm font-medium text-gray-200">Regenerate recovery codes</p>
+            <p className="text-sm font-medium text-gray-200">{tr('web.mfa.regenerateRecovery')}</p>
             <input
               type="text"
-              placeholder="Current TOTP code"
+              placeholder={tr('web.mfa.currentTotp')}
               value={confirmCode}
               onChange={(e) => setConfirmCode(e.target.value)}
               className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded font-mono"
             />
             <input
               type="password"
-              placeholder="Password (if prompted)"
+              placeholder={tr('web.mfa.passwordIfPrompted')}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded"
@@ -258,15 +253,15 @@ export default function MfaSettingsPanel({ email }: Props) {
               disabled={busy}
               className="text-sm text-bunny-accent hover:underline disabled:opacity-50"
             >
-              Generate new recovery codes
+              {tr('web.mfa.generateNewRecovery')}
             </button>
           </form>
           <hr className="border-bunny-border" />
           <form onSubmit={handleDisable} className="space-y-2">
-            <p className="text-sm font-medium text-red-300">Disable MFA</p>
+            <p className="text-sm font-medium text-red-300">{tr('web.mfa.disableTitle')}</p>
             <input
               type="text"
-              placeholder="Current TOTP code"
+              placeholder={tr('web.mfa.currentTotp')}
               value={confirmCode}
               onChange={(e) => setConfirmCode(e.target.value)}
               className="w-full px-3 py-2 bg-bunny-bg border border-bunny-border rounded font-mono"
@@ -277,15 +272,13 @@ export default function MfaSettingsPanel({ email }: Props) {
               disabled={busy}
               className="px-4 py-2 border border-red-500/50 text-red-300 rounded text-sm disabled:opacity-50"
             >
-              Disable two-factor authentication
+              {tr('web.mfa.disableButton')}
             </button>
           </form>
         </div>
       )}
 
-      <p className="text-xs text-bunny-muted">
-        Account: {email}
-      </p>
+      <p className="text-xs text-bunny-muted">{tr('web.mfa.account', { email })}</p>
     </div>
   );
 }

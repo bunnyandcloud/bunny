@@ -12,6 +12,7 @@ use axum::{
 };
 use bunny_auth::AuthenticatedSession;
 use bunny_core::permissions::{role_can, Action};
+use bunny_i18n::Locale;
 use bunny_discord::{db::hash_token, AgentTaskMode, DiscordAuditEntry, DiscordSessionLink};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,8 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/link", post(internal_link))
         .route("/unlink", post(internal_unlink))
         .route("/status", get(internal_status))
+        .route("/locale", post(internal_set_locale))
+        .route("/user-locale", get(internal_user_locale))
         .route("/shell/list", get(internal_shell_list))
         .route("/shell/run", post(internal_shell_run))
         .route("/shell/run/stop", post(internal_shell_run_stop))
@@ -196,12 +199,70 @@ async fn internal_status(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     verify_bridge_token(&state, &headers)?;
     let link = resolve_link(&state, &ctx)?;
+    let locale = discord_user_locale(&state, &ctx);
     Ok(Json(serde_json::json!({
         "linked": true,
         "session_id": link.session_id.to_string(),
         "guild_id": link.guild_id,
         "channel_id": link.channel_id,
+        "locale": locale.as_str(),
+        "locale_source": "user",
     })))
+}
+
+#[derive(Deserialize)]
+pub struct InternalSetLocaleRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    pub locale: String,
+}
+
+async fn internal_set_locale(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<InternalSetLocaleRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    if !bunny_i18n::is_valid_locale_code(&body.locale) {
+        let loc = discord_user_locale(&state, &body.ctx);
+        return Err(ApiError::validation(
+            &bunny_i18n::t(loc, "api.error.invalid_locale", &[]),
+        ));
+    }
+    let user_id = resolve_bunny_user(&state, &body.ctx)?;
+    state
+        .auth
+        .set_user_locale(user_id, &body.locale)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let loc = Locale::from_db(&body.locale);
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "locale": loc.as_str(),
+        "message": bunny_i18n::t(loc, "discord.language.updated", &[("locale", loc.as_str())]),
+    })))
+}
+
+async fn internal_user_locale(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(ctx): Query<BridgeContext>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    let locale = discord_user_locale(&state, &ctx);
+    Ok(Json(serde_json::json!({
+        "locale": locale.as_str(),
+        "locale_source": if resolve_bunny_user(&state, &ctx).is_ok() { "user" } else { "default" },
+    })))
+}
+
+/// Preferred UI locale for the Discord user behind `ctx`, defaulting to English.
+pub(crate) fn discord_user_locale(state: &AppState, ctx: &BridgeContext) -> Locale {
+    if let Ok(user_id) = resolve_bunny_user(state, ctx) {
+        if let Ok(loc) = state.auth.get_user_locale(user_id) {
+            return Locale::from_db(&loc);
+        }
+    }
+    Locale::En
 }
 
 #[derive(Deserialize)]
@@ -1393,8 +1454,9 @@ pub(crate) fn resolve_bunny_user(state: &AppState, ctx: &BridgeContext) -> Resul
     {
         return Ok(user_id);
     }
+    let loc = Locale::En;
     Err(ApiError::forbidden(
-        "discord account not linked to bunny user — run /bunny link again with a fresh code from the Web UI",
+        &bunny_i18n::t(loc, "api.error.discord_not_linked", &[]),
     ))
 }
 

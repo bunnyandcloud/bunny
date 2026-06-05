@@ -403,6 +403,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bunny-discord",
+ "bunny-i18n",
  "reqwest",
  "serde",
  "serde_json",
@@ -411,6 +412,14 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "bunny-i18n"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -482,6 +491,7 @@ dependencies = [
  "bunny-browser",
  "bunny-core",
  "bunny-discord",
+ "bunny-i18n",
  "bunny-pty",
  "bunny-push",
  "bunny-relay",

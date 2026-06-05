@@ -1,4 +1,5 @@
 use crate::{BunnyClient, CommandReply};
+use bunny_i18n::{Locale, t};
 use serenity::all::{
     ChannelId, CreateActionRow, CreateButton, CreateInteractionResponse,
     CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
@@ -15,17 +16,16 @@ use std::time::Duration;
 const THREAD_CLAUDE_TIMEOUT: Duration = Duration::from_secs(300);
 /// Discord typing indicator expires after ~10s; refresh while Claude runs.
 const THREAD_TYPING_REFRESH: Duration = Duration::from_secs(8);
-const THREAD_WORKING_MSG: &str =
-    "⏳ **Claude travaille…**\n_Cela peut prendre 1 à 5 minutes — ce message disparaît à la réponse._";
-const THREAD_QUESTION_INTRO: &str =
-    "❓ **Choix requis** — utilisez les boutons ci-dessous.";
-
 async fn post_thread_working_message(
     http: &Http,
     channel_id: ChannelId,
+    locale: Locale,
 ) -> Option<MessageId> {
     channel_id
-        .send_message(http, CreateMessage::new().content(THREAD_WORKING_MSG))
+        .send_message(
+            http,
+            CreateMessage::new().content(t(locale, "discord.thread.working", &[])),
+        )
         .await
         .ok()
         .map(|m| m.id)
@@ -156,10 +156,11 @@ pub async fn handle_message(
 
     let q = query_pairs(&bctx);
     let q_ref: Vec<(&str, String)> = q.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    let locale = crate::user_locale(bunny, &bctx).await;
     let linked = bunny.get_json("/status", &q_ref).await.is_ok();
     if !linked {
         msg.channel_id
-            .say(&ctx.http, "Ce canal n’est pas lié — utilisez `/bunny link`.")
+            .say(&ctx.http, t(locale, "discord.thread.not_linked", &[]))
             .await?;
         return Ok(());
     }
@@ -179,7 +180,7 @@ pub async fn handle_message(
     bind_body["thread_id"] = serde_json::json!(thread_id);
     bind_body["goal_text"] = serde_json::json!(prompt);
 
-    let working_id = post_thread_working_message(&ctx.http, thread_ch.id).await;
+    let working_id = post_thread_working_message(&ctx.http, thread_ch.id, locale).await;
     let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), thread_ch.id);
 
     let bind = match bunny
@@ -193,8 +194,10 @@ pub async fn handle_message(
             thread_ch
                 .send_message(
                     &ctx.http,
-                    CreateMessage::new().content(format!(
-                        "❌ Impossible de démarrer le thread : {e}\n\n_Vérifie que Claude Code est installé (`?claude=setup` dans la Web UI) et que `bunny run` a été recompilé._"
+                    CreateMessage::new().content(t(
+                        locale,
+                        "discord.thread.bind_failed",
+                        &[("error", &e.to_string())],
                     )),
                 )
                 .await?;
@@ -204,24 +207,38 @@ pub async fn handle_message(
 
     clear_thread_working(&ctx.http, thread_ch.id, working_id, Some(typing_task)).await;
 
+    let extra = if bind.get("git_enabled").and_then(|v| v.as_bool()) == Some(true) {
+        t(
+            locale,
+            "discord.thread.branch_suffix",
+            &[(
+                "branch",
+                bind.get("thread_branch")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
+            )],
+        )
+    } else {
+        String::new()
+    };
     let goal_msg = thread_ch
         .send_message(
             &ctx.http,
-            CreateMessage::new().content(format!(
-                "**GOAL:** {}\n\n_Thread lié au shell `{}` · cwd `{}`{}_",
-                prompt,
-                bind.get("shell_name").and_then(|v| v.as_str()).unwrap_or("?"),
-                bind.get("project_cwd").and_then(|v| v.as_str()).unwrap_or("?"),
-                if bind.get("git_enabled").and_then(|v| v.as_bool()) == Some(true) {
-                    format!(
-                        " · branche `{}`",
-                        bind.get("thread_branch")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("?")
-                    )
-                } else {
-                    String::new()
-                }
+            CreateMessage::new().content(t(
+                locale,
+                "discord.thread.linked",
+                &[
+                    ("goal", &prompt),
+                    (
+                        "shell",
+                        bind.get("shell_name").and_then(|v| v.as_str()).unwrap_or("?"),
+                    ),
+                    (
+                        "cwd",
+                        bind.get("project_cwd").and_then(|v| v.as_str()).unwrap_or("?"),
+                    ),
+                    ("extra", &extra),
+                ],
             )),
         )
         .await?;
@@ -236,6 +253,7 @@ pub async fn handle_message(
         &thread_id,
         &bctx,
         bunny,
+        locale,
     )
     .await?;
 
@@ -261,12 +279,10 @@ async fn handle_thread_message(
         Err(_) => return Ok(()),
     };
     let st = status.get("status").and_then(|v| v.as_str()).unwrap_or("active");
+    let locale = crate::user_locale(bunny, bctx).await;
     if st != "active" {
         msg.channel_id
-            .say(
-                &ctx.http,
-                "Ce thread n’est plus actif (Goal atteint ou annulé).",
-            )
+            .say(&ctx.http, t(locale, "discord.thread.inactive", &[]))
             .await?;
         return Ok(());
     }
@@ -299,7 +315,7 @@ async fn handle_thread_message(
             "include_discussion_context": true,
         });
 
-        let working_id = post_thread_working_message(&ctx.http, msg.channel_id).await;
+        let working_id = post_thread_working_message(&ctx.http, msg.channel_id, locale).await;
         let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), msg.channel_id);
 
         let res = match bunny
@@ -336,6 +352,7 @@ async fn handle_thread_message(
             thread_id,
             bctx,
             bunny,
+            locale,
         )
         .await?;
         return Ok(());
@@ -362,6 +379,7 @@ async fn post_thread_claude_response(
     thread_id: &str,
     bctx: &serde_json::Value,
     bunny: &BunnyClient,
+    locale: Locale,
 ) -> anyhow::Result<()> {
     if res.get("needs_approval").and_then(|v| v.as_bool()) == Some(true) {
         let summary = res
@@ -388,15 +406,15 @@ async fn post_thread_claude_response(
         res.get("pending_question_id").and_then(|v| v.as_str()),
         res.get("pending_questions").and_then(|v| v.as_array()),
     ) {
-        let intro = if text.trim().is_empty() {
-            THREAD_QUESTION_INTRO
+        let intro_owned = if text.trim().is_empty() {
+            t(locale, "discord.thread.question_intro", &[])
         } else {
-            text.trim()
+            text.trim().to_string()
         };
         post_thread_question_prompt(
             http,
             channel_id,
-            intro,
+            &intro_owned,
             pending_id,
             questions,
             thread_id,
@@ -561,6 +579,7 @@ pub async fn handle_thread_question_button(
         Some(&thread_id),
         &comp.user.id.get().to_string(),
     );
+    let locale = crate::user_locale(bunny, &bctx).await;
     let mut body = bctx.clone();
     body["pending_id"] = serde_json::json!(pending_id);
     body["question_index"] = serde_json::json!(q_index);
@@ -575,7 +594,7 @@ pub async fn handle_thread_question_button(
         )
         .await;
 
-    let working_id = post_thread_working_message(&http, comp.channel_id).await;
+    let working_id = post_thread_working_message(&http, comp.channel_id, locale).await;
     let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
 
     let res = match bunny
@@ -626,6 +645,7 @@ pub async fn handle_thread_question_button(
         &thread_id,
         &bctx,
         bunny,
+        locale,
     )
     .await?;
 
@@ -706,6 +726,7 @@ pub async fn handle_goal_cancel_button(
         Some(&thread_id),
         &comp.user.id.get().to_string(),
     );
+    let locale = crate::user_locale(bunny, &bctx).await;
     let mut body = bctx;
     body["thread_id"] = serde_json::json!(thread_id);
     body["outcome"] = serde_json::json!(if approve { "goal" } else { "cancel" });
@@ -719,9 +740,9 @@ pub async fn handle_goal_cancel_button(
     let res = bunny.post_json("/thread/finalize", &body).await?;
     let status_emoji = if approve { "✅" } else { "❌" };
     let mut content: String = if approve {
-        "Goal confirmé — shell fermé.".into()
+        t(locale, "discord.thread.goal_confirmed", &[])
     } else {
-        "Annulé — shell fermé.".into()
+        t(locale, "discord.thread.goal_cancelled", &[])
     };
     if let Some(git) = res.get("git_instructions").and_then(|v| v.as_str()) {
         content.push_str("\n\n");
@@ -845,6 +866,7 @@ pub async fn run_git_command(
     sub: &str,
     branch: Option<&str>,
     path: Option<&str>,
+    _locale: Locale,
 ) -> Result<CommandReply, anyhow::Error> {
     let body = serde_json::json!({
         "guild_id": bctx["guild_id"],
@@ -869,6 +891,7 @@ pub async fn run_project_command(
     bunny: &BunnyClient,
     bctx: &serde_json::Value,
     path: Option<&str>,
+    _locale: Locale,
 ) -> Result<CommandReply, anyhow::Error> {
     if let Some(p) = path {
         let body = serde_json::json!({

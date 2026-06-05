@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect } from 'react';
 import HomePage from './components/HomePage';
 import InviteAcceptPage from './components/InviteAcceptPage';
 import LoginPage from './components/LoginPage';
+import LanguageSelect from './components/LanguageSelect';
+import { useT } from './i18n';
 import { useAuth } from './store/auth';
 
 const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
@@ -20,8 +22,17 @@ function parseWatchToken(): string | null {
   return m ? m[1] : null;
 }
 
+function LoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center text-bunny-muted">
+      {message}
+    </div>
+  );
+}
+
 export default function App() {
   const { user, loading, check, logout } = useAuth();
+  const tr = useT();
   const sessionId = parseSessionFromPath();
   const watchToken = parseWatchToken();
   const inviteToken = new URLSearchParams(location.search).get('invite');
@@ -32,11 +43,7 @@ export default function App() {
   }, [check]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-        Loading…
-      </div>
-    );
+    return <LoadingScreen message={tr('web.common.loading')} />;
   }
 
   if (inviteToken && user) {
@@ -52,11 +59,7 @@ export default function App() {
   if (watchToken) {
     return (
       <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-            Loading watch…
-          </div>
-        }
+        fallback={<LoadingScreen message={tr('web.common.loadingWatch')} />}
       >
         <WatchPage token={watchToken} />
       </Suspense>
@@ -64,17 +67,20 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginPage />;
+    return (
+      <div className="min-h-screen relative">
+        <div className="absolute top-4 right-4 z-10">
+          <LanguageSelect />
+        </div>
+        <LoginPage />
+      </div>
+    );
   }
 
   if (sessionId) {
     return (
       <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-            Loading session…
-          </div>
-        }
+        fallback={<LoadingScreen message={tr('web.common.loadingSession')} />}
       >
         <SessionWorkspace sessionId={sessionId} />
       </Suspense>
@@ -84,11 +90,7 @@ export default function App() {
   if (location.pathname === '/security') {
     return (
       <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-            Loading…
-          </div>
-        }
+        fallback={<LoadingScreen message={tr('web.common.loading')} />}
       >
         <SecurityPage email={user.email} />
       </Suspense>
@@ -102,11 +104,7 @@ export default function App() {
     }
     return (
       <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-            Loading…
-          </div>
-        }
+        fallback={<LoadingScreen message={tr('web.common.loading')} />}
       >
         <SecretsPage email={user.email} />
       </Suspense>
@@ -120,11 +118,7 @@ export default function App() {
     }
     return (
       <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center text-bunny-muted">
-            Loading…
-          </div>
-        }
+        fallback={<LoadingScreen message={tr('web.common.loading')} />}
       >
         <TeamPage email={user.email} />
       </Suspense>

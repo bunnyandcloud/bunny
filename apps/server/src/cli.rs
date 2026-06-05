@@ -2,6 +2,7 @@ use crate::api;
 use crate::state::AppState;
 use crate::terminals::{default_shell_cwd, persist_terminal};
 use anyhow::Result;
+use bunny_i18n::{Locale, parse_locale, t};
 use axum::Router;
 use clap::{Parser, Subcommand};
 use qrcode::render::unicode;
@@ -166,62 +167,88 @@ pub enum ServiceCommands {
 }
 
 pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> {
+    let locale = prompt_configure_locale();
     if let Some(path) = crate::config_init::ensure_user_config()? {
-        println!("✓ Created {}", path.display());
+        println!(
+            "{}",
+            t(locale, "configure.config_created", &[("path", &path.display().to_string())])
+        );
     }
     if !state.auth.needs_bootstrap()? {
-        println!("✓ Owner account already exists");
-        maybe_configure_discord_interactive(state).await?;
+        println!("{}", t(locale, "configure.owner_exists", &[]));
+        maybe_configure_discord_interactive(state, locale).await?;
         return Ok(());
     }
     let email = opts
         .email
-        .unwrap_or_else(|| prompt("Email: "));
-    let password = opts.password.unwrap_or_else(|| prompt_password("Password: "));
-    let confirm = prompt_password("Confirm: ");
+        .unwrap_or_else(|| prompt(&t(locale, "configure.prompt.email", &[])));
+    let password = opts
+        .password
+        .unwrap_or_else(|| prompt_password(&t(locale, "configure.prompt.password", &[])));
+    let confirm = prompt_password(&t(locale, "configure.prompt.confirm", &[]));
     if password != confirm {
-        anyhow::bail!("passwords do not match");
+        anyhow::bail!("{}", t(locale, "configure.password_mismatch", &[]));
     }
-    let owner_id = state.auth.bootstrap_owner(&email, &password)?;
-    println!("✓ Owner account created");
-    println!("✓ Local auth enabled");
-    println!("✓ Anonymous access disabled");
-    println!("✓ Secure session cookies enabled");
+    let owner_id = state
+        .auth
+        .bootstrap_owner(&email, &password, locale.as_str())?;
+    println!("{}", t(locale, "configure.owner_created", &[]));
+    println!("{}", t(locale, "configure.local_auth_enabled", &[]));
+    println!("{}", t(locale, "configure.anonymous_disabled", &[]));
+    println!("{}", t(locale, "configure.secure_cookies", &[]));
 
-    // Optional: enable MFA during initial bootstrap.
-    if prompt_yes_no("Enable TOTP MFA now? [y/N]: ", false) {
-        println!("\nMFA setup (TOTP)");
-        println!("1) Scan the QR code in the web UI later, or add this secret manually now.");
-        println!("2) Then enter a 6-digit code to confirm.\n");
+    if prompt_yes_no(&t(locale, "configure.mfa.enable_prompt", &[]), false) {
+        println!("\n{}", t(locale, "configure.mfa.title", &[]));
+        println!("{}", t(locale, "configure.mfa.step1", &[]));
+        println!("{}\n", t(locale, "configure.mfa.step2", &[]));
 
         let setup = state.auth.mfa_setup_begin(owner_id)?;
-        println!("Issuer: bunny");
-        println!("Account: {email}");
-        println!("otpauth URI (QR payload):\n{}\n", setup.otpauth_uri);
+        println!("{}", t(locale, "configure.mfa.issuer", &[]));
+        println!(
+            "{}",
+            t(locale, "configure.mfa.account", &[("email", &email)])
+        );
+        println!(
+            "{}",
+            t(
+                locale,
+                "configure.mfa.otpauth_uri",
+                &[("uri", &setup.otpauth_uri)]
+            )
+        );
         if let Ok(code) = QrCode::new(setup.otpauth_uri.as_bytes()) {
-            // Dense1x2 renders nicely in most terminals (2 vertical pixels per char).
             let qr = code
                 .render::<unicode::Dense1x2>()
                 .quiet_zone(true)
                 .build();
-            println!("Scan this QR code with your authenticator app:\n{qr}\n");
+            println!(
+                "{}",
+                t(locale, "configure.mfa.scan_qr", &[("qr", &qr)])
+            );
         } else {
-            println!("(QR rendering failed in this terminal; use the otpauth URI above.)\n");
+            println!("{}", t(locale, "configure.mfa.qr_failed", &[]));
         }
-        println!("Manual secret (base32) — show once:\n{}\n", setup.secret_base32);
+        println!(
+            "{}",
+            t(
+                locale,
+                "configure.mfa.manual_secret",
+                &[("secret", &setup.secret_base32)]
+            )
+        );
 
         let mut attempts = 0;
         loop {
-            let code = prompt("TOTP code (or empty to cancel): ");
+            let code = prompt(&t(locale, "configure.mfa.prompt_code", &[]));
             if code.trim().is_empty() {
                 state.auth.mfa_setup_cancel(owner_id)?;
-                println!("✓ MFA setup cancelled");
+                println!("{}", t(locale, "configure.mfa.cancelled", &[]));
                 break;
             }
             match state.auth.mfa_setup_confirm(owner_id, &code) {
                 Ok(recovery) => {
-                    println!("✓ MFA enabled");
-                    println!("\nRecovery codes — save these now (shown only once):");
+                    println!("{}", t(locale, "configure.mfa.enabled", &[]));
+                    println!("\n{}", t(locale, "configure.mfa.recovery_header", &[]));
                     for c in recovery {
                         println!("  {c}");
                     }
@@ -230,58 +257,89 @@ pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> 
                 }
                 Err(e) => {
                     attempts += 1;
-                    eprintln!("✗ Invalid code: {e}");
+                    eprintln!(
+                        "{}",
+                        t(
+                            locale,
+                            "configure.mfa.invalid_code",
+                            &[("error", &e.to_string())]
+                        )
+                    );
                     if attempts >= 3 {
                         state.auth.mfa_setup_cancel(owner_id)?;
-                        anyhow::bail!("MFA setup failed (too many attempts); setup cancelled");
+                        anyhow::bail!("{}", t(locale, "configure.mfa.failed_cancelled", &[]));
                     }
                 }
             }
         }
     }
 
-    maybe_configure_discord_interactive(state).await?;
+    maybe_configure_discord_interactive(state, locale).await?;
     Ok(())
 }
 
-async fn maybe_configure_discord_interactive(state: &AppState) -> Result<()> {
+fn prompt_configure_locale() -> Locale {
+    let can_prompt = stdin_is_tty() || std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1");
+    if !can_prompt {
+        return Locale::En;
+    }
+    let s = prompt(&t(Locale::En, "configure.prompt.language", &[]));
+    parse_locale(&s).unwrap_or(Locale::En)
+}
+
+async fn maybe_configure_discord_interactive(state: &AppState, locale: Locale) -> Result<()> {
     let bridge = std::env::current_dir()?.join(".discord/bridge.yaml");
     let can_prompt = stdin_is_tty() || std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1");
 
     if bridge.is_file() {
         if crate::config_init::sync_agent_from_bridge_file(&bridge)? {
-            println!("\n✓ Agent config synced from {}", bridge.display());
-            println!("  Restart bunny run if it is already running.");
+            println!(
+                "\n{}",
+                t(
+                    locale,
+                    "configure.discord.synced",
+                    &[("path", &bridge.display().to_string())]
+                )
+            );
+            println!("{}", t(locale, "configure.discord.restart_hint", &[]));
         }
-        println!("\n✓ Discord bridge already configured ({})", bridge.display());
-        print_discord_run_hints();
+        println!(
+            "\n{}",
+            t(
+                locale,
+                "configure.discord.already_configured",
+                &[("path", &bridge.display().to_string())]
+            )
+        );
+        print_discord_run_hints(locale);
         if can_prompt
-            && prompt_yes_no("Reconfigure Discord bridge? [y/N]: ", false)
+            && prompt_yes_no(&t(locale, "configure.discord.reconfigure_prompt", &[]), false)
         {
             // fall through to setup (overwrites bridge.yaml + agent config)
         } else {
             return Ok(());
         }
     } else if !can_prompt {
-        println!("\nDiscord bridge not configured.");
-        print_discord_run_hints();
-        println!("  Or: bunny discord setup");
+        println!("\n{}", t(locale, "configure.discord.not_configured", &[]));
+        print_discord_run_hints(locale);
+        println!("{}", t(locale, "configure.discord.or_setup", &[]));
         return Ok(());
-    } else if !prompt_yes_no("Configure Discord bridge now? [y/N]: ", false) {
-        println!("\nSkipped Discord setup.");
-        print_discord_run_hints();
+    } else if !prompt_yes_no(&t(locale, "configure.discord.setup_prompt", &[]), false) {
+        println!("\n{}", t(locale, "configure.discord.skipped", &[]));
+        print_discord_run_hints(locale);
         return Ok(());
     }
     let app_id: u64 = loop {
-        let s = prompt("Discord Application ID: ");
+        let s = prompt(&t(locale, "configure.discord.prompt_app_id", &[]));
         match s.trim().parse::<u64>() {
             Ok(v) => break v,
-            Err(_) => eprintln!("✗ Invalid number, try again."),
+            Err(_) => eprintln!("{}", t(locale, "configure.discord.invalid_number", &[])),
         }
     };
-    let token = prompt_password("Discord Bot Token: ");
-    run_discord(
+    let token = prompt_password(&t(locale, "configure.discord.prompt_token", &[]));
+    run_discord_with_locale(
         state,
+        locale,
         DiscordCommands::Setup {
             bridge_out: ".discord/bridge.yaml".into(),
             application_id: Some(app_id),
@@ -318,7 +376,7 @@ pub async fn run_user(state: &AppState, command: UserCommands) -> Result<()> {
         UserCommands::Create { email } => {
             let password = prompt_password("Password: ");
             if state.auth.needs_bootstrap()? {
-                state.auth.bootstrap_owner(&email, &password)?;
+                state.auth.bootstrap_owner(&email, &password, "en")?;
                 println!("✓ Owner created: {email}");
             } else {
                 println!("Use invite flow for additional users (MVP: owner only via configure)");
@@ -565,6 +623,14 @@ pub async fn run_config_init(_state: &AppState) -> Result<()> {
 }
 
 pub async fn run_discord(state: &AppState, command: DiscordCommands) -> Result<()> {
+    run_discord_with_locale(state, Locale::En, command).await
+}
+
+pub async fn run_discord_with_locale(
+    state: &AppState,
+    locale: Locale,
+    command: DiscordCommands,
+) -> Result<()> {
     match command {
         DiscordCommands::Bridge { config } => run_discord_bridge(config),
         DiscordCommands::Sync { bridge_config } => {
@@ -600,7 +666,14 @@ pub async fn run_discord(state: &AppState, command: DiscordCommands) -> Result<(
             let (plain, hash) = crate::config_init::generate_bridge_credentials();
             let agent_path =
                 crate::config_init::apply_discord_to_config(&hash, &public_url)?;
-            println!("✓ Agent config: {}", agent_path.display());
+            println!(
+                "{}",
+                t(
+                    locale,
+                    "configure.discord.agent_config",
+                    &[("path", &agent_path.display().to_string())]
+                )
+            );
             let bridge_path = std::path::Path::new(&bridge_out);
             let bridge_path = if bridge_path.is_absolute() {
                 bridge_path.to_path_buf()
@@ -615,17 +688,24 @@ pub async fn run_discord(state: &AppState, command: DiscordCommands) -> Result<(
                 "http://127.0.0.1:7681",
                 &public_url,
             )?;
-            println!("✓ Bridge config: {}", bridge_path.display());
-            print_discord_run_hints();
+            println!(
+                "{}",
+                t(
+                    locale,
+                    "configure.discord.bridge_config",
+                    &[("path", &bridge_path.display().to_string())]
+                )
+            );
+            print_discord_run_hints(locale);
             Ok(())
         }
     }
 }
 
-fn print_discord_run_hints() {
-    println!("\nNext (two terminals in the same environment — e.g. Docker shell):");
-    println!("  Terminal 1:  bunny run");
-    println!("  Terminal 2:  bunny discord bridge");
+fn print_discord_run_hints(locale: Locale) {
+    println!("\n{}", t(locale, "configure.discord.run_hints_title", &[]));
+    println!("{}", t(locale, "configure.discord.run_terminal1", &[]));
+    println!("{}", t(locale, "configure.discord.run_terminal2", &[]));
 }
 
 fn resolve_bridge_config_path(explicit: Option<std::path::PathBuf>) -> Result<std::path::PathBuf> {

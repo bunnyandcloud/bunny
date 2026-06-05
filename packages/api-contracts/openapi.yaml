@@ -70,7 +70,21 @@ paths:
       summary: Logout
   /auth/me:
     get:
-      summary: Current user
+      summary: Current user (includes locale en|fr)
+    patch:
+      summary: Update current user preferences (locale en|fr)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                locale:
+                  type: string
+                  enum: [en, fr]
+      responses:
+        '200':
+          description: Updated profile
   /sessions:
     get:
       summary: List sessions

@@ -686,7 +686,12 @@ pub fn exec_discord_shell_command(
         (true, false) => stderr.trim_end().to_string(),
         (false, false) => format!("{stdout}{stderr}").trim_end().to_string(),
     };
-    append_discord_transcript(state, term_id, command, &text);
+    append_discord_transcript(
+        state,
+        term_id,
+        command,
+        DiscordTranscriptBody::Output(&text),
+    );
     Ok((text, out.status.code().unwrap_or(1)))
 }
 
@@ -727,7 +732,12 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
     std::thread::sleep(std::time::Duration::from_millis(400));
 
     let note = "Interruption (Ctrl+C) envoyée depuis Discord.";
-    append_discord_transcript(state, term_id, "run_stop", note);
+    append_discord_transcript(
+        state,
+        term_id,
+        "run_stop",
+        DiscordTranscriptBody::Output(note),
+    );
     Ok(note.to_string())
 }
 
@@ -776,43 +786,50 @@ pub fn exec_discord_shell_command_run(
     tmux::send_keys_literal(&target, &wrapped, true)?;
     state.terminals.refresh_display(term_id);
     std::thread::sleep(std::time::Duration::from_millis(350));
-    let after_send = capture_pane_text(&target).unwrap_or_else(|_| baseline.clone());
 
     let started = std::time::Instant::now();
     let mut last_delta = String::new();
     while started.elapsed() < DISCORD_RUN_QUICK_WAIT {
-        std::thread::sleep(std::time::Duration::from_millis(400));
         let Ok(cap) = capture_pane_text(&target) else {
+            std::thread::sleep(std::time::Duration::from_millis(200));
             continue;
         };
-        let delta = pane_text_since_baseline(&after_send, &cap);
-        if delta.is_empty() {
-            continue;
+        // Compare against pre-command baseline (not post-send snapshot): fast commands
+        // like `ls` often finish before the first poll, so the exit marker is already
+        // in the pane while the delta vs after_send would stay empty.
+        let since = pane_text_since_baseline(&baseline, &cap);
+        if !since.is_empty() {
+            last_delta = since.clone();
         }
-        last_delta = delta.clone();
-        if let Some((output, code)) = split_on_exit_marker(&delta) {
+        if let Some((output, code)) = split_on_exit_marker(&since) {
             let text = sanitize_discord_terminal_excerpt(&output);
             let text = if text.trim().is_empty() {
                 "(no output)".to_string()
             } else {
                 text
             };
-            append_discord_transcript(state, term_id, command, &text);
+            append_discord_transcript(
+                state,
+                term_id,
+                command,
+                DiscordTranscriptBody::CommandOnly,
+            );
             return Ok(DiscordShellRunResult {
                 output: text,
                 exit_code: code,
                 persistent: false,
             });
         }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     let excerpt = sanitize_discord_terminal_excerpt(&last_delta);
-    let transcript = if excerpt.trim().is_empty() {
-        "Processus long / persistant lancé.\n(pas encore de sortie)".to_string()
-    } else {
-        format!("Processus long / persistant lancé.\n\nExtrait :\n{excerpt}")
-    };
-    append_discord_transcript(state, term_id, command, &transcript);
+    append_discord_transcript(
+        state,
+        term_id,
+        command,
+        DiscordTranscriptBody::CommandOnly,
+    );
     Ok(DiscordShellRunResult {
         output: excerpt,
         exit_code: 0,
@@ -937,6 +954,20 @@ mod discord_run_tests {
     }
 
     #[test]
+    fn fast_command_detected_against_pre_command_baseline() {
+        let baseline = "root@host:~/app# ";
+        let cap = concat!(
+            "root@host:~/app# bash -lc 'ls'; echo __BUNNY_EXIT__$?\n",
+            "AGENTS.md\nREADME.md\n__BUNNY_EXIT__0\n",
+            "root@host:~/app# "
+        );
+        let since = pane_text_since_baseline(baseline, cap);
+        let (out, code) = split_on_exit_marker(&since).unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("AGENTS.md"));
+    }
+
+    #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
     }
@@ -1021,7 +1052,12 @@ pub fn exec_discord_shell_command_timed(
         (true, false) => stderr.trim_end().to_string(),
         (false, false) => format!("{stdout}{stderr}").trim_end().to_string(),
     };
-    append_discord_transcript(state, term_id, command, &text);
+    append_discord_transcript(
+        state,
+        term_id,
+        command,
+        DiscordTranscriptBody::Output(&text),
+    );
     Ok((text, out.status.code().unwrap_or(1)))
 }
 
@@ -1147,6 +1183,14 @@ pub fn strip_ansi_escapes(text: &str) -> String {
     out
 }
 
+/// What to store in the Discord sidecar / Web UI transcript overlay.
+enum DiscordTranscriptBody<'a> {
+    /// Output already visible in the live tmux pane — marker line only.
+    CommandOnly,
+    /// Subprocess or no pane capture — include full output text.
+    Output(&'a str),
+}
+
 fn summarize_discord_command(command: &str) -> String {
     for prefix in ["claude -p ", "claude --print "] {
         if let Some(rest) = command.strip_prefix(prefix) {
@@ -1176,29 +1220,50 @@ fn summarize_discord_command(command: &str) -> String {
     }
 }
 
-fn discord_transcript_entry(command: &str, output: &str) -> String {
+fn discord_transcript_entry(command: &str, body: &DiscordTranscriptBody<'_>) -> String {
     let label = summarize_discord_command(command);
-    format!("[discord] $ {label}\n{output}\n")
+    match body {
+        DiscordTranscriptBody::CommandOnly => format!("[discord] $ {label}\n"),
+        DiscordTranscriptBody::Output(output) => {
+            let output = strip_ansi_escapes(output);
+            let output = if output.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                output
+            };
+            format!("[discord] $ {label}\n{output}\n")
+        }
+    }
 }
 
-fn discord_transcript_entry_terminal(command: &str, output: &str) -> String {
+fn discord_transcript_entry_terminal(command: &str, body: &DiscordTranscriptBody<'_>) -> String {
     let label = summarize_discord_command(command);
-    format!("\r\n[discord] $ {label}\r\n{output}\r\n")
+    match body {
+        DiscordTranscriptBody::CommandOnly => format!("\r\n[discord] $ {label}\r\n"),
+        DiscordTranscriptBody::Output(output) => {
+            let output = strip_ansi_escapes(output);
+            let output = if output.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                output
+            };
+            format!("\r\n[discord] $ {label}\r\n{output}\r\n")
+        }
+    }
 }
 
 /// Record Discord runs for Web UI scrollback and snapshot overlay (target shell only).
-fn append_discord_transcript(state: &AppState, term_id: Uuid, command: &str, output: &str) {
+fn append_discord_transcript(
+    state: &AppState,
+    term_id: Uuid,
+    command: &str,
+    body: DiscordTranscriptBody<'_>,
+) {
     let dir = scrollback_dir(state);
     let _ = std::fs::create_dir_all(&dir);
-    let output = strip_ansi_escapes(output);
-    let output = if output.trim().is_empty() {
-        "(no output)".to_string()
-    } else {
-        output
-    };
 
-    let entry = discord_transcript_entry(command, &output);
-    let mut entry_terminal = discord_transcript_entry_terminal(command, &output);
+    let entry = discord_transcript_entry(command, &body);
+    let mut entry_terminal = discord_transcript_entry_terminal(command, &body);
     if let Some(prompt) = terminal_prompt_line(state, term_id) {
         entry_terminal.push_str("\r\n");
         entry_terminal.push_str(&prompt);

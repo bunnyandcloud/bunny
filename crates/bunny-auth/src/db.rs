@@ -39,6 +39,8 @@ pub struct UserProfileRow {
     pub can_manage_vault: bool,
     pub can_create_sessions: bool,
     pub default_session_role: Role,
+    /// `en` or `fr`
+    pub preferred_locale: String,
 }
 
 impl AuthDb {
@@ -210,6 +212,10 @@ impl AuthDb {
             "ALTER TABLE auth_sessions ADD COLUMN password_verified_at TEXT",
             [],
         );
+        let _ = self.conn.execute(
+            "ALTER TABLE users ADD COLUMN preferred_locale TEXT NOT NULL DEFAULT 'en'",
+            [],
+        );
         self.conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS mfa_pending_setups (
@@ -352,17 +358,46 @@ impl AuthDb {
         Ok(count)
     }
 
-    pub fn create_user(&self, id: Uuid, email: &str, password_hash: &str) -> Result<()> {
+    pub fn create_user(
+        &self,
+        id: Uuid,
+        email: &str,
+        password_hash: &str,
+        preferred_locale: &str,
+    ) -> Result<()> {
+        let locale = normalize_locale(preferred_locale);
         self.conn.execute(
-            "INSERT INTO users (id, email, password_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO users (id, email, password_hash, created_at, preferred_locale) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 id.to_string(),
                 email,
                 password_hash,
-                Utc::now().to_rfc3339()
+                Utc::now().to_rfc3339(),
+                locale,
             ],
         )?;
         Ok(())
+    }
+
+    pub fn set_user_locale(&self, user_id: Uuid, locale: &str) -> Result<()> {
+        let locale = normalize_locale(locale);
+        self.conn.execute(
+            "UPDATE users SET preferred_locale = ?1 WHERE id = ?2",
+            params![locale, user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_user_locale(&self, user_id: Uuid) -> Result<String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT preferred_locale FROM users WHERE id = ?1")?;
+        let mut rows = stmt.query(params![user_id.to_string()])?;
+        if let Some(row) = rows.next()? {
+            Ok(row.get(0)?)
+        } else {
+            Ok("en".into())
+        }
     }
 
     pub fn find_user_by_email(&self, email: &str) -> Result<Option<(Uuid, String)>> {
@@ -402,7 +437,7 @@ impl AuthDb {
     pub fn list_users(&self) -> Result<Vec<UserProfileRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
-                    can_create_sessions, default_session_role
+                    can_create_sessions, default_session_role, preferred_locale
              FROM users
              ORDER BY created_at ASC",
         )?;
@@ -414,7 +449,7 @@ impl AuthDb {
     pub fn get_user_profile(&self, user_id: Uuid) -> Result<Option<UserProfileRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
-                    can_create_sessions, default_session_role
+                    can_create_sessions, default_session_role, preferred_locale
              FROM users
              WHERE id = ?1",
         )?;
@@ -1441,6 +1476,7 @@ fn map_user_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserProfile
     let role_str: String = row.get(6)?;
     let default_session_role = bunny_core::permissions::parse_role(&role_str).unwrap_or(Role::Viewer);
     let disabled_at: Option<String> = row.get(2)?;
+    let preferred_locale: String = row.get(7).unwrap_or_else(|_| "en".into());
     Ok(UserProfileRow {
         id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
         email: row.get(1)?,
@@ -1449,7 +1485,15 @@ fn map_user_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserProfile
         can_manage_vault: row.get::<_, i64>(4)? != 0,
         can_create_sessions: row.get::<_, i64>(5)? != 0,
         default_session_role,
+        preferred_locale: normalize_locale(&preferred_locale),
     })
+}
+
+fn normalize_locale(s: &str) -> String {
+    match s.trim().to_lowercase().as_str() {
+        "fr" | "french" | "français" | "francais" => "fr".into(),
+        _ => "en".into(),
+    }
 }
 
 fn role_to_str(role: Role) -> &'static str {

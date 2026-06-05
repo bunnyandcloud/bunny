@@ -1,0 +1,358 @@
+{
+  "configure.config_created": {
+    "en": "✓ Created {path}",
+    "fr": "✓ Fichier créé : {path}"
+  },
+  "configure.owner_exists": {
+    "en": "✓ Owner account already exists",
+    "fr": "✓ Compte propriétaire déjà existant"
+  },
+  "configure.password_mismatch": {
+    "en": "passwords do not match",
+    "fr": "les mots de passe ne correspondent pas"
+  },
+  "configure.owner_created": {
+    "en": "✓ Owner account created",
+    "fr": "✓ Compte propriétaire créé"
+  },
+  "configure.local_auth_enabled": {
+    "en": "✓ Local auth enabled",
+    "fr": "✓ Authentification locale activée"
+  },
+  "configure.anonymous_disabled": {
+    "en": "✓ Anonymous access disabled",
+    "fr": "✓ Accès anonyme désactivé"
+  },
+  "configure.secure_cookies": {
+    "en": "✓ Secure session cookies enabled",
+    "fr": "✓ Cookies de session sécurisés activés"
+  },
+  "configure.prompt.email": {
+    "en": "Email: ",
+    "fr": "E-mail : "
+  },
+  "configure.prompt.password": {
+    "en": "Password: ",
+    "fr": "Mot de passe : "
+  },
+  "configure.prompt.confirm": {
+    "en": "Confirm: ",
+    "fr": "Confirmation : "
+  },
+  "configure.prompt.language": {
+    "en": "Language / Langue [en/fr] (default: en): ",
+    "fr": "Langue / Language [en/fr] (défaut : en) : "
+  },
+  "configure.mfa.enable_prompt": {
+    "en": "Enable TOTP MFA now? [y/N]: ",
+    "fr": "Activer la MFA TOTP maintenant ? [o/N] : "
+  },
+  "configure.mfa.title": {
+    "en": "MFA setup (TOTP)",
+    "fr": "Configuration MFA (TOTP)"
+  },
+  "configure.mfa.step1": {
+    "en": "1) Scan the QR code in the web UI later, or add this secret manually now.",
+    "fr": "1) Scannez le QR code dans l’interface web plus tard, ou ajoutez ce secret manuellement maintenant."
+  },
+  "configure.mfa.step2": {
+    "en": "2) Then enter a 6-digit code to confirm.",
+    "fr": "2) Puis saisissez un code à 6 chiffres pour confirmer."
+  },
+  "configure.mfa.issuer": {
+    "en": "Issuer: bunny",
+    "fr": "Émetteur : bunny"
+  },
+  "configure.mfa.account": {
+    "en": "Account: {email}",
+    "fr": "Compte : {email}"
+  },
+  "configure.mfa.otpauth_uri": {
+    "en": "otpauth URI (QR payload):\n{uri}\n",
+    "fr": "URI otpauth (charge utile QR) :\n{uri}\n"
+  },
+  "configure.mfa.scan_qr": {
+    "en": "Scan this QR code with your authenticator app:\n{qr}\n",
+    "fr": "Scannez ce QR code avec votre application d’authentification :\n{qr}\n"
+  },
+  "configure.mfa.qr_failed": {
+    "en": "(QR rendering failed in this terminal; use the otpauth URI above.)\n",
+    "fr": "(Échec du rendu QR dans ce terminal ; utilisez l’URI otpauth ci-dessus.)\n"
+  },
+  "configure.mfa.manual_secret": {
+    "en": "Manual secret (base32) — show once:\n{secret}\n",
+    "fr": "Secret manuel (base32) — affiché une seule fois :\n{secret}\n"
+  },
+  "configure.mfa.prompt_code": {
+    "en": "TOTP code (or empty to cancel): ",
+    "fr": "Code TOTP (ou vide pour annuler) : "
+  },
+  "configure.mfa.cancelled": {
+    "en": "✓ MFA setup cancelled",
+    "fr": "✓ Configuration MFA annulée"
+  },
+  "configure.mfa.enabled": {
+    "en": "✓ MFA enabled",
+    "fr": "✓ MFA activée"
+  },
+  "configure.mfa.recovery_header": {
+    "en": "Recovery codes — save these now (shown only once):",
+    "fr": "Codes de récupération — enregistrez-les maintenant (affichés une seule fois) :"
+  },
+  "configure.mfa.invalid_code": {
+    "en": "✗ Invalid code: {error}",
+    "fr": "✗ Code invalide : {error}"
+  },
+  "configure.mfa.failed_cancelled": {
+    "en": "MFA setup failed (too many attempts); setup cancelled",
+    "fr": "Échec de la configuration MFA (trop de tentatives) ; configuration annulée"
+  },
+  "configure.discord.synced": {
+    "en": "✓ Agent config synced from {path}",
+    "fr": "✓ Configuration agent synchronisée depuis {path}"
+  },
+  "configure.discord.restart_hint": {
+    "en": "  Restart bunny run if it is already running.",
+    "fr": "  Redémarrez bunny run s’il est déjà en cours d’exécution."
+  },
+  "configure.discord.already_configured": {
+    "en": "✓ Discord bridge already configured ({path})",
+    "fr": "✓ Pont Discord déjà configuré ({path})"
+  },
+  "configure.discord.reconfigure_prompt": {
+    "en": "Reconfigure Discord bridge? [y/N]: ",
+    "fr": "Reconfigurer le pont Discord ? [o/N] : "
+  },
+  "configure.discord.not_configured": {
+    "en": "Discord bridge not configured.",
+    "fr": "Pont Discord non configuré."
+  },
+  "configure.discord.or_setup": {
+    "en": "  Or: bunny discord setup",
+    "fr": "  Ou : bunny discord setup"
+  },
+  "configure.discord.setup_prompt": {
+    "en": "Configure Discord bridge now? [y/N]: ",
+    "fr": "Configurer le pont Discord maintenant ? [o/N] : "
+  },
+  "configure.discord.skipped": {
+    "en": "Skipped Discord setup.",
+    "fr": "Configuration Discord ignorée."
+  },
+  "configure.discord.invalid_number": {
+    "en": "✗ Invalid number, try again.",
+    "fr": "✗ Numéro invalide, réessayez."
+  },
+  "configure.discord.prompt_app_id": {
+    "en": "Discord Application ID: ",
+    "fr": "ID d’application Discord : "
+  },
+  "configure.discord.prompt_token": {
+    "en": "Discord Bot Token: ",
+    "fr": "Jeton du bot Discord : "
+  },
+  "configure.discord.run_hints_title": {
+    "en": "Next (two terminals in the same environment — e.g. Docker shell):",
+    "fr": "Ensuite (deux terminaux dans le même environnement — ex. shell Docker) :"
+  },
+  "configure.discord.run_terminal1": {
+    "en": "  Terminal 1:  bunny run",
+    "fr": "  Terminal 1 :  bunny run"
+  },
+  "configure.discord.run_terminal2": {
+    "en": "  Terminal 2:  bunny discord bridge",
+    "fr": "  Terminal 2 :  bunny discord bridge"
+  },
+  "configure.discord.agent_config": {
+    "en": "✓ Agent config: {path}",
+    "fr": "✓ Config agent : {path}"
+  },
+  "configure.discord.bridge_config": {
+    "en": "✓ Bridge config: {path}",
+    "fr": "✓ Config pont : {path}"
+  },
+  "web.home.language_label": {
+    "en": "Language",
+    "fr": "Langue"
+  },
+  "web.home.language_en": {
+    "en": "English",
+    "fr": "Anglais"
+  },
+  "web.home.language_fr": {
+    "en": "French",
+    "fr": "Français"
+  },
+  "web.home.language_saved": {
+    "en": "Language updated.",
+    "fr": "Langue mise à jour."
+  },
+  "web.home.language_error": {
+    "en": "Could not update language: {error}",
+    "fr": "Impossible de mettre à jour la langue : {error}"
+  },
+  "discord.language.updated": {
+    "en": "Language set to **{locale}** (`en` or `fr`).",
+    "fr": "Langue définie sur **{locale}** (`en` ou `fr`)."
+  },
+  "discord.language.invalid": {
+    "en": "Invalid locale. Use `en` or `fr`.",
+    "fr": "Locale invalide. Utilisez `en` ou `fr`."
+  },
+  "discord.language.not_linked": {
+    "en": "Discord account not linked to a Bunny user — link via `/bunny link` or Web UI profile.",
+    "fr": "Compte Discord non lié à un utilisateur Bunny — liez via `/bunny link` ou le profil Web UI."
+  },
+  "discord.thread.not_linked": {
+    "en": "This channel is not linked — use `/bunny link`.",
+    "fr": "Ce canal n’est pas lié — utilisez `/bunny link`."
+  },
+  "discord.thread.linked": {
+    "en": "**GOAL:** {goal}\n\n_Thread linked to shell `{shell}` · cwd `{cwd}`{extra}_",
+    "fr": "**GOAL:** {goal}\n\n_Thread lié au shell `{shell}` · cwd `{cwd}`{extra}_"
+  },
+  "discord.thread.branch_suffix": {
+    "en": " · branch `{branch}`",
+    "fr": " · branche `{branch}`"
+  },
+  "discord.thread.bind_failed": {
+    "en": "❌ Could not start thread: {error}\n\n_Check that Claude Code is installed (`?claude=setup` in Web UI) and that `bunny run` was rebuilt._",
+    "fr": "❌ Impossible de démarrer le thread : {error}\n\n_Vérifiez que Claude Code est installé (`?claude=setup` dans la Web UI) et que `bunny run` a été recompilé._"
+  },
+  "discord.thread.inactive": {
+    "en": "This thread is no longer active (goal reached or cancelled).",
+    "fr": "Ce thread n’est plus actif (objectif atteint ou annulé)."
+  },
+  "discord.thread.working": {
+    "en": "⏳ **Claude is working…**\n_This may take 1–5 minutes — this message disappears when done._",
+    "fr": "⏳ **Claude travaille…**\n_Cela peut prendre 1 à 5 minutes — ce message disparaît à la réponse._"
+  },
+  "discord.thread.question_intro": {
+    "en": "❓ **Choice required** — use the buttons below.",
+    "fr": "❓ **Choix requis** — utilisez les boutons ci-dessous."
+  },
+  "discord.thread.goal_confirmed": {
+    "en": "Goal confirmed — shell closed",
+    "fr": "Objectif confirmé — shell fermé"
+  },
+  "discord.thread.goal_cancelled": {
+    "en": "Cancelled — shell closed",
+    "fr": "Annulé — shell fermé"
+  },
+  "discord.link.success": {
+    "en": "Linked to Bunny session `{session_id}`",
+    "fr": "Lié à la session Bunny `{session_id}`"
+  },
+  "discord.unlink.success": {
+    "en": "Channel unlinked.",
+    "fr": "Canal délié."
+  },
+  "discord.unknown_command": {
+    "en": "Unknown command",
+    "fr": "Commande inconnue"
+  },
+  "discord.unknown_subcommand": {
+    "en": "Unknown subcommand: {name}",
+    "fr": "Sous-commande inconnue : {name}"
+  },
+  "discord.shell_list.title": {
+    "en": "**Shells**",
+    "fr": "**Shells**"
+  },
+  "discord.shell_list.empty": {
+    "en": "_No shell — open one in the Web UI first._",
+    "fr": "_Aucun shell — ouvrez-en un dans la Web UI d’abord._"
+  },
+  "discord.shell_list.default_tag": {
+    "en": " _(default)_",
+    "fr": " _(par défaut)_"
+  },
+  "discord.shell_list.hint_run": {
+    "en": "Use `/bunny run shell:<name> command:...`",
+    "fr": "Utilisez `/bunny run shell:<name> command:...`"
+  },
+  "discord.shell_list.hint_manage": {
+    "en": "`/bunny shell_new` · `/bunny shell_close shell:<name>`",
+    "fr": "`/bunny shell_new` · `/bunny shell_close shell:<name>`"
+  },
+  "discord.shell_new.created": {
+    "en": "Shell **`{name}`** created (`{id}`).\nOpen the Web UI Terminal tab to interact.",
+    "fr": "Shell **`{name}`** créé (`{id}`).\nOuvrez l’onglet Terminal de la Web UI pour interagir."
+  },
+  "discord.shell_close.closed": {
+    "en": "Shell **`{name}`** closed.",
+    "fr": "Shell **`{name}`** fermé."
+  },
+  "discord.run_stop.body": {
+    "en": "**Shell:** `{shell}`\nSignal **Ctrl+C** sent to foreground process.\nIf the server does not stop, run `/bunny run_stop` again or use the Web UI terminal.\n_(`/bunny stop` is for Claude tasks, not `run` commands.)_",
+    "fr": "**Shell :** `{shell}`\nSignal **Ctrl+C** envoyé au processus en avant-plan.\nSi le serveur ne s’arrête pas, relancez `/bunny run_stop` ou utilisez le terminal Web UI.\n_(`/bunny stop` concerne les tâches Claude, pas les commandes `run`.)_"
+  },
+  "discord.claude_reset.done": {
+    "en": "Claude conversation reset for this channel (`ask`/`plan` start fresh). Interactive shell (`do`) stays in the terminal until you exit Claude.",
+    "fr": "Conversation Claude réinitialisée pour ce canal (`ask`/`plan` repartiront de zéro). Le shell interactif (`do`) reste dans le terminal tant que vous ne quittez pas Claude."
+  },
+  "discord.approval.denied": {
+    "en": "Denied",
+    "fr": "Refusé"
+  },
+  "discord.approval.approved": {
+    "en": "Approved",
+    "fr": "Approuvé"
+  },
+  "discord.run.persistent_header": {
+    "en": "**Shell:** `{shell}`\n**Long-running / persistent process** — started in the shell.\nOutput continues in the Web UI **Terminal** tab.\nTo stop: `/bunny run_stop` (or `run_stop shell:{shell}`).\n\n**Excerpt:**",
+    "fr": "**Shell :** `{shell}`\n**Processus long / persistant** — lancé dans le shell.\nLa sortie continue dans l’onglet **Terminal** de la Web UI.\nPour arrêter : `/bunny run_stop` (ou `run_stop shell:{shell}`).\n\n**Extrait :**"
+  },
+  "discord.run.no_output_yet": {
+    "en": "_(no output yet)_",
+    "fr": "_(pas encore de sortie)_"
+  },
+  "discord.run.no_output": {
+    "en": "(no output)",
+    "fr": "(aucune sortie)"
+  },
+  "discord.shell_run.header": {
+    "en": "**Shell:** `{shell}`",
+    "fr": "**Shell :** `{shell}`"
+  },
+  "discord.shell_run.continuation": {
+    "en": "(continued {current}/{total})",
+    "fr": "(suite {current}/{total})"
+  },
+  "discord.shell_run.exit": {
+    "en": "_(exit {code})_",
+    "fr": "_(code {code})_"
+  },
+  "discord.approval.summary_default": {
+    "en": "Action requiring your approval.",
+    "fr": "Action nécessitant votre accord."
+  },
+  "discord.approval.footer": {
+    "en": "Press a button below.",
+    "fr": "Appuyez sur un bouton ci-dessous."
+  },
+  "discord.approval.header": {
+    "en": "**Permission required** · Claude {mode} · shell `{shell}`",
+    "fr": "**Permission requise** · Claude {mode} · shell `{shell}`"
+  },
+  "discord.run.web_ui_footer": {
+    "en": "_(continued in Web UI terminal — Discord limit)_",
+    "fr": "_(suite dans le terminal Web UI — limite Discord)_"
+  },
+  "discord.approval.title": {
+    "en": "Action requiring your approval",
+    "fr": "Action nécessitant votre accord"
+  },
+  "discord.approval.permission": {
+    "en": "Permission required",
+    "fr": "Permission requise"
+  },
+  "api.error.discord_not_linked": {
+    "en": "discord account not linked to bunny user — run /bunny link again with a fresh code from the Web UI",
+    "fr": "compte Discord non lié à un utilisateur Bunny — relancez /bunny link avec un code frais depuis la Web UI"
+  },
+  "api.error.invalid_locale": {
+    "en": "invalid locale: use en or fr",
+    "fr": "locale invalide : utilisez en ou fr"
+  }
+}

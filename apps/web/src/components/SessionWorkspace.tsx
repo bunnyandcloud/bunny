@@ -23,7 +23,8 @@ import VaultUnlockModal from './VaultUnlockModal';
 import PreviewPanel from './PreviewPanel';
 import BrowserPanel from './BrowserPanel';
 import ClaudeSetupPanel from './ClaudeSetupPanel';
-import LogoutButton from './LogoutButton';
+import { useT } from '../i18n';
+import AppTopBar from './AppTopBar';
 import SessionMembersModal from './SessionMembersModal';
 import SessionDiscordModal from './SessionDiscordModal';
 
@@ -57,7 +58,23 @@ function secretsForSession(secrets: SecretMeta[], sessionId: string): SecretMeta
   );
 }
 
+function displayStatus(tr: (key: string) => string, status: string): string {
+  switch (status) {
+    case 'connecting':
+      return tr('web.session.statusConnecting');
+    case 'ready':
+      return tr('web.session.statusReady');
+    case 'no shells':
+      return tr('web.session.statusNoShells');
+    case 'no_active_shell':
+      return tr('web.session.noActiveShell');
+    default:
+      return status;
+  }
+}
+
 export default function SessionWorkspace({ sessionId }: Props) {
+  const tr = useT();
   const { user } = useAuth();
   const [sessionName, setSessionName] = useState('');
   const [shells, setShells] = useState<ShellTab[]>([]);
@@ -286,7 +303,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
 
   async function handleInjectSecret(envVar: string) {
     if (!activeId) {
-      setStatus('No active shell');
+      setStatus('no_active_shell');
       return;
     }
     const text = `$${envVar}`;
@@ -336,40 +353,42 @@ export default function SessionWorkspace({ sessionId }: Props) {
           }}
           className="text-bunny-accent font-bold hover:opacity-80"
         >
-          ← Sessions
+          {tr('web.session.home')}
         </button>
         <div className="flex-1 flex items-center justify-center gap-2 min-w-0 text-sm">
           {sessionName ? (
             <InlineRename
               value={sessionName}
               className="text-gray-200 font-medium truncate max-w-[min(100%,20rem)]"
-              title="Double-click to rename session"
+              title={tr('web.session.renameHint')}
               onSave={async (name) => {
                 const updated = await renameSession(sessionId, name);
                 setSessionName(updated.name);
               }}
             />
           ) : (
-            <span className="text-bunny-muted">Loading…</span>
+            <span className="text-bunny-muted">{tr('web.common.loading')}</span>
           )}
-          <span className="text-bunny-muted truncate">— {status}</span>
+          <span className="text-bunny-muted truncate">
+            {tr('web.session.statusSeparator')} {displayStatus(tr, status)}
+          </span>
         </div>
-        <div className="flex items-center justify-end gap-2 shrink-0 min-w-[5rem]">
+        <AppTopBar logoutClassName="text-xs text-bunny-muted hover:text-gray-200 disabled:opacity-50">
           <button
             type="button"
             onClick={() => setDiscordOpen(true)}
             className="text-xs px-2.5 py-1 rounded border border-bunny-border text-bunny-muted hover:text-gray-200 hover:bg-bunny-bg"
-            title="Link Discord channel to this session"
+            title={tr('web.session.discordTitle')}
           >
-            Discord
+            {tr('web.session.discord')}
           </button>
           <button
             type="button"
             onClick={() => setMembersOpen(true)}
             className="text-xs px-2.5 py-1 rounded border border-bunny-border text-bunny-muted hover:text-gray-200 hover:bg-bunny-bg"
-            title="Manage session members"
+            title={tr('web.session.membersTitle')}
           >
-            Members
+            {tr('web.session.members')}
           </button>
           {user?.isOwner && (
             <button
@@ -384,17 +403,17 @@ export default function SessionWorkspace({ sessionId }: Props) {
               }`}
               title={
                 vaultLocked
-                  ? 'Vault verrouillé — cliquer pour déverrouiller'
+                  ? tr('web.session.vaultLockedTitle')
                   : showVaultSection
-                    ? 'Masquer le panneau vault'
-                    : 'Afficher le panneau vault'
+                    ? tr('web.session.vaultHide')
+                    : tr('web.session.vaultShow')
               }
             >
-              Vault{vaultLocked ? ' 🔒' : ''}
+              {tr('web.session.vault')}
+              {vaultLocked ? ' 🔒' : ''}
             </button>
           )}
-          <LogoutButton className="text-xs text-bunny-muted hover:text-gray-200 disabled:opacity-50" />
-        </div>
+        </AppTopBar>
       </header>
       {showVaultBanner && (
         <SecretsVaultBanner onUnlock={() => setUnlockOpen(true)} />
@@ -431,9 +450,9 @@ export default function SessionWorkspace({ sessionId }: Props) {
             <div className="flex items-center gap-1 px-2 py-1 border-b border-bunny-border bg-bunny-panel shrink-0">
               {(
                 [
-                  ['terminal', 'Terminal'],
-                  ['preview', 'Preview'],
-                  ['browser', 'Browser'],
+                  ['terminal', tr('web.session.tabTerminal')],
+                  ['preview', tr('web.session.tabPreview')],
+                  ['browser', tr('web.session.tabBrowser')],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -472,9 +491,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
               busy={busy}
             />
             <p className="px-2 py-1 text-xs text-bunny-muted border-b border-bunny-border">
-              Shells run in tmux and survive agent restarts. Closing the browser only
-              disconnects you — stop the agent, restart it, then re-open this session. Use ×
-              to close a shell for good.
+              {tr('web.session.tmuxHint')}
             </p>
             <div className="flex-1 min-h-0 relative">
               {shells.length > 0 ? (
@@ -507,18 +524,12 @@ export default function SessionWorkspace({ sessionId }: Props) {
                 })
               ) : (
                 <div className="p-4 text-bunny-muted text-sm space-y-2">
-                  <p>No shell open.</p>
+                  <p>{tr('web.session.noShellOpen')}</p>
                   {vaultLocked && hasStoredSecrets && (
-                    <p className="text-xs text-orange-300/80">
-                      Le vault est verrouillé — déverrouille-le puis ouvre un shell pour injecter les
-                      secrets (<code className="text-gray-400">BUNNY_SECRET_*</code>).
-                    </p>
+                    <p className="text-xs text-orange-300/80">{tr('web.session.vaultLockedHint')}</p>
                   )}
                   {vaultStatus?.status === 'unlocked' && hasStoredSecrets && (
-                    <p className="text-xs text-bunny-muted">
-                      Déverrouille le vault pour injecter les variables{' '}
-                      <code className="text-gray-400">BUNNY_SECRET_*</code> dans les shells ouverts.
-                    </p>
+                    <p className="text-xs text-bunny-muted">{tr('web.session.vaultUnlockHint')}</p>
                   )}
                   <button
                     type="button"
@@ -542,16 +553,18 @@ export default function SessionWorkspace({ sessionId }: Props) {
               <div className="h-full flex flex-col bg-bunny-bg">
                 {showSidebarSecretsHint && (
                   <p className="px-2 py-1.5 text-[11px] leading-snug text-bunny-muted border-b border-bunny-border bg-bunny-panel/80 shrink-0">
-                    Vault verrouillé — {vaultStatus?.ref_count} secret
-                    {(vaultStatus?.ref_count ?? 0) > 1 ? 's' : ''} en attente.{' '}
+                    {tr('web.vault.sidebarHintPrefix', {
+                      count: String(vaultStatus?.ref_count ?? 0),
+                      plural: (vaultStatus?.ref_count ?? 0) > 1 ? 's' : '',
+                    })}{' '}
                     <button
                       type="button"
                       className="text-bunny-accent hover:underline"
                       onClick={() => setUnlockOpen(true)}
                     >
-                      Unlock
+                      {tr('web.vault.unlockButton')}
                     </button>{' '}
-                    puis nouveau shell.
+                    {tr('web.vault.sidebarHintSuffix')}
                   </p>
                 )}
                 <div className="flex-1 min-h-0">

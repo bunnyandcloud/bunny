@@ -48,7 +48,7 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
 
     let protected = Router::new()
         .route("/auth/logout", post(auth_logout))
-        .route("/auth/me", get(auth_me))
+        .route("/auth/me", get(auth_me).patch(auth_patch_me))
         .route("/auth/mfa/status", get(auth_mfa_status))
         .route("/auth/mfa/setup", post(auth_mfa_setup))
         .route("/auth/mfa/enable", post(auth_mfa_enable))
@@ -182,7 +182,7 @@ async fn auth_bootstrap(
     if !state.auth.needs_bootstrap()? {
         return Err(ApiError::conflict("owner already exists"));
     }
-    let id = state.auth.bootstrap_owner(&body.email, &body.password)?;
+    let id = state.auth.bootstrap_owner(&body.email, &body.password, "en")?;
     Ok(Json(BootstrapResponse {
         user_id: id.to_string(),
         message: "owner account created".into(),
@@ -400,6 +400,10 @@ async fn auth_me(
         .get_user_profile(user)
         .ok()
         .flatten();
+    let locale = profile
+        .as_ref()
+        .map(|p| p.preferred_locale.clone())
+        .unwrap_or_else(|| "en".into());
     let (can_install_claude, can_manage_vault, can_create_sessions, default_session_role) =
         if is_owner {
             (true, true, true, "owner".to_string())
@@ -423,7 +427,32 @@ async fn auth_me(
         can_manage_vault,
         can_create_sessions,
         default_session_role,
+        locale,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct PatchMeRequest {
+    pub locale: Option<String>,
+}
+
+async fn auth_patch_me(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<PatchMeRequest>,
+) -> Result<Json<MeResponse>, ApiError> {
+    if let Some(ref locale) = body.locale {
+        if !bunny_i18n::is_valid_locale_code(locale) {
+            return Err(ApiError::validation(
+                &bunny_i18n::t(bunny_i18n::Locale::En, "api.error.invalid_locale", &[]),
+            ));
+        }
+        state
+            .auth
+            .set_user_locale(user, locale)
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+    }
+    auth_me(State(state), Extension(user)).await
 }
 
 async fn list_users(
@@ -1818,6 +1847,8 @@ pub struct MeResponse {
     pub can_manage_vault: bool,
     pub can_create_sessions: bool,
     pub default_session_role: String,
+    /// UI locale: `en` or `fr`
+    pub locale: String,
 }
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {

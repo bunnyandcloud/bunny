@@ -1,10 +1,13 @@
+import { effectiveLocale, readStoredLocale, guessBrowserLocale, t } from '../i18n';
+
 const API = '/api/v1';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export function apiErrorMessage(err: unknown, fallback: string): string {
+  const loc = effectiveLocale(readStoredLocale() ?? guessBrowserLocale());
   if (err instanceof Error) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return 'Request timed out. Please try again.';
+      return t(loc, 'web.api.timeout');
     }
     const msg = err.message.trim();
     if (msg) return msg;
@@ -105,7 +108,25 @@ export function me() {
     can_manage_vault: boolean;
     can_create_sessions: boolean;
     default_session_role: string;
+    locale: string;
   }>('/auth/me');
+}
+
+export function updateLocale(locale: 'en' | 'fr') {
+  return api<{
+    user_id: string;
+    email: string;
+    is_owner: boolean;
+    mfa_enabled: boolean;
+    can_install_claude: boolean;
+    can_manage_vault: boolean;
+    can_create_sessions: boolean;
+    default_session_role: string;
+    locale: string;
+  }>('/auth/me', {
+    method: 'PATCH',
+    body: JSON.stringify({ locale }),
+  });
 }
 
 export type TeamUser = {
