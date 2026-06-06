@@ -1,8 +1,18 @@
-# bunny
+<p align="center">
+  <img src="docs/assets/logo.png" alt="bunny" width="280">
+</p>
 
-Remote development and debugging tool for Linux servers: PTY terminals, port previews, instrumented desktop browser, unified timeline, and secure local authentication..
+# Build products together on the same remote environment
 
-## Quick start
+This project turns a remote server or hosted container into a collaborative product-making station: web terminals, live port previews, live-streamed browsers, Discord workflows, and a unified timeline where code, feedback, decisions, and experiments come together. A real server-side agent gives teams an open workspace they control, without being locked into a proprietary cloud. It lets teams install and orchestrate the tools they already use — shell commands, project CLIs, scripts, and AI agents like Codex or Claude — through prompts, commands, and shared workflows in one open environment.
+
+It is designed for engineers, designers, operators, founders, and non-technical contributors to participate in the same development flow — and for versioning to evolve beyond code commits into a more organic record of how the product is actually made.
+
+## Install on a Linux server
+
+Best for a VPS, cloud VM, or any machine where you develop over SSH.
+
+**From a git clone** (recommended for development):
 
 ```bash
 git clone https://github.com/bunny-dev/bunny.git && cd bunny
@@ -11,126 +21,32 @@ bunny configure
 bunny run
 ```
 
-On Debian/Ubuntu, `./bunny setup` installs prerequisites (Rust, Node, browser stack) automatically when needed.
+On Debian/Ubuntu, `./bunny setup` installs missing prerequisites (Rust, Node, tmux, browser stack) automatically.
 
-Open the UI in your browser (see [where to connect](#where-to-open-the-ui) below). Verbose Rust build: `BUNNY_VERBOSE_BUILD=1 ./bunny setup`
+**First install takes a few minutes** — `./bunny setup` compiles the Rust agent from source; the first `bunny run` also builds the web UI (Node.js required). Subsequent starts are much faster.
 
-## Prerequisites
-
-| Tool | Version | Used for |
-|------|---------|----------|
-| **Rust** (rustup) | stable, ≥ 1.86 | Agent + CLI (`bunny-server`) |
-| **Node.js** + **npm** | 20+ | Web UI (`apps/web`) + WebRTC/CDP sidecars |
-| **Git** | any | Clone |
-| **tmux** | any | Persistent terminals |
-| **Neovim** (`nvim`) | any | Default editor on the remote host |
-
-**Browser preview & streaming** (installed automatically by `./bunny setup` on Debian/Ubuntu):
-
-| Tool | Used for |
-|------|----------|
-| **Chromium** | Remote desktop browser (via **Playwright** on Ubuntu 24.04+ Docker — apt packages are snap stubs) |
-| **Xvfb** | Virtual display for headless Chromium |
-| **x11vnc** | VNC server on the virtual display |
-| **websockify** | noVNC WebSocket bridge (interactive browser tab) |
-| **Sidecar npm deps** | `apps/server/webrtc-sidecar`, `apps/server/cdp-sidecar` (WebRTC stream + CDP capture) |
-
-Port **Preview** (iframe proxy to e.g. `:3000`) works without the browser stack. The **Browser** tab (noVNC / WebRTC) needs the packages above — run `bunny doctor` to verify.
-
-**Docker dev note:** `./scripts/docker-dev.sh bootstrap` and `bunny setup --minimal` skip the browser stack. Run `./scripts/docker-dev.sh browser-setup` before using the Browser tab (see [Docker](#docker-dev-with-docker-devsh)).
-
-### Linux (Ubuntu / Debian / Docker)
-
-Inside the container or VM:
+By default, the agent listens on **localhost only** (`127.0.0.1` on the server). From your laptop, use an **SSH tunnel** (recommended):
 
 ```bash
-apt-get update
-apt-get install -y curl ca-certificates build-essential pkg-config libssl-dev git tmux neovim
-
-# Browser stack (Preview tab works without this; Browser tab needs it)
-apt-get install -y xvfb x11vnc websockify
-
-# Chromium — use Playwright on Ubuntu 24.04+ (apt `chromium-browser` is a snap stub)
-cd /path/to/bunny/apps/server/webrtc-sidecar
-npm install
-npx playwright install chromium
-npx playwright install-deps chromium
-ln -sf "$(find ~/.cache/ms-playwright -path '*/chromium-*/chrome-linux*/chrome' -type f | sort -V | tail -1)" /usr/local/bin/chromium
-
-# CDP sidecar
-cd ../cdp-sidecar && npm install
-
-# Rust
-curl -fsSL https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-rustc --version
-cargo --version
-
-# Node.js 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-node --version
-npm --version
+ssh -L 7681:127.0.0.1:7681 user@your-server
 ```
 
-Or run the helper script manually:
+Then open **http://127.0.0.1:7681** in your browser — on your laptop, not the server’s public IP.
+
+To reach the UI via the server’s IP directly, bind on all interfaces and open the firewall (less secure — see [Installation](docs/install/README.md)):
 
 ```bash
-./scripts/install-prerequisites.sh
-source "$HOME/.cargo/env"
-bunny doctor
+bunny run --host 0.0.0.0 --port 7681
+# then http://YOUR_SERVER_IP:7681
 ```
 
-### macOS
+Run `bunny doctor` to verify dependencies.
 
-```bash
-xcode-select --install   # if needed
-curl -fsSL https://sh.rustup.rs | sh
-# Node: https://nodejs.org/ or brew install node
-# Neovim: brew install neovim
-```
+## Install with Docker
 
-After installing Rust, **open a new shell** or run `source "$HOME/.cargo/env"` so `cargo` is on your `PATH`.
+Run the agent inside a container — useful for trying bunny locally or keeping a clean dev environment.
 
-### Docker (dev with `docker-dev.sh`)
-
-Recommended on Mac: agent + terminals in Ubuntu, Discord bridge on the host.
-
-```bash
-./scripts/docker-dev.sh bootstrap    # Rust + bunny configure (minimal — no browser stack)
-./scripts/docker-dev.sh shell
-bunny run                            # terminal 1 — keep open
-```
-
-**Browser tab (React on :3000, noVNC):** `bootstrap` / `bunny setup --minimal` do **not** install Xvfb or Chromium. Run once per container (or after `docker-dev.sh down -v`):
-
-```bash
-./scripts/docker-dev.sh browser-setup   # Xvfb, Chromium (Playwright), x11vnc, noVNC — ~2 min
-bunny doctor                            # optional: should show ✓ Xvfb, ✓ Chromium
-```
-
-Then in the Web UI: open the **Browser** tab and click **Recharger**. Your app must listen inside the container (e.g. `npm run dev` in a shell tab on port 3000).
-
-Discord on Mac: [docs/integrations/discord-docker-dev.md](docs/integrations/discord-docker-dev.md).
-
-Equivalent manual steps:
-
-```bash
-./scripts/docker-dev.sh up
-./scripts/docker-dev.sh init
-./scripts/docker-dev.sh browser-setup   # skip only if you never use the Browser tab
-./scripts/docker-dev.sh shell
-bunny run
-```
-
-| Symptom | Fix |
-|---------|-----|
-| `failed to start Xvfb: No such file or directory` | `./scripts/docker-dev.sh browser-setup` |
-| Browser black / not loading | App listening on `127.0.0.1:3000` **inside** the container; click Recharger |
-
-### Docker (manual `docker run`)
-
-On the **host**:
+**Quick container** (Ubuntu 24.04):
 
 ```bash
 docker run -dit --name bunny-dev \
@@ -139,115 +55,48 @@ docker run -dit --name bunny-dev \
   -p 127.0.0.1:7681:7681 \
   --shm-size=2g \
   ubuntu:24.04 sleep infinity
-```
 
-Inside the container:
-
-```bash
-./scripts/install-prerequisites.sh   # full stack including browser (not --minimal)
-source "$HOME/.cargo/env"
+docker exec -it bunny-dev bash
+cd /opt/bunny
+./bunny setup
 bunny configure
 bunny run
 ```
 
-Or use `./bunny setup` (full install, not `--minimal`). Confirm you see:
+Same as above: first `./bunny setup` and `bunny run` compile from source — allow a few minutes.
 
-`✓ Listening on http://0.0.0.0:7681` — not `127.0.0.1` only inside the container.
+Open **http://127.0.0.1:7681** on the host.
 
-### Where to open the UI
-
-| Where you run `bunny run` | URL in your browser |
-|-----------------------------------|---------------------|
-| **Same machine** (Linux VM with desktop, or SSH with port forward) | `http://127.0.0.1:7681` |
-| **Docker** on your laptop (`-p 127.0.0.1:7681:7681`) | `http://127.0.0.1:7681` on the laptop |
-| **Remote VM** (SSH tunnel) | `ssh -L 7681:127.0.0.1:7681 user@vm` then `http://127.0.0.1:7681` on your laptop |
-| **Remote VM** (public IP) | See [Server with a public IP](#server-with-a-public-ip) below |
-
-For day-to-day work, prefer an **SSH tunnel** (first remote row). Binding on all interfaces is only for quick solo tests or when you explicitly need direct browser access.
-
-### Server with a public IP
-
-Use this when the agent runs on a VPS or cloud VM and you want to open the web UI from your laptop **without** `ssh -L`.
-
-**1. Listen on all interfaces**
+**Mac / local dev** — use the helper script (agent in Docker, optional Discord bridge on the host):
 
 ```bash
-bunny run --host 0.0.0.0 --port 7681
+./scripts/docker-dev.sh bootstrap
+./scripts/docker-dev.sh shell
+bunny run
 ```
 
-Or set it once in config (`~/.config/bunny/config.yaml`, or `.bunny.yaml` in the repo — see [.bunny.yaml.example](.bunny.yaml.example)):
+Browser tab (noVNC) needs a one-time `./scripts/docker-dev.sh browser-setup`. Details: [Installation → Docker](docs/install/README.md#docker) and [Discord + Docker on Mac](docs/integrations/discord-docker-dev.md).
 
-```yaml
-server:
-  bind_host: 0.0.0.0
-  port: 7681
-```
+## Community
 
-Confirm the log shows `Listening on http://0.0.0.0:7681`, not `127.0.0.1` only.
-
-**2. Open the port on the host**
-
-- **Linux firewall** (example): allow TCP `7681` from your IP only if possible (`ufw`, `firewalld`, or your cloud security group).
-- **Cloud**: add an inbound rule for TCP **7681** on the instance security group / network ACL.
-
-**3. Open in the browser**
-
-```text
-http://YOUR_PUBLIC_IP:7681
-```
-
-Replace `YOUR_PUBLIC_IP` with the VM’s public IPv4 (or DNS name).
-
-**Security**
-
-- Traffic is **HTTP by default** — login and session cookies are not encrypted on the wire. Do not expose `0.0.0.0` on the open internet for anything sensitive.
-- **Prefer** `ssh -L 7681:127.0.0.1:7681 user@host` and keep the agent on `127.0.0.1` for production-style use (see [docs/install/README.md](docs/install/README.md)).
-- Restrict firewall / security group source IPs to your home or office when you must bind publicly.
-- For a durable public setup, put **HTTPS** (reverse proxy + TLS) in front of the agent instead of raw port 7681 on the internet.
-
-Production-style deployments should keep **`127.0.0.1`** on the server and use an SSH tunnel unless you have deliberately hardened the network path.
-
-### `setup` and permissions
-
-`./bunny setup` picks the install location automatically:
-
-| Situation | Where `bunny` is installed | `bunny` works right away? |
-|-----------|----------------------------|---------------------------|
-| **root**, or `/usr/local/bin` writable | `/usr/local/bin` | Yes |
-| Normal user on a VM | `~/.local/bin` + line in `~/.bashrc` | After a **new SSH session** (or `source ~/.bashrc` once) |
-| Normal user, system-wide CLI | Run **`sudo ./bunny setup`** | Yes (same as root row) |
-
-You do **not** need `sudo` on Docker as root or on a dev VM where you are already root. Use `sudo` on a shared Linux VM if you want `/usr/local/bin` without logging out and back in.
-
-Override: `INSTALL_DIR=/custom/bin ./bunny setup`
-
-### Without global install
-
-From the repo root you can skip `setup` and call the launcher directly:
-
-```bash
-./bunny configure
-./bunny run
-```
-
-## Monorepo layout
-
-| Path | Description |
-|------|-------------|
-| `apps/server` | Rust agent + CLI (`bunny`) |
-| `apps/web` | React + Vite web UI |
-| `apps/mobile` | Flutter iOS/Android app |
-| `crates/*` | Shared Rust libraries |
-| `packages/*` | OpenAPI + WebSocket protocol contracts |
-| `infra/` | Docker, systemd, packaging scripts |
-| `scripts/` | Install, doctor, release helpers |
+Discord server for questions, feedback, and release announcements — **invite link coming soon**.
 
 ## Documentation
 
-- [Architecture](docs/architecture/overview.md)
-- [Installation](docs/install/README.md)
-- [Security](docs/security/README.md)
-- [API](docs/api/README.md)
+| Topic | Link |
+|-------|------|
+| Full install guide (systemd, secrets) | [docs/install/README.md](docs/install/README.md) |
+| macOS local dev | [docs/install/README.md#macos-local-development](docs/install/README.md#macos-local-development) |
+| Architecture | [docs/architecture/overview.md](docs/architecture/overview.md) |
+| Security | [docs/security/README.md](docs/security/README.md) |
+| API | [docs/api/README.md](docs/api/README.md) |
+| Discord integration | [docs/integrations/discord.md](docs/integrations/discord.md) |
+| Mobile app | [docs/mobile/README.md](docs/mobile/README.md) |
+| Everything else | [docs/README.md](docs/README.md) |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
