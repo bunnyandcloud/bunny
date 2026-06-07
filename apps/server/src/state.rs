@@ -39,6 +39,8 @@ pub struct AppState {
     pub claude_install: Mutex<InstallState>,
     pub claude_auth: Mutex<AuthFlow>,
     pub discord: ParkingMutex<DiscordDb>,
+    /// Managed Discord bridge sidecar (spawned by bunny run or restarted via API).
+    pub discord_bridge: tokio::sync::Mutex<Option<crate::discord_bridge::DiscordBridgeSidecar>>,
     /// Active headless Claude subprocess PIDs per Discord thread (for /thread/stop).
     pub thread_claude_pids: Mutex<HashMap<String, u32>>,
 }
@@ -114,6 +116,7 @@ impl AppState {
             claude_install: Mutex::new(InstallState::default()),
             claude_auth: Mutex::new(AuthFlow::default()),
             discord: ParkingMutex::new(discord),
+            discord_bridge: tokio::sync::Mutex::new(None),
             thread_claude_pids: Mutex::new(HashMap::new()),
             previews: RwLock::new(HashMap::new()),
             terminal_sessions: RwLock::new(HashMap::new()),

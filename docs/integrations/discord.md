@@ -8,47 +8,195 @@ Bunny can be controlled from Discord via a separate **Discord Bridge** process w
 - `bunny-discord-bridge` — Discord bot (slash commands `/bunny …`)
 - Web UI — generate link codes from session members modal (MFA password)
 
-## Setup
+## Discord application and server
 
-1. Create a Discord application and bot; enable **Message Content** and **applications.commands** scopes.
+This section is the **step-by-step guide** for beginners: create the Discord app/bot, add it to a server, then wire it to Bunny.
 
-2. Generate a bridge token on the agent host:
+### Three things to understand
+
+| Piece | What it is | Where it lives |
+|-------|------------|----------------|
+| **Discord application** | Your bot’s identity (ID, token, OAuth) | [Discord Developer Portal](https://discord.com/developers/applications) |
+| **Discord server** (guild) | The place where you chat and run `/bunny` | Your Discord client — you **invite** the bot there |
+| **Channel link** | Connects one Discord channel to one Bunny session | Web UI link code + `/bunny link` in Discord |
+
+An application is **not** tied to any server until you invite the bot. Bunny does not pick a server for you.
+
+```text
+Developer Portal (app + bot token)
+        ↓ invite URL
+Discord server (guild) — bot appears in member list
+        ↓ bunny configure (Discord setup) or bunny discord setup (+ optional guild_id)
+Bunny bridge — registers /bunny commands
+        ↓ link code from Web UI
+/bunny link — channel ↔ Bunny session
+```
+
+### Step 1 — Create the application and bot
+
+1. Open [Discord Developer Portal](https://discord.com/developers/applications) → **New Application** → name it (e.g. “Bunny”).
+2. **General Information** → copy **Application ID** (long number). You need it for Bunny.
+3. **Bot** → **Add Bot** (or **Reset Token** if you already have one) → copy the **Token**.  
+   This is **not** the OAuth Client Secret (that is under OAuth2).
+4. Under **Privileged Gateway Intents**, enable **Message Content Intent** → **Save Changes**.  
+   Required for `@mention` threads.
+
+### Step 2 — Invite the bot to your Discord server
+
+The bot must be a **member** of the server where you will use `/bunny`.
+
+1. In the portal: **OAuth2 → URL Generator**.
+2. Scopes: check **`bot`** and **`applications.commands`**.
+3. Bot permissions (minimum): Send Messages, Read Message History, Use Slash Commands, Create Public Threads (and Send Messages in Threads).
+4. Copy the generated URL, open it in a browser, pick your **Discord server**, authorize.
+
+**Check:** the bot appears in the server’s member list. If not, repeat this step — nothing else will work.
+
+**Server ID (recommended for dev):** enable Discord **Developer Mode** (Settings → Advanced), right-click your server icon → **Copy Server ID**. You will pass this as `guild_id` so `/bunny` registers on that server immediately (see Step 4).
+
+### Step 3 — Start Bunny and configure Discord
+
+On the agent host (or inside the Docker container), after Steps 1–2 (portal + bot invite):
 
 ```bash
-bunny discord token
+bunny configure    # owner account; prompts for Discord setup if you accept
+bunny run          # agent + Web UI (bridge auto-starts when configured)
 ```
 
-Add to `~/.config/bunny/config.yaml`:
+During **`bunny configure`**, if you accept Discord setup, Bunny runs the same flow as `bunny discord setup`: it asks for **Application ID** and **Bot Token** (Step 1), writes `~/.config/bunny/config.yaml` and `.discord/bridge.yaml`, and optionally configures OAuth. **If you completed that, skip Step 4** and go to Step 5.
 
-```yaml
-discord:
-  enabled: true
-  bridge_token_hash: "<sha256 hex from command>"
-  public_url: "https://your-bunny-host.example.com"
-  link_code_ttl_minutes: 15
+**Docker on Mac:** see [discord-docker-dev.md](discord-docker-dev.md) — `./scripts/docker-dev.sh bootstrap` runs `bunny configure` for you, then `bunny run` + `start-bridge`.
+
+### Step 4 — Configure Bunny for your application (if you skipped Discord in Step 3)
+
+**Only needed** if you declined Discord during `bunny configure`, or you are reconfiguring after a new application / token rotation.
+
+```bash
+bunny discord setup
 ```
 
-3. Configure `~/.config/bunny/discord-bridge.yaml`:
+This writes the same files as the configure wizard:
+
+- **Agent:** `~/.config/bunny/config.yaml` (bridge token hash, public URL, optional OAuth)
+- **Bridge:** `.discord/bridge.yaml` in the repo (or `--bridge-out` path) — `application_id`, `bot_token`, optional `guild_id`
+
+For local dev, public URL is usually `http://127.0.0.1:7681`.
+
+**Guild ID (optional but recommended):** neither `bunny configure` nor `bunny discord setup` prompts for it interactively — add your server ID (Step 2) so `/bunny` registers on that server immediately:
+
+```bash
+bunny discord setup --guild-id YOUR_SERVER_ID
+```
+
+Or edit `.discord/bridge.yaml` after setup:
 
 ```yaml
 discord:
   application_id: 123456789012345678
   bot_token: "YOUR_BOT_TOKEN"
+  guild_id: 987654321098765432
+```
+
+Restart `bunny run` (and the bridge if it runs separately) after changing config.
+
+**Re-run:** `bunny configure` also offers to reconfigure Discord when `.discord/bridge.yaml` already exists — equivalent to running `bunny discord setup` again.
+
+### Step 5 — Link a channel to a Bunny session
+
+1. Web UI → open a session → **Discord** → enter password → **Generate code**.
+2. In Discord, in a channel on the server where the bot was invited: `/bunny link YOUR_CODE`.
+
+Test with `/bunny status`. You can `/bunny unlink` to remove the link.
+
+### Changing server or application
+
+| Situation | What to do |
+|-----------|------------|
+| **New Discord server** | Invite the same bot (Step 2), update `guild_id` in bridge config, restart bridge, `/bunny link` again on the new channel |
+| **New Discord application** | Full Step 1 + `bunny discord setup` with new ID/token; re-invite bot; update OAuth redirect URI if you use home-page linking |
+| **Commands missing or duplicated** | Set `guild_id`, restart bridge once; quit Discord (Cmd+Q) if autocomplete is stale — see [discord-docker-dev.md](discord-docker-dev.md#troubleshooting) |
+
+Stale channel links in Bunny’s database (old server deleted) do not block a new server — generate a fresh link code and run `/bunny link` on the new channel.
+
+### Quick troubleshooting
+
+| Symptom | Likely fix |
+|---------|------------|
+| Bot not in server member list | Repeat Step 2 (invite URL) |
+| `/bunny` does not appear | Bridge not running — `bunny discord bridge` or `./scripts/docker-dev.sh start-bridge` |
+| `invalid bridge token` on link | `bunny discord sync` then restart `bunny run` |
+| Link code rejected | New code from Web UI; codes expire (default 15 min) |
+
+## Setup (reference)
+
+The wizard above is the supported path. Equivalent manual layout:
+
+**Agent** (`~/.config/bunny/config.yaml`):
+
+```yaml
+discord:
+  enabled: true
+  bridge_token_hash: "<sha256 of bridge_token — written by bunny discord setup>"
+  public_url: "https://your-bunny-host.example.com"
+  link_code_ttl_minutes: 15
+```
+
+**Bridge** (`.discord/bridge.yaml` or `~/.config/bunny/discord-bridge.yaml`):
+
+```yaml
+discord:
+  application_id: 123456789012345678
+  bot_token: "YOUR_BOT_TOKEN"
+  guild_id: 987654321098765432   # optional; recommended for dev
 bunny:
   internal_url: "http://127.0.0.1:7681"
-  bridge_token: "same plaintext token as above"
+  bridge_token: "plaintext bridge token"
   public_url: "https://your-bunny-host.example.com"
 ```
 
-4. Run the bridge (alongside `bunny run`):
+Run the bridge alongside `bunny run`, or separately:
 
 ```bash
-cargo run -p bunny-discord-bridge
+bunny discord bridge
+# or: cargo run -p bunny-discord-bridge
 ```
 
-5. In the Web UI, open a session → **Discord** → enter password → **Generate code**, then in Discord: `/bunny link CODE`.
+**Docker on Mac:** [discord-docker-dev.md](discord-docker-dev.md).
 
-**Docker on Mac:** see [discord-docker-dev.md](discord-docker-dev.md) (`docker-compose.dev.yml` + `scripts/run-discord-bridge.sh`).
+## Link your Discord account (user)
+
+Each Bunny user links **their own** Discord identity once from the **home page** (`Discord account` card → **Connect Discord**). This is separate from linking a **channel** to a session (above).
+
+Requirements:
+
+1. OAuth configured on the agent (`bunny discord setup` includes OAuth, or set `config.yaml` fields below).
+2. Redirect URI registered in the [Discord Developer Portal](https://discord.com/developers/applications) → OAuth2:
+
+```text
+https://your-bunny-host.example.com/api/v1/auth/discord/callback
+```
+
+```yaml
+discord:
+  oauth_client_id: "<Discord Application ID>"
+  oauth_client_secret: "<OAuth client secret>"
+  oauth_redirect_uri: "https://your-bunny-host.example.com/api/v1/auth/discord/callback"
+```
+
+After linking, any session member can interact on **already linked Discord channels** without running `/bunny link` themselves. Actions are attributed to their Bunny account; permissions follow their **session role**:
+
+| Role | Discord capabilities |
+|------|----------------------|
+| **Viewer** | Thread discussion, watch links (read-only) |
+| **Editor** | Control threads, shell commands, Claude agents |
+| **Admin / Owner** | Above + **Approve / Deny** approval buttons |
+
+Typical team flow:
+
+1. Admin links the Discord **channel** to the session (`/bunny link` + link code).
+2. Admin invites teammates to the session (Editor or higher for control).
+3. Each teammate creates a Bunny account, opens the **home page**, and clicks **Connect Discord**.
+4. Teammates use the linked channel — no per-user `/bunny link` needed.
 
 ## Thread workflow (@mention)
 
@@ -56,16 +204,18 @@ In a linked channel, **@mention the bridge bot** with your task. The bot:
 
 1. Creates a **Discord thread** named from your message
 2. Opens a **dedicated shell** on the server (cwd = session `project_path`, or `/bunny project path:…`)
-3. Starts **Claude Code** interactively (auto-accepts the “trust this folder” prompt)
-4. Streams shell output into the thread
-5. Optional: creates a **git branch** per thread when the project cwd is a git repo
+3. Invokes **Claude Code headlessly** (`claude -p --output-format json`) and posts the response **directly in the thread**
+4. Optional: creates a **git branch** per thread when the project cwd is a git repo
 
 In the thread:
 
-- **Reply to the bot** or **@mention the bot** → input to Claude in that shell
+- **Reply to the bot** or **@mention the bot** → re-injects **Goal** (context) + thread history into the next `claude -p` call
 - Other messages → stored as discussion context for the next Claude input
-- **Goal!** / **Cancel** buttons → close shell; Cancel resets git to thread start when git was enabled
-- **⛔ / 🛑** reaction on your last bot-directed message → interrupt Claude
+- **Goal!** / **Cancel** buttons → close shell (tab disappears from Web UI); Cancel resets git to thread start when git was enabled
+- **⛔** reaction on your last input message → interrupt the running Claude subprocess
+- **AskUserQuestion**: if Claude needs a choice, the bot posts **buttons** in the thread; after click, `claude -p --resume` continues with your answers
+- `error_max_turns`: partial plan extracted from JSON if present
+- The `discord-*` shell in the Web UI shows the transcript `[discord] $ claude -p …` after each call (reload tab if needed)
 - `/bunny project` / `/bunny git` — see below
 
 Legacy `@bunny and claude …` mentions are removed.
@@ -92,6 +242,7 @@ Legacy `@bunny and claude …` mentions are removed.
 | `/bunny ask/plan` | Claude session with **context** (`claude -p --resume` per channel) — read/plan style prompts |
 | `/bunny do` | Claude agent with **context** (`--resume`) and auto-approved file edits (`acceptEdits`) — creates/updates files without stalling on the welcome screen |
 | `/bunny claude_reset` | Clear the stored `ask`/`plan` conversation id for this channel |
+| `/bunny language` | Set UI locale (`locale:fr` or `locale:en`; requires linked Bunny user) |
 | `/bunny stop` | Cancel task record (does not kill an in-flight `claude` process in tmux) |
 
 ## Watch links
@@ -106,16 +257,26 @@ Legacy `@bunny and claude …` mentions are removed.
 
 - **`ask` / `plan`**: each linked Discord channel keeps a Claude `session_id`. Follow-up prompts reuse context (`claude -p --resume`). Use `/bunny claude_reset` to start fresh.
 - **`do`**: same resume session as `ask`/`plan`, plus `--permission-mode acceptEdits` so landing pages and file writes complete in Discord without the interactive welcome screen. Follow up with another `/bunny do` on the same channel to continue the task.
-- **Autoriser / Refuser** buttons apply to risky shell commands and (legacy) tmux tool prompts; most `do` file edits do not need a button.
+- **Approve / Deny** buttons apply to risky shell commands and (legacy) tmux tool prompts; most `do` file edits do not need a button.
 - **Viewing whole files:** Discord chat is limited to ~2000 characters per message. Use **`/bunny file path:landing-page.html`** to receive the complete file as an attachment (open in browser or editor). For files larger than 24 MB or interactive viewing, use the **Web UI** terminal (`cat`, `less`, preview in browser).
 
 ## Security
 
 - Bridge uses `Authorization: Bearer` with hashed token stored in config
-- Shell/agent commands require Discord account linked to a Bunny user with Editor+ on the session
-- Tool approvals and risky shell commands require **DiscordApprove** (buttons or API)
+- Shell/agent commands require Discord account linked to a Bunny user (home page OAuth) with Editor+ on the session
+- Tool approvals and risky shell commands require **DiscordApprove** (Admin+; buttons or API)
 - All actions are written to `discord_audit_log`
 
-## OAuth
+## OAuth (admin setup)
 
-`GET /api/v1/auth/discord/start` redirects to Discord OAuth for identity; link the returned `discord_user_id` via `POST /api/v1/auth/discord/link` while logged in.
+`bunny discord setup` configures the **bot/bridge** and then prompts for **OAuth** (user account linking from the home page). You can skip OAuth with `--skip-oauth`, or configure OAuth only with `--oauth-only`.
+
+```bash
+bunny discord setup
+```
+
+Legacy alias (OAuth only): `bunny discord oauth-setup`.
+
+Or set `oauth_client_id`, `oauth_client_secret`, and `oauth_redirect_uri` in `~/.config/bunny/config.yaml` manually. Users then link from the Web UI home page; `GET /api/v1/auth/discord/start` requires a Bunny session cookie.
+
+During **`bunny configure`**, accepting Discord setup runs the same merged flow (bridge + optional OAuth).

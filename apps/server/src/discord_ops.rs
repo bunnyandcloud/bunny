@@ -17,6 +17,7 @@ use bunny_i18n::Locale;
 use bunny_discord::{AgentTaskMode, DiscordAuditEntry, DiscordSessionLink};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -30,7 +31,15 @@ pub fn human_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             "/sessions/:id/discord/links",
             get(list_discord_links).delete(revoke_discord_links),
         )
-        .route("/auth/discord/link", post(link_discord_user))
+        .route("/auth/discord/start", get(discord_oauth_start))
+        .route(
+            "/auth/discord/link",
+            post(link_discord_user).delete(unlink_discord_user),
+        )
+        .route("/discord/setup", get(discord_setup_status))
+        .route("/discord/setup/bot", post(discord_setup_bot))
+        .route("/discord/setup/oauth", post(discord_setup_oauth))
+        .route("/discord/setup/reload", post(discord_setup_reload))
         .with_state(state)
 }
 
@@ -87,12 +96,11 @@ pub fn public_watch_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 }
 
 pub fn verify_bridge_token(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    if !state.config.discord.enabled {
+    let cfg = effective_discord_config(state);
+    if !cfg.enabled {
         return Err(ApiError::forbidden("discord integration disabled"));
     }
-    let hash = state
-        .config
-        .discord
+    let hash = cfg
         .bridge_token_hash
         .as_deref()
         .ok_or_else(|| ApiError::forbidden("discord bridge not configured"))?;
@@ -1413,25 +1421,313 @@ async fn revoke_discord_links(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+pub fn discord_bridge_configured(state: &AppState) -> bool {
+    let cfg = effective_discord_config(state);
+    (cfg.enabled && cfg.bridge_token_hash.is_some()) || bridge_configured_on_disk()
+}
+
+pub fn discord_oauth_configured(state: &AppState) -> bool {
+    let cfg = effective_discord_config(state);
+    cfg.oauth_client_id.is_some() && cfg.oauth_client_secret.is_some()
+}
+
+fn setup_public_url(state: &AppState) -> String {
+    effective_discord_config(state)
+        .public_url
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| format!("http://127.0.0.1:{}", state.config.server.port))
+}
+
+fn setup_oauth_redirect_uri(state: &AppState) -> String {
+    let cfg = effective_discord_config(state);
+    cfg.oauth_redirect_uri
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}/api/v1/auth/discord/callback",
+                setup_public_url(state).trim_end_matches('/')
+            )
+        })
+}
+
+fn effective_discord_config(state: &AppState) -> bunny_core::config::DiscordConfig {
+    let path = crate::config_init::config_path();
+    if path.is_file() {
+        let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
+        if let Ok(cfg) = bunny_core::config::BunnyConfig::load(&paths) {
+            return cfg.discord;
+        }
+    }
+    state.config.discord.clone()
+}
+
+fn bridge_configured_on_disk() -> bool {
+    default_bridge_path().is_file()
+}
+
+fn looks_like_discord_application_id(token: &str) -> bool {
+    token.chars().all(|c| c.is_ascii_digit()) && token.len() >= 15
+}
+
+pub fn default_bridge_path() -> std::path::PathBuf {
+    if let Ok(env) = std::env::var("BUNNY_DISCORD_BRIDGE_CONFIG") {
+        if !env.trim().is_empty() {
+            return std::path::PathBuf::from(env);
+        }
+    }
+    if let Some(root) = crate::web_ui::find_repo_root() {
+        return root.join(".discord/bridge.yaml");
+    }
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join(".discord/bridge.yaml")
+}
+
+fn ensure_discord_setup_owner(state: &AppState, user_id: Uuid) -> Result<(), ApiError> {
+    let owner = state
+        .auth
+        .owner_id()
+        .map_err(|_| ApiError::forbidden("permission denied"))?;
+    if user_id == owner {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("permission denied"))
+    }
+}
+
+#[derive(Serialize)]
+pub struct DiscordSetupStatus {
+    pub bridge_configured: bool,
+    pub oauth_configured: bool,
+    pub public_url: String,
+    pub oauth_redirect_uri: String,
+    pub application_id: Option<String>,
+    pub guild_id: Option<String>,
+    pub bridge_path: String,
+}
+
+async fn discord_setup_status(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<DiscordSetupStatus>, ApiError> {
+    ensure_discord_setup_owner(&state, user)?;
+    let bridge_path = default_bridge_path();
+    let application_id = crate::config_init::read_bridge_application_id(&bridge_path)
+        .map(|id| id.to_string());
+    let guild_id = crate::config_init::read_bridge_guild_id(&bridge_path).map(|id| id.to_string());
+    Ok(Json(DiscordSetupStatus {
+        bridge_configured: {
+            let cfg = effective_discord_config(&state);
+            (cfg.enabled && cfg.bridge_token_hash.is_some()) || bridge_configured_on_disk()
+        },
+        oauth_configured: {
+            let cfg = effective_discord_config(&state);
+            cfg.oauth_client_id.is_some() && cfg.oauth_client_secret.is_some()
+        },
+        public_url: setup_public_url(&state),
+        oauth_redirect_uri: setup_oauth_redirect_uri(&state),
+        application_id,
+        guild_id,
+        bridge_path: bridge_path.display().to_string(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct DiscordSetupBotRequest {
+    application_id: u64,
+    bot_token: String,
+    guild_id: Option<u64>,
+    public_url: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DiscordSetupBotResponse {
+    ok: bool,
+    bridge_path: String,
+    public_url: String,
+    oauth_redirect_uri: String,
+    bridge_running: bool,
+}
+
+async fn discord_setup_bot(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<DiscordSetupBotRequest>,
+) -> Result<Json<DiscordSetupBotResponse>, ApiError> {
+    ensure_discord_setup_owner(&state, user)?;
+    let token = body.bot_token.trim();
+    if token.is_empty() {
+        return Err(ApiError::validation("bot token is required"));
+    }
+    if body.application_id == 0 {
+        return Err(ApiError::validation("application id is required"));
+    }
+    if looks_like_discord_application_id(token) {
+        return Err(ApiError::validation(
+            "this looks like an Application ID — use Bot → Token in the Discord Developer Portal (Reset Token → Copy)",
+        ));
+    }
+    let public_url = body
+        .public_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| setup_public_url(&state));
+    if !public_url.starts_with("http://") && !public_url.starts_with("https://") {
+        return Err(ApiError::validation("public URL must start with http:// or https://"));
+    }
+    let (plain, hash) = crate::config_init::generate_bridge_credentials();
+    crate::config_init::apply_discord_to_config(&hash, &public_url)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let bridge_path = default_bridge_path();
+    let internal_url = format!("http://127.0.0.1:{}", state.config.server.port);
+    crate::config_init::write_bridge_dev_file(
+        &bridge_path,
+        body.application_id,
+        token,
+        &plain,
+        &internal_url,
+        &public_url,
+        body.guild_id,
+    )
+    .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let oauth_redirect_uri = format!("{public_url}/api/v1/auth/discord/callback");
+    let bridge_reload = crate::discord_bridge::restart_managed(&state)
+        .await
+        .ok()
+        .map(|r| r.bridge_running)
+        .unwrap_or(false);
+    Ok(Json(DiscordSetupBotResponse {
+        ok: true,
+        bridge_path: bridge_path.display().to_string(),
+        public_url,
+        oauth_redirect_uri,
+        bridge_running: bridge_reload,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DiscordSetupOAuthRequest {
+    oauth_client_secret: String,
+    oauth_client_id: Option<String>,
+    oauth_redirect_uri: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DiscordSetupOAuthResponse {
+    ok: bool,
+    oauth_redirect_uri: String,
+}
+
+async fn discord_setup_oauth(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Json(body): Json<DiscordSetupOAuthRequest>,
+) -> Result<Json<DiscordSetupOAuthResponse>, ApiError> {
+    ensure_discord_setup_owner(&state, user)?;
+    let secret = body.oauth_client_secret.trim();
+    if secret.is_empty() {
+        return Err(ApiError::validation("oauth client secret is required"));
+    }
+    let bridge_path = default_bridge_path();
+    let app_id_hint = crate::config_init::read_bridge_application_id(&bridge_path)
+        .map(|id| id.to_string());
+    let client_id = body
+        .oauth_client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or(app_id_hint)
+        .ok_or_else(|| ApiError::validation("oauth client id is required (configure bot first)"))?;
+    let redirect = body
+        .oauth_redirect_uri
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| setup_oauth_redirect_uri(&state));
+    crate::config_init::apply_oauth_to_config(&client_id, secret, &redirect)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(DiscordSetupOAuthResponse {
+        ok: true,
+        oauth_redirect_uri: redirect,
+    }))
+}
+
+async fn discord_setup_reload(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<crate::discord_bridge::DiscordBridgeReloadResponse>, ApiError> {
+    ensure_discord_setup_owner(&state, user)?;
+    crate::discord_bridge::restart_managed(&state)
+        .await
+        .map(Json)
+        .map_err(|e| ApiError::validation(&e.to_string()))
+}
+
+#[derive(Serialize)]
+pub struct DiscordAccountStatus {
+    pub bridge_configured: bool,
+    pub oauth_configured: bool,
+    pub linked: bool,
+    pub discord_user_id: Option<String>,
+    pub username: Option<String>,
+}
+
+pub fn discord_account_status(state: &AppState, user_id: Uuid) -> DiscordAccountStatus {
+    let bridge_configured = discord_bridge_configured(state);
+    let oauth_configured = discord_oauth_configured(state);
+    let link = state
+        .discord
+        .lock()
+        .get_discord_link_for_user(user_id)
+        .ok()
+        .flatten();
+    let (linked, discord_user_id, username) = match link {
+        Some(l) => {
+            let display = l
+                .discord_global_name
+                .or(l.discord_username)
+                .or_else(|| Some(l.discord_user_id.chars().take(8).collect()));
+            (true, Some(l.discord_user_id), display)
+        }
+        None => (false, None, None),
+    };
+    DiscordAccountStatus {
+        bridge_configured,
+        oauth_configured,
+        linked,
+        discord_user_id,
+        username,
+    }
+}
+
 pub async fn discord_oauth_start(
     State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    headers: HeaderMap,
 ) -> Result<RedirectResponse, ApiError> {
-    let client_id = state
-        .config
-        .discord
+    if !discord_oauth_configured(&state) {
+        return Err(ApiError::validation("discord oauth not configured"));
+    }
+    let cfg = effective_discord_config(&state);
+    let client_id = cfg
         .oauth_client_id
         .as_deref()
         .ok_or_else(|| ApiError::validation("discord oauth not configured"))?;
-    let redirect = state
-        .config
-        .discord
-        .oauth_redirect_uri
-        .clone()
-        .unwrap_or_else(|| "/api/v1/auth/discord/callback".into());
+    let redirect = oauth_redirect_uri(&state);
+    let return_origin = oauth_return_origin(&headers, &state);
+    let exp = Utc::now().timestamp() + 600;
+    let state_param = sign_oauth_state(&state, user, exp, &return_origin)?;
     let url = format!(
-        "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify%20guilds.members.read",
+        "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify%20guilds.members.read&state={}",
         client_id,
-        urlencoding::encode(&redirect)
+        urlencoding::encode(&redirect),
+        urlencoding::encode(&state_param),
     );
     Ok(RedirectResponse(url))
 }
@@ -1447,42 +1743,161 @@ impl IntoResponse for RedirectResponse {
 #[derive(Deserialize)]
 pub struct OAuthCallbackQuery {
     pub code: Option<String>,
-    #[allow(dead_code)]
     pub state: Option<String>,
+    pub error: Option<String>,
 }
 
 pub async fn discord_oauth_callback(
     State(state): State<Arc<AppState>>,
     Query(q): Query<OAuthCallbackQuery>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
+    if q.error.is_some() {
+        return Ok(oauth_ui_redirect("error", &setup_public_url(&state)));
+    }
     let code = q.code.ok_or_else(|| ApiError::validation("missing code"))?;
+    let state_param = q
+        .state
+        .ok_or_else(|| ApiError::validation("missing state"))?;
+    let (bunny_user_id, return_origin) = verify_oauth_state(&state, &state_param)
+        .map_err(|_| ApiError::validation("invalid oauth state"))?;
     let token = exchange_discord_code(&state, &code).await?;
-    let discord_user_id = fetch_discord_user_id(&token).await?;
-    Ok(Json(serde_json::json!({
-        "discord_user_id": discord_user_id,
-        "message": "Link your Bunny account from profile settings with this Discord id",
-    })))
+    let profile = fetch_discord_profile(&token).await?;
+    if let Some(existing) = state
+        .discord
+        .lock()
+        .get_bunny_user_for_discord(&profile.id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+    {
+        if existing != bunny_user_id {
+            return Ok(oauth_ui_redirect("conflict", &return_origin));
+        }
+    }
+    state
+        .discord
+        .lock()
+        .link_discord_user_profile(
+            &profile.id,
+            bunny_user_id,
+            profile.username.as_deref(),
+            profile.global_name.as_deref(),
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(oauth_ui_redirect("success", &return_origin))
+}
+
+fn oauth_ui_redirect(outcome: &str, return_origin: &str) -> axum::response::Response {
+    let base = return_origin.trim_end_matches('/');
+    axum::response::Redirect::temporary(&format!("{base}/?discord_link={outcome}")).into_response()
+}
+
+fn oauth_return_origin(headers: &HeaderMap, state: &AppState) -> String {
+    if let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+    {
+        let scheme = headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| *s == "http" || *s == "https")
+            .unwrap_or("http");
+        return format!("{scheme}://{host}");
+    }
+    setup_public_url(state)
+}
+
+fn validate_return_origin(origin: &str) -> Result<(), ApiError> {
+    let origin = origin.trim();
+    if origin.is_empty() || origin.len() > 256 {
+        return Err(ApiError::validation("invalid return origin"));
+    }
+    if !origin.starts_with("http://") && !origin.starts_with("https://") {
+        return Err(ApiError::validation("invalid return origin"));
+    }
+    if origin.contains(['\n', '\r', '@']) {
+        return Err(ApiError::validation("invalid return origin"));
+    }
+    Ok(())
+}
+
+fn oauth_redirect_uri(state: &AppState) -> String {
+    setup_oauth_redirect_uri(state)
+}
+
+fn oauth_signing_key(state: &AppState) -> String {
+    effective_discord_config(state)
+        .bridge_token_hash
+        .unwrap_or_else(|| format!("bunny-oauth:{}", state.data_dir))
+}
+
+fn sign_oauth_state(
+    state: &AppState,
+    user_id: Uuid,
+    exp: i64,
+    return_origin: &str,
+) -> Result<String, ApiError> {
+    validate_return_origin(return_origin)?;
+    let return_origin = return_origin.trim_end_matches('/');
+    let payload = format!("{user_id}|{exp}|{return_origin}");
+    let sig = oauth_signature(&oauth_signing_key(state), &payload);
+    Ok(format!("{payload}.{sig}"))
+}
+
+fn verify_oauth_state(state: &AppState, token: &str) -> Result<(Uuid, String), ApiError> {
+    let (payload, sig) = token
+        .rsplit_once('.')
+        .ok_or_else(|| ApiError::validation("malformed state"))?;
+    let mut parts = payload.splitn(3, '|');
+    let user_id = parts
+        .next()
+        .ok_or_else(|| ApiError::validation("malformed state"))?;
+    let exp = parts
+        .next()
+        .ok_or_else(|| ApiError::validation("malformed state"))?
+        .parse::<i64>()
+        .map_err(|_| ApiError::validation("malformed state"))?;
+    let return_origin = parts
+        .next()
+        .ok_or_else(|| ApiError::validation("malformed state"))?
+        .to_string();
+    validate_return_origin(&return_origin)?;
+    if Utc::now().timestamp() > exp {
+        return Err(ApiError::validation("oauth state expired"));
+    }
+    let expected = oauth_signature(&oauth_signing_key(state), payload);
+    if sig != expected {
+        return Err(ApiError::validation("invalid oauth signature"));
+    }
+    let user_id = Uuid::parse_str(user_id).map_err(|_| ApiError::validation("invalid user in state"))?;
+    Ok((user_id, return_origin))
+}
+
+fn oauth_signature(key: &str, payload: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    hasher.update(payload.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+struct DiscordOAuthProfile {
+    id: String,
+    username: Option<String>,
+    global_name: Option<String>,
 }
 
 async fn exchange_discord_code(state: &AppState, code: &str) -> Result<String, ApiError> {
-    let client_id = state
-        .config
-        .discord
+    let cfg = effective_discord_config(state);
+    let client_id = cfg
         .oauth_client_id
         .as_deref()
         .ok_or_else(|| ApiError::validation("oauth not configured"))?;
-    let client_secret = state
-        .config
-        .discord
+    let client_secret = cfg
         .oauth_client_secret
         .as_deref()
         .ok_or_else(|| ApiError::validation("oauth not configured"))?;
-    let redirect = state
-        .config
-        .discord
-        .oauth_redirect_uri
-        .clone()
-        .unwrap_or_else(|| "/api/v1/auth/discord/callback".into());
+    let redirect = oauth_redirect_uri(state);
     let client = reqwest::Client::new();
     let res = client
         .post("https://discord.com/api/oauth2/token")
@@ -1506,7 +1921,7 @@ async fn exchange_discord_code(state: &AppState, code: &str) -> Result<String, A
         .ok_or_else(|| ApiError::validation("no access token"))
 }
 
-async fn fetch_discord_user_id(token: &str) -> Result<String, ApiError> {
+async fn fetch_discord_profile(token: &str) -> Result<DiscordOAuthProfile, ApiError> {
     let client = reqwest::Client::new();
     let res = client
         .get("https://discord.com/api/users/@me")
@@ -1518,10 +1933,37 @@ async fn fetch_discord_user_id(token: &str) -> Result<String, ApiError> {
         .json()
         .await
         .map_err(|e| ApiError::validation(&e.to_string()))?;
-    json.get("id")
+    let id = json
+        .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| ApiError::validation("no user id"))
+        .ok_or_else(|| ApiError::validation("no user id"))?;
+    Ok(DiscordOAuthProfile {
+        id,
+        username: json
+            .get("username")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        global_name: json
+            .get("global_name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+    })
+}
+
+async fn unlink_discord_user(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let removed = state
+        .discord
+        .lock()
+        .unlink_discord_user(user)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    if !removed {
+        return Err(ApiError::not_found("discord account not linked"));
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 pub(crate) fn resolve_link(state: &AppState, ctx: &BridgeContext) -> Result<DiscordSessionLink, ApiError> {

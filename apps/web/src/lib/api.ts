@@ -98,32 +98,87 @@ export function verifyMfa(
   });
 }
 
+export type DiscordAccountStatus = {
+  bridge_configured: boolean;
+  oauth_configured: boolean;
+  linked: boolean;
+  discord_user_id: string | null;
+  username: string | null;
+};
+
+export type MeProfile = {
+  user_id: string;
+  email: string;
+  is_owner: boolean;
+  mfa_enabled: boolean;
+  can_install_claude: boolean;
+  can_manage_vault: boolean;
+  can_create_sessions: boolean;
+  default_session_role: string;
+  locale: string;
+  discord: DiscordAccountStatus;
+};
+
 export function me() {
+  return api<MeProfile>('/auth/me');
+}
+
+export function unlinkDiscordAccount() {
+  return api<{ ok: boolean }>('/auth/discord/link', { method: 'DELETE' });
+}
+
+export type DiscordSetupStatus = {
+  bridge_configured: boolean;
+  oauth_configured: boolean;
+  public_url: string;
+  oauth_redirect_uri: string;
+  application_id: string | null;
+  guild_id: string | null;
+  bridge_path: string;
+};
+
+export function getDiscordSetupStatus() {
+  return api<DiscordSetupStatus>('/discord/setup');
+}
+
+export function setupDiscordBot(body: {
+  application_id: number;
+  bot_token: string;
+  guild_id?: number;
+  public_url?: string;
+}) {
   return api<{
-    user_id: string;
-    email: string;
-    is_owner: boolean;
-    mfa_enabled: boolean;
-    can_install_claude: boolean;
-    can_manage_vault: boolean;
-    can_create_sessions: boolean;
-    default_session_role: string;
-    locale: string;
-  }>('/auth/me');
+    ok: boolean;
+    bridge_path: string;
+    public_url: string;
+    oauth_redirect_uri: string;
+    bridge_running: boolean;
+  }>('/discord/setup/bot', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function setupDiscordOAuth(body: {
+  oauth_client_secret: string;
+  oauth_client_id?: string;
+  oauth_redirect_uri?: string;
+}) {
+  return api<{ ok: boolean; oauth_redirect_uri: string }>('/discord/setup/oauth', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function reloadDiscordBridge() {
+  return api<{ ok: boolean; bridge_running: boolean; bridge_path: string }>(
+    '/discord/setup/reload',
+    { method: 'POST' },
+  );
 }
 
 export function updateLocale(locale: 'en' | 'fr') {
-  return api<{
-    user_id: string;
-    email: string;
-    is_owner: boolean;
-    mfa_enabled: boolean;
-    can_install_claude: boolean;
-    can_manage_vault: boolean;
-    can_create_sessions: boolean;
-    default_session_role: string;
-    locale: string;
-  }>('/auth/me', {
+  return api<MeProfile>('/auth/me', {
     method: 'PATCH',
     body: JSON.stringify({ locale }),
   });
@@ -616,6 +671,8 @@ export function browserNovncUrl(browserId: string, opts?: { viewOnly?: boolean }
     params.set('view_only', '1');
     params.set('show_dot', '1');
     params.set('bunny_lock', 'readonly');
+  } else {
+    params.set('bunny_lock', 'interactive');
   }
   return `/api/v1/browser-sessions/${browserId}/vnc/vnc.html?${params}`;
 }

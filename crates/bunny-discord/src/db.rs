@@ -1,6 +1,6 @@
 use crate::models::{
     AgentTask, AgentTaskMode, AgentTaskStatus, ApprovalRequest, AskUserQuestionItem,
-    DiscordAuditEntry, DiscordFollow, DiscordSessionLink,
+    DiscordAuditEntry, DiscordFollow, DiscordSessionLink, DiscordUserLink,
     DiscordThreadBinding, DiscordThreadDiscussion, DiscordThreadMessage, DiscordThreadMessageRole,
     DiscordThreadPendingQuestions, DiscordThreadStatus, WatchSession,
 };
@@ -156,6 +156,18 @@ impl DiscordDb {
         );
         let _ = self.conn.execute(
             "ALTER TABLE discord_thread_bindings ADD COLUMN term_id TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_user_links ADD COLUMN discord_username TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE discord_user_links ADD COLUMN discord_global_name TEXT",
+            [],
+        );
+        let _ = self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_discord_user_links_user ON discord_user_links(user_id)",
             [],
         );
         for col in [
@@ -372,12 +384,52 @@ impl DiscordDb {
     }
 
     pub fn link_discord_user(&self, discord_user_id: &str, user_id: Uuid) -> Result<()> {
+        self.link_discord_user_profile(discord_user_id, user_id, None, None)
+    }
+
+    pub fn link_discord_user_profile(
+        &self,
+        discord_user_id: &str,
+        user_id: Uuid,
+        discord_username: Option<&str>,
+        discord_global_name: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
-            r#"INSERT INTO discord_user_links (discord_user_id, user_id, created_at) VALUES (?1,?2,?3)
-               ON CONFLICT(discord_user_id) DO UPDATE SET user_id=excluded.user_id"#,
-            params![discord_user_id, user_id.to_string(), Utc::now().to_rfc3339()],
+            r#"INSERT INTO discord_user_links (discord_user_id, user_id, discord_username, discord_global_name, created_at)
+               VALUES (?1,?2,?3,?4,?5)
+               ON CONFLICT(discord_user_id) DO UPDATE SET
+                 user_id=excluded.user_id,
+                 discord_username=COALESCE(excluded.discord_username, discord_user_links.discord_username),
+                 discord_global_name=COALESCE(excluded.discord_global_name, discord_user_links.discord_global_name)"#,
+            params![
+                discord_user_id,
+                user_id.to_string(),
+                discord_username,
+                discord_global_name,
+                Utc::now().to_rfc3339(),
+            ],
         )?;
         Ok(())
+    }
+
+    pub fn get_discord_link_for_user(&self, user_id: Uuid) -> Result<Option<DiscordUserLink>> {
+        self.conn
+            .query_row(
+                "SELECT discord_user_id, user_id, discord_username, discord_global_name, created_at
+                 FROM discord_user_links WHERE user_id = ?1 LIMIT 1",
+                params![user_id.to_string()],
+                map_discord_user_link_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn unlink_discord_user(&self, user_id: Uuid) -> Result<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM discord_user_links WHERE user_id = ?1",
+            params![user_id.to_string()],
+        )?;
+        Ok(n > 0)
     }
 
     pub fn get_bunny_user_for_discord(&self, discord_user_id: &str) -> Result<Option<Uuid>> {
@@ -1127,6 +1179,17 @@ fn map_thread_binding_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordThre
         last_input_discord_message_id: r.get(15)?,
         claude_session_id: r.get::<_, Option<String>>(16).ok().flatten(),
         created_at: parse_ts(&r.get::<_, String>(17)?),
+    })
+}
+
+fn map_discord_user_link_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordUserLink> {
+    Ok(DiscordUserLink {
+        discord_user_id: r.get(0)?,
+        user_id: Uuid::parse_str(&r.get::<_, String>(1)?)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+        discord_username: r.get(2)?,
+        discord_global_name: r.get(3)?,
+        created_at: parse_ts(&r.get::<_, String>(4)?),
     })
 }
 

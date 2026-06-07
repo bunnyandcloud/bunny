@@ -1,119 +1,119 @@
-# Amélioration : enforcement read-only noVNC côté serveur
+# Improvement: server-side read-only noVNC enforcement
 
-**Statut :** piste future (v1 acceptée côté client)  
-**Contexte :** liens watch Discord (`/watch/:token`), onglet Stream read-only Web UI  
-**Implémentation actuelle :** `apps/server/src/novnc_proxy.rs` (`NovncEmbedLock`, paramètre `bunny_lock`)
+**Status:** future track (v1 accepted on client)  
+**Context:** Discord watch links (`/watch/:token`), Web UI Stream tab (read-only)  
+**Current implementation:** `apps/server/src/novnc_proxy.rs` (`NovncEmbedLock`, `bunny_lock` parameter)
 
 ---
 
-## Comportement actuel (v1)
+## Current behavior (v1)
 
-Pour distinguer **interactif** et **read-only**, le serveur sert une page `vnc.html` modifiée :
+To distinguish **interactive** and **read-only**, the server serves a modified `vnc.html` page:
 
-| Mode | Mécanisme |
+| Mode | Mechanism |
 |------|-----------|
-| **Interactif** | Script injecté : `localStorage.view_only = false`, case « Afficher uniquement » décochée au chargement |
-| **Read-only** | Panneau Settings noVNC masqué (CSS), `localStorage.view_only = true`, case cochée + `disabled` + revert au `change` |
+| **Interactive** | Injected script: `localStorage.view_only = false`, "View Only" checkbox unchecked on load |
+| **Read-only** | noVNC Settings panel hidden (CSS), `localStorage.view_only = true`, checkbox checked + `disabled` + revert on `change` |
 
-Sur les liens **watch**, le mode est dérivé de `watch.mode` en base (`interactive` vs `read_only`) — le query param `bunny_lock` envoyé par le client n’est **pas** la source de vérité pour `/watch/:token/vnc/vnc.html`.
+On **watch** links, mode is derived from `watch.mode` in the database (`interactive` vs `read_only`) — the client `bunny_lock` query param is **not** the source of truth for `/watch/:token/vnc/vnc.html`.
 
-Cela corrige les cas utilisateur observés :
+This fixes observed user issues:
 
-1. **Interactif bloqué** — noVNC mémorise `view_only` dans le `localStorage` ; une session read-only précédente laissait « Afficher uniquement » coché.
-2. **Read-only contournable** — un spectateur pouvait ouvrir Settings noVNC et décocher « Afficher uniquement ».
+1. **Interactive blocked** — noVNC persists `view_only` in `localStorage`; a previous read-only session left "View Only" checked.
+2. **Read-only bypassable** — a viewer could open noVNC Settings and uncheck "View Only".
 
 ---
 
-## Limite de sécurité (pourquoi une amélioration est nécessaire)
+## Security limitation (why an improvement is needed)
 
-Le verrouillage v1 est **uniquement côté client noVNC** (HTML/JS injecté + UI masquée). Il ne contrôle pas ce qui transite sur le WebSocket VNC.
+v1 locking is **noVNC client-side only** (injected HTML/JS + hidden UI). It does not control what travels over the VNC WebSocket.
 
-Un utilisateur déterminé peut contourner la v1 en :
+A determined user can bypass v1 by:
 
-- modifiant le `localStorage` ou le DOM via les outils développeur ;
-- chargeant une autre page noVNC (fichiers statiques non verrouillés) pointant vers le même WebSocket ;
-- envoyant des trames RFB (pointeur / clavier) avec un client VNC custom, tant qu’il possède l’URL WebSocket et le token watch valide.
+- modifying `localStorage` or the DOM via devtools;
+- loading another noVNC page (unlocked static files) pointing at the same WebSocket;
+- sending RFB frames (pointer / keyboard) with a custom VNC client, as long as they have the WebSocket URL and a valid watch token.
 
-Aujourd’hui, le proxy WebSocket (`apps/server/src/ws.rs`, `handle_novnc_proxy`) relaie **tous** les messages client → upstream sans inspection du protocole RFB :
+Today, the WebSocket proxy (`apps/server/src/ws.rs`, `handle_novnc_proxy`) relays **all** client → upstream messages without RFB protocol inspection:
 
 ```text
-noVNC (navigateur)  ↔  bunny-server (proxy)  ↔  websockify  ↔  x11vnc  ↔  Chromium
+noVNC (browser)  ↔  bunny-server (proxy)  ↔  websockify  ↔  x11vnc  ↔  Chromium
 ```
 
-x11vnc est démarré en mode **partagé** (`-shared`, sans `-viewonly`) pour permettre à la fois le contrôle depuis la Web UI (onglet Interactif) et la diffusion read-only sur le **même** stack navigateur par session.
+x11vnc starts in **shared** mode (`-shared`, without `-viewonly`) so both Web UI control (Interactive tab) and read-only streaming work on the **same** browser stack per session.
 
-**Modèle de confiance v1 :** read-only = confiance raisonnable pour un spectateur casual ; **pas** une barrière cryptographique ou protocole contre un attaquant avec accès au lien watch et compétences techniques.
-
----
-
-## Objectif de l’amélioration
-
-Garantir que le mode **read-only** ne transmet **aucun** événement pointeur/clavier au desktop, indépendamment du client noVNC ou du `localStorage`, tout en conservant le mode **interactif** pour les liens `interactive:true` et l’onglet Interactif authentifié.
+**v1 trust model:** read-only = reasonable trust for a casual viewer; **not** a cryptographic or protocol barrier against an attacker with the watch link and technical skills.
 
 ---
 
-## Pistes d’implémentation
+## Improvement goal
 
-### 1. Filtrage RFB dans le proxy WebSocket bunny-server (recommandé)
-
-Intercepter le flux **client → upstream** dans `handle_novnc_proxy` (ou variante watch / browser avec contexte de mode).
-
-- Parser les trames RFB binaires (types 5 PointerEvent, 4 KeyEvent, etc.).
-- En contexte **read-only** : dropper les messages d’entrée, laisser passer framebuffer / encodings / keepalive.
-- En contexte **interactif** : relayer sans filtre.
-
-**Avantages :** un seul stack x11vnc par session ; enforcement indépendant du client.  
-**Inconvénients :** maintenance d’un parseur RFB minimal ; tests sur encodings / versions noVNC.
-
-Paramètres de route :
-
-- Watch : mode depuis `watch.mode` (déjà résolu côté HTTP).
-- Browser authentifié : flag explicite sur `/browser-sessions/:id/vnc/ws` (Stream = read-only, Interactif = full).
-
-### 2. Deux instances x11vnc ou bascule `-viewonly`
-
-- **Option A :** second port VNC read-only avec `x11vnc -viewonly` pour watch / Stream ; port interactif sans `-viewonly` pour l’UI éditeur.
-- **Option B :** redémarrer ou reconfigurer x11vnc au changement de mode (plus fragile, latence).
-
-**Avantages :** enforcement au niveau serveur VNC, pas de parseur RFB dans bunny.  
-**Inconvénients :** complexité stack, ports supplémentaires, coordination lifecycle.
-
-### 3. Restreindre l’accès aux assets noVNC non verrouillés
-
-Servir **uniquement** `vnc.html` verrouillé sur les routes publiques watch ; refuser ou ne pas exposer les autres fichiers statiques noVNC sans auth.
-
-Réduit le contournement « autre page noVNC », mais **ne suffit pas** seul (client VNC custom + WS).
-
-### 4. Tokens watch à capacités séparées
-
-JWT ou claims sur le token watch : `capabilities: ["view"]` vs `["view", "input"]`. Le proxy WS refuse les trames d’entrée si `input` absent — même approche que (1), avec modèle d’auth explicite.
+Ensure **read-only** mode transmits **no** pointer/keyboard events to the desktop, regardless of noVNC client or `localStorage`, while keeping **interactive** mode for `interactive:true` links and the authenticated Interactive tab.
 
 ---
 
-## Critères d’acceptation (future)
+## Implementation options
 
-1. Lien watch **sans** `interactive:true` : clic, scroll souris, clavier **n’ont aucun effet** sur Chromium, même après manipulation du DOM / localStorage / client alternatif.
-2. Lien watch **`interactive:true`** : interaction complète sans régression.
-3. Web UI : onglet **Stream** read-only verrouillé ; onglet **Interactif** inchangé.
-4. Tests automatisés ou manuels documentés : au minimum une checklist RFB (pointer + key dropped en read-only).
+### 1. RFB filtering in bunny-server WebSocket proxy (recommended)
+
+Intercept the **client → upstream** stream in `handle_novnc_proxy` (or watch / browser variant with mode context).
+
+- Parse binary RFB frames (type 5 PointerEvent, 4 KeyEvent, etc.).
+- In **read-only** context: drop input messages; pass framebuffer / encodings / keepalive.
+- In **interactive** context: relay without filter.
+
+**Pros:** single x11vnc stack per session; enforcement independent of client.  
+**Cons:** maintain a minimal RFB parser; test across noVNC encodings / versions.
+
+Route parameters:
+
+- Watch: mode from `watch.mode` (already resolved on HTTP).
+- Authenticated browser: explicit flag on `/browser-sessions/:id/vnc/ws` (Stream = read-only, Interactive = full).
+
+### 2. Two x11vnc instances or `-viewonly` toggle
+
+- **Option A:** second read-only VNC port with `x11vnc -viewonly` for watch / Stream; interactive port without `-viewonly` for the editor UI.
+- **Option B:** restart or reconfigure x11vnc on mode change (more fragile, latency).
+
+**Pros:** enforcement at VNC server level, no RFB parser in bunny.  
+**Cons:** stack complexity, extra ports, lifecycle coordination.
+
+### 3. Restrict access to unlocked noVNC assets
+
+Serve **only** locked `vnc.html` on public watch routes; deny or do not expose other noVNC static files without auth.
+
+Reduces "alternate noVNC page" bypass, but **not sufficient** alone (custom VNC client + WS).
+
+### 4. Separate watch token capabilities
+
+JWT or claims on watch token: `capabilities: ["view"]` vs `["view", "input"]`. WS proxy refuses input frames when `input` is absent — same approach as (1), with explicit auth model.
 
 ---
 
-## Fichiers concernés (implémentation future)
+## Acceptance criteria (future)
 
-| Fichier | Rôle |
-|---------|------|
-| `apps/server/src/ws.rs` | Proxy WebSocket bidirectionnel — point d’injection filtrage RFB |
-| `apps/server/src/watch.rs` | Résolution `watch.mode` → contexte read-only sur WS |
-| `apps/server/src/novnc_proxy.rs` | Verrouillage HTML v1 (peut rester en défense en profondeur UI) |
-| `apps/server/src/api.rs` | Route `browser_novnc_ws` — distinguer Stream vs Interactif |
-| `crates/bunny-browser/src/stack.rs` | Optionnel : second VNC / `-viewonly` |
-| `docs/integrations/discord.md` | Mettre à jour la doc sécurité une fois l’enforcement serveur livré |
+1. Watch link **without** `interactive:true`: mouse click, scroll, keyboard **have no effect** on Chromium, even after DOM / localStorage / alternate client manipulation.
+2. Watch link **`interactive:true`**: full interaction without regression.
+3. Web UI: **Stream** tab read-only locked; **Interactive** tab unchanged.
+4. Automated or documented manual tests: at minimum an RFB checklist (pointer + key dropped in read-only).
 
 ---
 
-## Références
+## Files involved (future implementation)
 
-- noVNC `view_only` : option **client** ; ne sécurise pas le protocole.
-- RFB 3.8 : [RFC 6143](https://www.rfc-editor.org/rfc/rfc6143) — types de messages PointerEvent (5), KeyEvent (4).
-- Issue / discussion interne : contournement Settings noVNC signalé en test manuel watch Discord (2025).
+| File | Role |
+|------|------|
+| `apps/server/src/ws.rs` | Bidirectional WebSocket proxy — RFB filter injection point |
+| `apps/server/src/watch.rs` | Resolve `watch.mode` → read-only context on WS |
+| `apps/server/src/novnc_proxy.rs` | HTML v1 lock (can remain as UI defense in depth) |
+| `apps/server/src/api.rs` | `browser_novnc_ws` route — distinguish Stream vs Interactive |
+| `crates/bunny-browser/src/stack.rs` | Optional: second VNC / `-viewonly` |
+| `docs/integrations/discord.md` | Update security doc once server enforcement ships |
+
+---
+
+## References
+
+- noVNC `view_only`: **client** option; does not secure the protocol.
+- RFB 3.8: [RFC 6143](https://www.rfc-editor.org/rfc/rfc6143) — PointerEvent (5), KeyEvent (4) message types.
+- Internal issue: noVNC Settings bypass reported during manual Discord watch testing (2025).

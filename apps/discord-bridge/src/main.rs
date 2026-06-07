@@ -567,7 +567,7 @@ impl EventHandler for Handler {
                     )),
                 ),
         ];
-        if let Err(e) = register_slash_commands(&ctx, self.dev_guild_id, commands).await {
+        if let Err(e) = register_slash_commands(&ctx, &ready, self.dev_guild_id, commands).await {
             tracing::error!("register commands: {e}");
         }
     }
@@ -1807,6 +1807,7 @@ fn opt_integer(opts: &[serenity::all::CommandDataOption], name: &str) -> Option<
 
 async fn register_slash_commands(
     ctx: &Context,
+    ready: &Ready,
     dev_guild_id: Option<u64>,
     commands: Vec<CreateCommand>,
 ) -> serenity::Result<()> {
@@ -1823,12 +1824,43 @@ async fn register_slash_commands(
             "registered guild slash commands (visible immediately in this server)"
         );
     } else {
+        let cleared_guilds = clear_guild_slash_commands(ctx, ready, None).await?;
+        if cleared_guilds > 0 {
+            tracing::info!(
+                cleared_guilds,
+                "removed stale guild slash commands (avoids duplicate /bunny entries with global registration)"
+            );
+        }
         Command::set_global_commands(&ctx.http, commands).await?;
         tracing::info!(
-            "registered global slash commands — Discord clients may take up to 1 hour to refresh; set discord.guild_id in bridge config for instant dev updates"
+            "registered global slash commands — set discord.guild_id in bridge config for instant dev updates"
         );
     }
     Ok(())
+}
+
+/// Remove guild-scoped slash commands so they do not stack with global `/bunny` in Discord autocomplete.
+async fn clear_guild_slash_commands(
+    ctx: &Context,
+    ready: &Ready,
+    except_guild_id: Option<u64>,
+) -> serenity::Result<usize> {
+    let mut cleared = 0usize;
+    for guild in &ready.guilds {
+        let id = guild.id.get();
+        if except_guild_id == Some(id) {
+            continue;
+        }
+        let guild_id = GuildId::new(id);
+        let existing = guild_id.get_commands(&ctx.http).await.unwrap_or_default();
+        if existing.is_empty() {
+            continue;
+        }
+        guild_id.set_commands(&ctx.http, vec![]).await?;
+        cleared += 1;
+        tracing::debug!(guild_id = id, count = existing.len(), "cleared guild slash commands");
+    }
+    Ok(cleared)
 }
 
 async fn clear_global_slash_commands(ctx: &Context) -> serenity::Result<usize> {

@@ -93,6 +93,14 @@ Headers and bodies require explicit opt-in with redaction.
 - CDP sidecar runs locally, outputs redacted JSON lines.
 - **Watch read-only (v1):** noVNC UI lock (`bunny_lock`) hides settings and forces client-side `view_only`; this does **not** block RFB input at the WebSocket proxy. See [novnc-readonly-server-enforcement](../improvements/novnc-readonly-server-enforcement.md).
 
+## Discord
+
+- Bridge authenticates with `Authorization: Bearer` (hashed token in agent config).
+- Shell/agent commands require a Discord account linked to a Bunny user (home page OAuth) with Editor+ on the session.
+- Tool approvals and risky shell commands require **DiscordApprove** (Admin+).
+- All actions are written to `discord_audit_log`.
+- Watch read-only links: see [novnc-readonly-server-enforcement](../improvements/novnc-readonly-server-enforcement.md).
+
 ## Relay mode
 
 Outbound WSS from agent. Relay must not receive raw secrets. Auth remains on the bunny instance.

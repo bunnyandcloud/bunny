@@ -40,7 +40,6 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/invitations/accept", post(invitation_accept))
         .route("/agent/info", get(agent_info))
         .route("/claude/oauth/redirect/:token", get(claude_oauth_redirect))
-        .route("/auth/discord/start", get(crate::discord_ops::discord_oauth_start))
         .route(
             "/auth/discord/callback",
             get(crate::discord_ops::discord_oauth_callback),
@@ -417,6 +416,7 @@ async fn auth_me(
         } else {
             (false, false, false, "viewer".to_string())
         };
+    let discord = crate::discord_ops::discord_account_status(&state, user);
     Ok(Json(MeResponse {
         user_id: user.to_string(),
         email,
@@ -428,6 +428,7 @@ async fn auth_me(
         can_create_sessions,
         default_session_role,
         locale,
+        discord,
     }))
 }
 
@@ -1849,6 +1850,7 @@ pub struct MeResponse {
     pub default_session_role: String,
     /// UI locale: `en` or `fr`
     pub locale: String,
+    pub discord: crate::discord_ops::DiscordAccountStatus,
 }
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {

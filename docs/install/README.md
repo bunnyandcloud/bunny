@@ -36,7 +36,7 @@ Minimal (no browser stack):
 source "$HOME/.cargo/env"
 ```
 
-See [README prerequisites](../README.md#prerequisites) for step-by-step commands.
+Or run `./scripts/install-prerequisites.sh` manually for the full step-by-step install inside the script.
 
 ## From a git clone (recommended for development)
 
@@ -49,7 +49,7 @@ bunny configure
 
 On a fresh Debian/Ubuntu host, `./bunny setup` installs missing prerequisites (Rust, Node, browser stack) before building. Use `./bunny setup --minimal` to skip the browser stack.
 
-The launcher `./bunny` at the repo root **is** the CLI. It runs a release binary when built, otherwise compiles via Cargo on first use. See [README](../README.md#setup-and-permissions) for `setup` vs `sudo`.
+The launcher `./bunny` at the repo root **is** the CLI. It runs a release binary when built, otherwise compiles via Cargo on first use. See [Setup and permissions](#setup-and-permissions) below for `setup` vs `sudo`.
 
 **Optional — type `bunny` without `./` (one-time):**
 
@@ -58,6 +58,8 @@ The launcher `./bunny` at the repo root **is** the CLI. It runs a release binary
 bunny configure
 bunny run
 ```
+
+### Setup and permissions
 
 `setup` chooses the install directory from your permissions:
 
@@ -88,12 +90,11 @@ bunny doctor
 bunny run
 ```
 
-## System install (release binary on PATH)
+## Install script (from a clone)
 
 On Debian/Ubuntu, prerequisites are installed automatically:
 
 ```bash
-curl -fsSL https://get.bunny.dev | sh   # or from a clone:
 ./scripts/install.sh
 bunny configure
 bunny run
@@ -101,7 +102,7 @@ bunny run
 
 Skip browser stack: `./scripts/install.sh --minimal`. Already have Rust/Node: `./scripts/install.sh --skip-prerequisites`.
 
-Copies the binary to `~/.local/bin`. You still need the repo (or a release bundle with `apps/web`) to build the UI.
+Copies the binary to `~/.local/bin`. You still need the repo checkout (for `apps/web`) — first `bunny run` builds the web UI. Expect several minutes of compilation on a fresh server.
 
 ## Other commands
 
@@ -121,6 +122,15 @@ export BUNNY_SECRETS_PASSPHRASE='your-vault-passphrase'
 ```
 
 See [security](../security/README.md).
+
+## Discord (optional)
+
+```bash
+bunny discord setup
+bunny discord bridge    # alongside bunny run
+```
+
+See [Discord integration](../integrations/discord.md). Docker on Mac: [discord-docker-dev.md](../integrations/discord-docker-dev.md).
 
 ## SSH tunnel mode
 
@@ -143,3 +153,18 @@ sudo systemctl enable --now bunny-agent
 - Node.js 20+ and npm (first `bunny run` build)
 - **Browser tab:** Chromium, Xvfb, x11vnc, websockify + sidecar `npm install` (see `./scripts/install-prerequisites.sh`; use `--minimal` to skip)
 - Verify with `bunny doctor`
+
+## macOS (local development)
+
+```bash
+xcode-select --install   # if needed
+curl -fsSL https://sh.rustup.rs | sh
+# Node: https://nodejs.org/ or brew install node
+# Neovim: brew install neovim
+git clone https://github.com/bunny-dev/bunny.git && cd bunny
+./bunny setup
+bunny configure
+bunny run
+```
+
+After installing Rust, open a new shell or run `source "$HOME/.cargo/env"`. For Docker-based dev on Mac, see [Discord + Docker (Mac dev)](../integrations/discord-docker-dev.md).

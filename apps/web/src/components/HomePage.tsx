@@ -11,6 +11,7 @@ import {
 } from '../lib/api';
 import { useT } from '../i18n';
 import AppTopBar from './AppTopBar';
+import DiscordAccountPanel from './DiscordAccountPanel';
 import InlineRename from './InlineRename';
 
 interface SessionItem {
@@ -214,6 +215,8 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
           {error}
         </p>
       )}
+
+      <DiscordAccountPanel isOwner={isOwner} />
 
       <div className="w-full max-w-lg">
         <h2 className="text-xs uppercase tracking-wide text-bunny-muted mb-2">

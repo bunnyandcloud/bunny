@@ -40,8 +40,16 @@
     "fr": "Confirmation : "
   },
   "configure.prompt.language": {
-    "en": "Language / Langue [en/fr] (default: en): ",
-    "fr": "Langue / Language [en/fr] (défaut : en) : "
+    "en": "Select language / Choisissez la langue",
+    "fr": "Select language / Choisissez la langue"
+  },
+  "configure.prompt.language.option_en": {
+    "en": "English",
+    "fr": "English"
+  },
+  "configure.prompt.language.option_fr": {
+    "en": "Français",
+    "fr": "Français"
   },
   "configure.mfa.enable_prompt": {
     "en": "Enable TOTP MFA now? [y/N]: ",
@@ -132,8 +140,8 @@
     "fr": "  Ou : bunny discord setup"
   },
   "configure.discord.setup_prompt": {
-    "en": "Configure Discord bridge now? [y/N]: ",
-    "fr": "Configurer le pont Discord maintenant ? [o/N] : "
+    "en": "Configure Discord now (bot + optional OAuth for home-page linking)? [y/N]: ",
+    "fr": "Configurer Discord maintenant (bot + OAuth optionnel pour la home) ? [o/N] : "
   },
   "configure.discord.skipped": {
     "en": "Skipped Discord setup.",
@@ -151,17 +159,65 @@
     "en": "Discord Bot Token: ",
     "fr": "Jeton du bot Discord : "
   },
+  "configure.discord.portal_link": {
+    "en": "Open: https://discord.com/developers/applications — select (or create) your Bunny application.",
+    "fr": "Ouvrez : https://discord.com/developers/applications — sélectionnez (ou créez) votre application Bunny."
+  },
+  "configure.discord.section_bot": {
+    "en": "--- Step 1: Bot & bridge (/bunny commands in Discord) ---",
+    "fr": "--- Étape 1 : Bot & pont (commandes /bunny dans Discord) ---"
+  },
+  "configure.discord.deployment_local": {
+    "en": "  Local development — public URL: {url}",
+    "fr": "  Développement local — URL publique : {url}"
+  },
+  "configure.discord.deployment_prompt": {
+    "en": "Discord deployment environment",
+    "fr": "Environnement de déploiement Discord"
+  },
+  "configure.discord.deployment_option_local": {
+    "en": "Local development (localhost / Docker on my machine)",
+    "fr": "Développement local (localhost / Docker sur ma machine)"
+  },
+  "configure.discord.deployment_option_production": {
+    "en": "Production server (public domain, HTTPS)",
+    "fr": "Serveur de production (domaine public, HTTPS)"
+  },
+  "configure.discord.deployment_production": {
+    "en": "  Production deployment — Bunny needs its public URL (browser + Discord OAuth).",
+    "fr": "  Déploiement production — Bunny a besoin de son URL publique (navigateur + OAuth Discord)."
+  },
+  "configure.discord.hint_public_url": {
+    "en": "How users reach Bunny (HTTPS recommended in production, e.g. https://bunny.example.com).",
+    "fr": "Comment les utilisateurs accèdent à Bunny (HTTPS recommandé en prod, ex. https://bunny.example.com)."
+  },
+  "configure.discord.prompt_public_url": {
+    "en": "Public URL: ",
+    "fr": "URL publique : "
+  },
+  "configure.discord.hint_app_id": {
+    "en": "Where: General Information → Application ID (long number).",
+    "fr": "Où : General Information → Application ID (long numéro)."
+  },
+  "configure.discord.hint_bot_token": {
+    "en": "Where: Bot → Token → Reset Token → Copy. This is NOT the OAuth Client Secret.",
+    "fr": "Où : Bot → Token → Reset Token → Copier. Ce n’est PAS le Client Secret OAuth."
+  },
+  "configure.discord.hint_bot_intents": {
+    "en": "Also enable: Bot → Privileged Gateway Intents → Message Content Intent (required for threads).",
+    "fr": "À activer aussi : Bot → Privileged Gateway Intents → Message Content Intent (requis pour les threads)."
+  },
   "configure.discord.run_hints_title": {
-    "en": "Next (two terminals in the same environment — e.g. Docker shell):",
-    "fr": "Ensuite (deux terminaux dans le même environnement — ex. shell Docker) :"
+    "en": "Next — start the agent (Discord bridge auto-starts when configured):",
+    "fr": "Ensuite — lancez l’agent (le pont Discord démarre auto si configuré) :"
   },
   "configure.discord.run_terminal1": {
-    "en": "  Terminal 1:  bunny run",
-    "fr": "  Terminal 1 :  bunny run"
+    "en": "  bunny run",
+    "fr": "  bunny run"
   },
   "configure.discord.run_terminal2": {
-    "en": "  Terminal 2:  bunny discord bridge",
-    "fr": "  Terminal 2 :  bunny discord bridge"
+    "en": "  (optional: bunny discord bridge alone, or bunny run --no-discord-bridge)",
+    "fr": "  (optionnel : bunny discord bridge seul, ou bunny run --no-discord-bridge)"
   },
   "configure.discord.agent_config": {
     "en": "✓ Agent config: {path}",
@@ -170,6 +226,86 @@
   "configure.discord.bridge_config": {
     "en": "✓ Bridge config: {path}",
     "fr": "✓ Config pont : {path}"
+  },
+  "configure.discord.oauth_saved": {
+    "en": "✓ Discord OAuth saved to {path}",
+    "fr": "✓ OAuth Discord enregistré dans {path}"
+  },
+  "configure.discord.oauth_callback_hint": {
+    "en": "Required in Discord Developer Portal — add this Redirect URI:",
+    "fr": "Requis dans le portail Discord Developer — ajoutez cette URI de redirection :"
+  },
+  "configure.discord.oauth_callback_steps": {
+    "en": "  OAuth2 → Redirects → Add Redirect → paste URI → Save Changes",
+    "fr": "  OAuth2 → Redirects → Add Redirect → coller l’URI → Save Changes"
+  },
+  "configure.discord.hint_oauth_client_id": {
+    "en": "Where: OAuth2 → Client information → Client ID (= Application ID). Press Enter to keep [default].",
+    "fr": "Où : OAuth2 → Client information → Client ID (= Application ID). Entrée pour garder [défaut]."
+  },
+  "configure.discord.hint_oauth_client_secret": {
+    "en": "Where: OAuth2 → Client information → Client Secret → Reset Secret → Copy (shown once). Not Bot → Token.",
+    "fr": "Où : OAuth2 → Client information → Client Secret → Reset Secret → Copier (affiché une fois). Pas Bot → Token."
+  },
+  "configure.discord.hint_oauth_redirect": {
+    "en": "Must match exactly what you add under OAuth2 → Redirects (Enter accepts the default below).",
+    "fr": "Doit correspondre exactement à OAuth2 → Redirects (Entrée accepte la valeur par défaut)."
+  },
+  "configure.discord.oauth_using_client_id": {
+    "en": "  OAuth Client ID: {id} (same as Application ID)",
+    "fr": "  Client ID OAuth : {id} (identique à l’Application ID)"
+  },
+  "configure.discord.oauth_using_redirect": {
+    "en": "  OAuth redirect URI: {uri}",
+    "fr": "  URI de redirection OAuth : {uri}"
+  },
+  "configure.discord.oauth_secret_only_hint": {
+    "en": "Where: OAuth2 → Client information → Client Secret → Reset Secret → Copy (shown once). Not Bot → Token.",
+    "fr": "Où : OAuth2 → Client information → Client Secret → Reset Secret → Copier (affiché une fois). Pas Bot → Token."
+  },
+  "configure.discord.oauth_phase_title": {
+    "en": "--- Step 2: OAuth (Connect Discord on Bunny home page) ---",
+    "fr": "--- Étape 2 : OAuth (Connecter Discord sur la home Bunny) ---"
+  },
+  "configure.discord.oauth_intro": {
+    "en": "Users link their personal Discord account once from the Web UI home page.",
+    "fr": "Chaque utilisateur lie son compte Discord une fois depuis la home Web UI."
+  },
+  "configure.discord.oauth_intro_after_bot": {
+    "en": "Same application as the bot — enter the OAuth Client Secret only (Client ID and redirect URI are set automatically).",
+    "fr": "Même application que le bot — saisissez uniquement le Client Secret OAuth (Client ID et URI de redirection sont définis automatiquement)."
+  },
+  "configure.discord.oauth_setup_prompt": {
+    "en": "Configure OAuth now? [Y/n]: ",
+    "fr": "Configurer OAuth maintenant ? [O/n] : "
+  },
+  "configure.discord.oauth_skipped": {
+    "en": "Skipped OAuth — users cannot link Discord from the home page until OAuth is configured (bunny discord setup).",
+    "fr": "OAuth ignoré — les utilisateurs ne pourront pas lier Discord depuis la home tant qu’OAuth n’est pas configuré (bunny discord setup)."
+  },
+  "configure.discord.oauth_skipped_noninteractive": {
+    "en": "OAuth not configured (non-interactive). Re-run `bunny discord setup` or pass OAuth flags to enable home-page linking.",
+    "fr": "OAuth non configuré (mode non interactif). Relancez `bunny discord setup` ou passez les flags OAuth pour activer la liaison depuis la home."
+  },
+  "configure.discord.bridge_without_oauth": {
+    "en": "✓ Discord bridge configured ({path}) — OAuth for home-page linking is not set up yet (OAuth2 in Developer Portal).",
+    "fr": "✓ Pont Discord configuré ({path}) — OAuth pour la liaison depuis la home n’est pas configuré (OAuth2 dans le portail Developer)."
+  },
+  "configure.discord.prompt_oauth_client_id_prefill": {
+    "en": "OAuth Client ID [{default}]: ",
+    "fr": "Client ID OAuth [{default}] : "
+  },
+  "configure.discord.prompt_oauth_client_id": {
+    "en": "OAuth Client ID: ",
+    "fr": "Client ID OAuth : "
+  },
+  "configure.discord.prompt_oauth_client_secret": {
+    "en": "OAuth Client Secret (hidden input): ",
+    "fr": "Client Secret OAuth (saisie masquée) : "
+  },
+  "configure.discord.prompt_oauth_redirect": {
+    "en": "OAuth redirect URI [{default}]: ",
+    "fr": "URI de redirection OAuth [{default}] : "
   },
   "web.home.language_label": {
     "en": "Language",
@@ -348,8 +484,8 @@
     "fr": "Permission requise"
   },
   "api.error.discord_not_linked": {
-    "en": "discord account not linked to bunny user — run /bunny link again with a fresh code from the Web UI",
-    "fr": "compte Discord non lié à un utilisateur Bunny — relancez /bunny link avec un code frais depuis la Web UI"
+    "en": "Discord account not linked to a Bunny user — connect Discord from the Bunny home page (Discord account section).",
+    "fr": "Compte Discord non lié à un utilisateur Bunny — connectez Discord depuis la page d’accueil Bunny (section Compte Discord)."
   },
   "api.error.invalid_locale": {
     "en": "invalid locale: use en or fr",

@@ -243,6 +243,18 @@ case "$cmd" in
   down)
     docker compose -f "$COMPOSE_FILE" down "$@"
     ;;
+  reset)
+    echo "→ Stopping container and removing Docker volume (bunny-config)…"
+    docker compose -f "$COMPOSE_FILE" down -v
+    echo "→ Removing Discord dev files…"
+    rm -f "${ROOT}/.discord/.env" "${ROOT}/.discord/bridge.yaml"
+    echo "→ Removing host config (~/.config/bunny)…"
+    rm -rf "${HOME}/.config/bunny"
+    echo "→ Removing build artifacts (target/, apps/web/dist, apps/web/node_modules)…"
+    rm -rf "${ROOT}/target" "${ROOT}/apps/web/dist" "${ROOT}/apps/web/node_modules"
+    echo ""
+    echo "✓ Reset complete."
+    ;;
   shell|bash)
     docker compose -f "$COMPOSE_FILE" exec -it bunny-dev bash -lc '
       cd /opt/bunny
@@ -317,6 +329,7 @@ Bunny Docker dev
   ./scripts/docker-dev.sh bridge-logs     Tail discord bridge logs (background mode)
   ./scripts/docker-dev.sh status          Quick health check
   ./scripts/docker-dev.sh down            Stop container
+  ./scripts/docker-dev.sh reset           Wipe Docker volume + Discord + ~/.config/bunny + build artifacts
 
 Quick path:
   up → init → shell → bunny run

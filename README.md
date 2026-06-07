@@ -23,6 +23,8 @@ bunny run
 
 On Debian/Ubuntu, `./bunny setup` installs missing prerequisites (Rust, Node, tmux, browser stack) automatically.
 
+**Recommended — Discord:** create a bot in the [Discord Developer Portal](https://discord.com/developers/applications) and invite it to your server (see walkthrough below). Bunny normally runs `bunny discord setup` during `bunny configure`; you can also run `bunny discord setup` later if you skipped it. Walkthrough: [Discord application and server setup](docs/integrations/discord.md#discord-application-and-server).
+
 **First install takes a few minutes** — `./bunny setup` compiles the Rust agent from source; the first `bunny run` also builds the web UI (Node.js required). Subsequent starts are much faster.
 
 By default, the agent listens on **localhost only** (`127.0.0.1` on the server). From your laptop, use an **SSH tunnel** (recommended):
@@ -77,6 +79,8 @@ bunny run
 
 Browser tab (noVNC) needs a one-time `./scripts/docker-dev.sh browser-setup`. Details: [Installation → Docker](docs/install/README.md#docker) and [Discord + Docker on Mac](docs/integrations/discord-docker-dev.md).
 
+**Recommended — Discord:** create the application and invite the bot to your server first ([walkthrough](docs/integrations/discord.md#discord-application-and-server)). `bootstrap` runs `bunny configure`, which normally includes `bunny discord setup`; run `bunny discord setup` separately if you skipped it.
+
 ## Community
 
 Discord server for questions, feedback, and release announcements — **invite link coming soon**.
@@ -90,7 +94,7 @@ Discord server for questions, feedback, and release announcements — **invite l
 | Architecture | [docs/architecture/overview.md](docs/architecture/overview.md) |
 | Security | [docs/security/README.md](docs/security/README.md) |
 | API | [docs/api/README.md](docs/api/README.md) |
-| Discord integration | [docs/integrations/discord.md](docs/integrations/discord.md) |
+| Discord (app, bot, server, `/bunny link`) | [docs/integrations/discord.md#discord-application-and-server](docs/integrations/discord.md#discord-application-and-server) |
 | Mobile app | [docs/mobile/README.md](docs/mobile/README.md) |
 | Everything else | [docs/README.md](docs/README.md) |
 

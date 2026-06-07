@@ -1,31 +1,31 @@
-# Terminaux web (shells)
+# Web terminals (shells)
 
-Ce document décrit comment les shells interactifs fonctionnent dans Bunny : du clic « + New shell » dans la Web UI jusqu’au processus bash dans tmux, en passant par l’agent Rust et le WebSocket.
+This document describes how interactive shells work in Bunny: from clicking **+ New shell** in the Web UI to the bash process in tmux, through the Rust agent and WebSocket.
 
 ---
 
-## Vue d’ensemble
+## Overview
 
-Bunny ne lance pas bash directement dans le navigateur. La chaîne est :
+Bunny does not run bash directly in the browser. The chain is:
 
 ```
-Web UI (xterm.js)  ←→  WebSocket JSON  ←→  PtySession (attach tmux)  ←→  tmux  ←→  bash
+Web UI (xterm.js)  ←→  WebSocket JSON  ←→  PtySession (tmux attach)  ←→  tmux  ←→  bash
 ```
 
-**Idée clé :** tmux est la source de vérité pour la session shell. L’agent ne garde qu’un client `tmux attach` en mémoire (PTY). Si l’agent redémarre ou si le navigateur se déconnecte, **tmux continue** ; on se rattache ensuite et on rejoue le scrollback depuis le disque.
+**Key idea:** tmux is the source of truth for the shell session. The agent only keeps a `tmux attach` client (PTY) in memory. If the agent restarts or the browser disconnects, **tmux keeps running**; you reattach later and replay scrollback from disk.
 
 ```mermaid
 flowchart TB
-  subgraph browser["Navigateur (apps/web)"]
+  subgraph browser["Browser (apps/web)"]
     SW["SessionWorkspace"]
     TP["TerminalPanel + xterm.js"]
     SW --> TP
   end
 
-  subgraph agent["Agent Rust (apps/server)"]
+  subgraph agent["Rust agent (apps/server)"]
     API["api.rs — REST /terminals"]
     WS["ws.rs — handle_terminal_ws"]
-    TR["terminals.rs — persistance / reattach"]
+    TR["terminals.rs — persistence / reattach"]
     API --> TR
     WS --> TR
   end
@@ -33,12 +33,12 @@ flowchart TB
   subgraph pty["crate bunny-pty"]
     TM["TerminalManager"]
     PS["PtySession — tmux attach"]
-    BUF["CircularBuffer + scrollback disque"]
+    BUF["CircularBuffer + disk scrollback"]
     TM --> PS
     PS --> BUF
   end
 
-  subgraph host["Hôte Linux"]
+  subgraph host["Linux host"]
     TMX["tmux session bunny-t-{uuid}"]
     SH["bash / zsh"]
     TMX --> SH
@@ -48,109 +48,109 @@ flowchart TB
   API --> TM
   WS --> TM
   PS <-->|"PTY"| TMX
-  TR -->|"SQLite + fichiers"| DISK[("data/terminal-scrollback/")]
+  TR -->|"SQLite + files"| DISK[("data/terminal-scrollback/")]
   BUF --> DISK
 ```
 
 ---
 
-## Composants et fichiers
+## Components and files
 
-| Zone | Fichier | Rôle |
-|------|---------|------|
-| Protocole WS | `crates/bunny-pty/src/protocol.rs` | Types JSON client ↔ serveur |
-| Cœur PTY | `crates/bunny-pty/src/manager.rs` | Map des terminaux en mémoire |
-| Attach | `crates/bunny-pty/src/session.rs` | Thread lecture PTY → broadcast |
-| tmux | `crates/bunny-pty/src/tmux.rs` | Création session, capture-pane, refresh |
-| Buffer | `crates/bunny-pty/src/buffer.rs` | Anneau de lignes pour replay partiel |
-| Scrollback | `crates/bunny-pty/src/scrollback.rs` | Fichiers `{id}.scrollback`, `.cwd`, `.discord` |
-| API HTTP/WS | `apps/server/src/api.rs` | CRUD terminaux, upgrade WebSocket |
-| Handler WS | `apps/server/src/ws.rs` | `handle_terminal_ws`, `send_replay` |
-| Persistance | `apps/server/src/terminals.rs` | Reattach, merge historique, restore au boot |
-| Recovery | `apps/server/src/recovery.rs` | `restore_all_terminals` au démarrage agent |
-| UI session | `apps/web/src/components/SessionWorkspace.tsx` | Onglets shell, création / fermeture |
-| UI terminal | `apps/web/src/components/TerminalPanel.tsx` | xterm, WebSocket, resize |
-| Sanitize web | `apps/web/src/lib/terminalSanitize.ts` | Filtre sondes CSI tmux/xterm |
-| Client API | `apps/web/src/lib/api.ts` | `createTerminal`, `terminalWsUrl`, … |
+| Area | File | Role |
+|------|------|------|
+| WS protocol | `crates/bunny-pty/src/protocol.rs` | JSON types client ↔ server |
+| PTY core | `crates/bunny-pty/src/manager.rs` | In-memory terminal map |
+| Attach | `crates/bunny-pty/src/session.rs` | PTY read thread → broadcast |
+| tmux | `crates/bunny-pty/src/tmux.rs` | Session creation, capture-pane, refresh |
+| Buffer | `crates/bunny-pty/src/buffer.rs` | Line ring for partial replay |
+| Scrollback | `crates/bunny-pty/src/scrollback.rs` | Files `{id}.scrollback`, `.cwd`, `.discord` |
+| HTTP/WS API | `apps/server/src/api.rs` | Terminal CRUD, WebSocket upgrade |
+| WS handler | `apps/server/src/ws.rs` | `handle_terminal_ws`, `send_replay` |
+| Persistence | `apps/server/src/terminals.rs` | Reattach, history merge, boot restore |
+| Recovery | `apps/server/src/recovery.rs` | `restore_all_terminals` on agent start |
+| Session UI | `apps/web/src/components/SessionWorkspace.tsx` | Shell tabs, create / close |
+| Terminal UI | `apps/web/src/components/TerminalPanel.tsx` | xterm, WebSocket, resize |
+| Web sanitize | `apps/web/src/lib/terminalSanitize.ts` | Filter tmux/xterm CSI probes |
+| API client | `apps/web/src/lib/api.ts` | `createTerminal`, `terminalWsUrl`, … |
 
-Config : `TerminalConfig` dans `crates/bunny-core/src/config.rs` (`backend: tmux`, `shell`, `output_buffer_lines`).
+Config: `TerminalConfig` in `crates/bunny-core/src/config.rs` (`backend: tmux`, `shell`, `output_buffer_lines`).
 
 ---
 
-## Modèle tmux : un shell = une session
+## tmux model: one shell = one session
 
-Chaque onglet shell (UUID terminal) a **sa propre session tmux** :
+Each shell tab (terminal UUID) has **its own tmux session**:
 
 ```
 bunny-t-{terminal_uuid}
 ```
 
-(Ancien modèle legacy : une session `bunny-{session_id}` avec une fenêtre par shell — encore résolu à la reconnexion via `inferred_target`.)
+(Legacy model: one `bunny-{session_id}` session with one window per shell — still resolved on reconnect via `inferred_target`.)
 
-Options tmux pour l’UI web (`configure_session_for_web`) :
+tmux options for the web UI (`configure_session_for_web`):
 
-- pas de barre de status tmux ;
-- `aggressive-resize` / `assume-default-size` ;
-- la session ne meurt pas quand le client `attach` se déconnecte (`exit-empty-time 0`, `destroy-unattached off`).
-
----
-
-## Quatre niveaux de persistance
-
-| Niveau | Où | Contenu | Affichage Web UI |
-|--------|-----|---------|------------------|
-| **tmux** | Processus hôte | Shell vivant + scrollback du pane | Live via attach uniquement |
-| **Mémoire agent** | `PtySession` + `CircularBuffer` | Flux attach-only + catch-up F5 | Replay `[from, snapshot]` puis live |
-| **Disque** | `{data_dir}/terminal-scrollback/` | Snapshots texte, cwd, transcript Discord | **Recovery** post-restart agent seulement |
-| **SQLite** | table `terminals` | id, session_id, name, cwd, cols/rows, `tmux_target`, status | Métadonnées reattach |
-
-Au shutdown agent : `flush_all_scrollbacks` fusionne buffer + `tmux capture-pane` sur disque.
-
-**Règle single-source :** le disque n’est jamais lu pour un simple F5 navigateur. Les snapshots Discord utilisent `capture-pane visible` (tmux) + transcript appendé sous le pane.
+- no tmux status bar;
+- `aggressive-resize` / `assume-default-size`;
+- session does not die when the `attach` client disconnects (`exit-empty-time 0`, `destroy-unattached off`).
 
 ---
 
-## Protocole WebSocket
+## Four persistence levels
 
-Messages JSON avec champ `type` (snake_case). Définis dans `protocol.rs`.
+| Level | Where | Content | Web UI display |
+|-------|-------|---------|----------------|
+| **tmux** | Host process | Live shell + pane scrollback | Live via attach only |
+| **Agent memory** | `PtySession` + `CircularBuffer` | Attach-only stream + F5 catch-up | Replay `[from, snapshot]` then live |
+| **Disk** | `{data_dir}/terminal-scrollback/` | Text snapshots, cwd, Discord transcript | **Recovery** after agent restart only |
+| **SQLite** | `terminals` table | id, session_id, name, cwd, cols/rows, `tmux_target`, status | Reattach metadata |
 
-### Client → serveur
+On agent shutdown: `flush_all_scrollbacks` merges buffer + `tmux capture-pane` to disk.
 
-| `type` | Champs | Effet |
-|--------|--------|-------|
-| `input` | `data` | Écrit dans le PTY (si droit `TerminalWrite`) |
-| `resize` | `cols`, `rows` | Redimensionne le PTY ; premier resize sur shell neuf (`replay_mode: none`) → `refresh-client` tmux |
-| `subscribe` | `from_offset?` | **Seul** déclencheur de replay ; `ensure_shell_running` |
+**Single-source rule:** disk is never read for a simple browser F5. Discord snapshots use `capture-pane visible` (tmux) + transcript appended under the pane.
+
+---
+
+## WebSocket protocol
+
+JSON messages with a `type` field (snake_case). Defined in `protocol.rs`.
+
+### Client → server
+
+| `type` | Fields | Effect |
+|--------|--------|--------|
+| `input` | `data` | Write to PTY (if `TerminalWrite` permission) |
+| `resize` | `cols`, `rows` | Resize PTY; first resize on fresh shell (`replay_mode: none`) → `refresh-client` tmux |
+| `subscribe` | `from_offset?` | **Only** replay trigger; `ensure_shell_running` |
 | `refresh` | — | `tmux refresh-client` |
-| `ping` | `id` | Réponse `pong` |
+| `ping` | `id` | `pong` response |
 
-Le paramètre URL `?from_offset=N` est ignoré pour le replay (legacy) ; le client envoie `from_offset` dans `subscribe`.
+URL param `?from_offset=N` is ignored for replay (legacy); the client sends `from_offset` in `subscribe`.
 
-### Serveur → client
+### Server → client
 
-| `type` | Champs | Usage web |
+| `type` | Fields | Web usage |
 |--------|--------|-----------|
-| `output` | `data`, `offset` | Flux live attach ; offset = fin de chunk dans le buffer |
-| `replay` | `chunks[]`, `replay_mode`, `snapshot_offset`, `has_history?` | Ack replay ; `has_history` = alias legacy de `recovery` |
-| `error` | `code`, `message` | Shell indisponible |
-| `status` | `status`, `exit_code?` | Non géré dans `TerminalPanel` aujourd’hui |
+| `output` | `data`, `offset` | Live attach stream; offset = end of chunk in buffer |
+| `replay` | `chunks[]`, `replay_mode`, `snapshot_offset`, `has_history?` | Replay ack; `has_history` = legacy alias for `recovery` |
+| `error` | `code`, `message` | Shell unavailable |
+| `status` | `status`, `exit_code?` | Not handled in `TerminalPanel` today |
 | `pong` | `id` | — |
 
-#### Modes `replay_mode`
+#### `replay_mode` values
 
-| Mode | Source | Client | `refresh-client` au 1er resize |
-|------|--------|--------|-------------------------------|
-| `none` | Live attach seul (buffer vide ou rien à rattraper) | Pas d’écriture replay | **oui** |
-| `catch_up` | Buffer attach `[from_offset, snapshot_offset]` | Écrit chunks, `liveFence = snapshot_offset`, pas de reset | **non** |
-| `recovery` | Disque une fois (post-restart agent) | `term.reset()`, écrit replay, `liveFence = snapshot_offset` | **non** |
+| Mode | Source | Client | `refresh-client` on first resize |
+|------|--------|--------|----------------------------------|
+| `none` | Live attach only (empty buffer or nothing to catch up) | No replay write | **yes** |
+| `catch_up` | Attach buffer `[from_offset, snapshot_offset]` | Write chunks, `liveFence = snapshot_offset`, no reset | **no** |
+| `recovery` | Disk once (post agent restart) | `term.reset()`, write replay, `liveFence = snapshot_offset` | **no** |
 
 ---
 
-## Flux détaillé : premier shell d’une session
+## Detailed flow: first shell in a session
 
 ```mermaid
 sequenceDiagram
-  participant U as Utilisateur
+  participant U as User
   participant SW as SessionWorkspace
   participant API as api.rs
   participant TM as TerminalManager
@@ -158,8 +158,8 @@ sequenceDiagram
   participant WS as handle_terminal_ws
   participant TP as TerminalPanel / xterm
 
-  U->>SW: Ouvre session
-  SW->>API: GET /terminals?session_id= (vide)
+  U->>SW: Open session
+  SW->>API: GET /terminals?session_id= (empty)
   SW->>API: POST /terminals { name: "shell 1" }
   API->>TM: create()
   TM->>TX: ensure_terminal_session(uuid)
@@ -173,57 +173,57 @@ sequenceDiagram
   TP->>WS: resize (80×24 min, FitAddon)
   TP->>WS: subscribe { from_offset: 0 }
   WS->>TP: replay { replay_mode: none, snapshot_offset: 0 }
-  Note over WS,TX: Premier resize (mode none) → refresh-client tmux
+  Note over WS,TX: First resize (mode none) → refresh-client tmux
 
-  U->>TP: frappe clavier
+  U->>TP: keyboard input
   TP->>WS: input
   WS->>TM: write → PTY
-  TM-->>WS: broadcast chunk (offset réel)
-  WS->>WS: drop si offset <= live_fence
+  TM-->>WS: broadcast chunk (real offset)
+  WS->>WS: drop if offset <= live_fence
   WS->>TP: output
   TP->>TP: term.write (convertEol: true)
 ```
 
-Étapes importantes :
+Important steps:
 
-1. **`create_terminal`** crée l’UUID, la session tmux et l’attach PTY **avant** que le navigateur ouvre le WS.
-2. **`prepare_terminal_connection`** (à l’upgrade WS) vérifie que le `PtySession` existe ; sinon **`attach_terminal_record`** depuis SQLite.
-3. **Replay uniquement sur `subscribe`** — pas de replay à l’ouverture du WS.
-4. **`TerminalPanel`** envoie **resize** tôt (immédiat + `ResizeObserver`) : tmux n’affiche le prompt qu’après dimensionnement du PTY.
-5. **`convertEol: true`** sur xterm : tmux envoie souvent `\n` sans `\r` → sans ça, texte « en cascade ».
-6. **`localStorage`** `bunny:term:{id}:offset` : suit l’offset live ; au **F5** le client envoie `from_offset: 0` (xterm recréé vide).
+1. **`create_terminal`** creates the UUID, tmux session, and PTY attach **before** the browser opens the WS.
+2. **`prepare_terminal_connection`** (on WS upgrade) verifies `PtySession` exists; otherwise **`attach_terminal_record`** from SQLite.
+3. **Replay only on `subscribe`** — no replay on WS open.
+4. **`TerminalPanel`** sends **resize** early (immediate + `ResizeObserver`): tmux only shows the prompt after PTY sizing.
+5. **`convertEol: true`** on xterm: tmux often sends `\n` without `\r` → without this, text "cascades".
+6. **`localStorage`** `bunny:term:{id}:offset`: tracks live offset; on **F5** the client sends `from_offset: 0` (xterm recreated empty).
 
 ---
 
-## Web UI : onglets et cycle de vie
+## Web UI: tabs and lifecycle
 
 ### SessionWorkspace
 
-- Au chargement : `openShell(true)` → liste les terminaux ou crée `shell 1`.
-- **+ New shell** : nouveau `POST /terminals`, nouvel UUID, nouvel onglet actif.
-- **×** : `DELETE /terminals/{id}` → tue tmux + entrée mémoire + ligne SQLite.
-- Tous les onglets restent **montés** : onglet inactif = `invisible` CSS mais **WebSocket et xterm restent connectés**.
+- On load: `openShell(true)` → list terminals or create `shell 1`.
+- **+ New shell**: new `POST /terminals`, new UUID, new active tab.
+- **×**: `DELETE /terminals/{id}` → kills tmux + memory entry + SQLite row.
+- All tabs stay **mounted**: inactive tab = CSS `invisible` but **WebSocket and xterm stay connected**.
 
 ### TerminalPanel
 
-- Un composant par `terminalId`, effet `useEffect([terminalId])` = une connexion WS par shell.
-- Reconnexion automatique (max 5 tentatives, délai 1,5 s).
-- `offsetRef` + `localStorage` : dernier offset accepté (catch-up ou live).
-- Gate live : ignore `output` tant que replay non ack ; ignore `offset <= liveFence`.
-- `filterServerOutput` / `filterClientInput` : retire les séquences CSI de sondes capabilities (artefacts `tmux attach`).
+- One component per `terminalId`, `useEffect([terminalId])` = one WS connection per shell.
+- Auto-reconnect (max 5 attempts, 1.5 s delay).
+- `offsetRef` + `localStorage`: last accepted offset (catch-up or live).
+- Live gate: ignore `output` until replay ack; ignore `offset <= liveFence`.
+- `filterServerOutput` / `filterClientInput`: strip CSI capability probe sequences (`tmux attach` artifacts).
 
 ---
 
-## Trois scénarios de reconnexion
+## Three reconnection scenarios
 
-### A — Nouvel onglet shell (2ᵉ, 3ᵉ…)
+### A — New shell tab (2nd, 3rd…)
 
-Même flux que le premier, mais :
+Same flow as the first, but:
 
-- tmux / layout déjà chaud → prompt plus rapide ;
-- panneau précédent reste connecté en arrière-plan.
+- tmux / layout already warm → faster prompt;
+- previous panel stays connected in the background.
 
-### B — Rechargement navigateur F5 (agent tourne)
+### B — Browser reload F5 (agent running)
 
 ```mermaid
 sequenceDiagram
@@ -232,155 +232,155 @@ sequenceDiagram
   participant WS as handle_terminal_ws
   participant Buf as CircularBuffer
 
-  TP->>LS: (offset live seulement, pas pour le from du subscribe)
-  TP->>WS: nouveau WS + subscribe { from_offset: 0 }
+  TP->>LS: (live offset only, not subscribe from)
+  TP->>WS: new WS + subscribe { from_offset: 0 }
   WS->>Buf: snapshot_offset = current_offset()
   WS->>Buf: replay_range(N, snapshot_offset)
   WS->>TP: replay catch_up + snapshot_offset
   TP->>TP: write catch_up, liveFence = snapshot_offset
-  Note over WS: pas de refresh-client
+  Note over WS: no refresh-client
   loop live stream
     Buf->>WS: chunk offset M
     alt M gt snapshot_offset
       WS->>TP: output
     else
-      WS->>WS: drop (déjà dans catch_up)
+      WS->>WS: drop (already in catch_up)
     end
   end
 ```
 
-tmux **n’est pas tué**. Le disque **n’est pas lu**. Seul le buffer attach comble l’absence du client.
+tmux is **not killed**. Disk is **not read**. Only the attach buffer fills the gap while the client was away.
 
-### B′ — WS drop sans reload
+### B′ — WS drop without reload
 
-Même mécanisme ; `offsetRef` en mémoire remplace localStorage.
+Same mechanism; in-memory `offsetRef` replaces localStorage.
 
-### C — Redémarrage agent (navigateur ouvert ou non)
+### C — Agent restart (browser open or not)
 
 ```mermaid
 sequenceDiagram
-  participant AG as Nouvel agent
+  participant AG as New agent
   participant TR as restore_all_terminals
-  participant TX as tmux (survit)
+  participant TX as tmux (survives)
   participant TP as TerminalPanel
 
-  Note over AG: flush_all_scrollbacks avant exit (ancien agent)
-  AG->>TR: recovery au boot
+  Note over AG: flush_all_scrollbacks before exit (old agent)
+  AG->>TR: recovery on boot
   TR->>TX: resolve_tmux_target(bunny-t-{id})
-  TR->>TR: attach_terminal_record + merge scrollback disque/tmux
+  TR->>TR: attach_terminal_record + merge disk/tmux scrollback
   TP->>AG: WS reconnect + subscribe
-  AG->>TP: replay recovery (disque), snapshot_offset = buffer courant
+  AG->>TP: replay recovery (disk), snapshot_offset = current buffer
   TP->>TP: term.reset(), write replay
-  Note over AG: pas de refresh-client
+  Note over AG: no refresh-client
 ```
 
-Si tmux a disparu entre-temps : nouvelle session + bannière grise  
+If tmux disappeared in between: new session + grey banner  
 `─── history (read-only) — new shell below ───` (`format_initial_scrollback`).
 
 ---
 
-## Single-source display et offset fencing
+## Single-source display and offset fencing
 
-Chaque situation d’affichage a **une seule source** :
+Each display situation has **one source**:
 
-| Situation | Source affichée | Disque lu ? | refresh-client |
-|-----------|-----------------|-------------|----------------|
-| Shell neuf | Live attach après resize | non (écriture seule) | oui (mode `none`) |
-| F5 / reconnect | Catch-up buffer puis live `offset > snapshot` | **non** | **non** |
-| Restart agent | Recovery disque une fois puis live | oui (une fois) | **non** |
-| `/bunny snapshot` | `capture-pane visible` + Discord sous le pane | non | non |
+| Situation | Display source | Disk read? | refresh-client |
+|-----------|----------------|------------|----------------|
+| New shell | Live attach after resize | no (write only) | yes (`none` mode) |
+| F5 / reconnect | Buffer catch-up then live `offset > snapshot` | **no** | **no** |
+| Agent restart | Disk recovery once then live | yes (once) | **no** |
+| `/bunny snapshot` | `capture-pane visible` + Discord under pane | no | no |
 
-### Anti-doublon
+### Anti-duplication
 
-Le doublon venait du chevauchement catch-up + live + `refresh-client` tmux. Frontière explicite :
+Duplication came from catch-up + live + tmux `refresh-client` overlap. Explicit boundary:
 
-1. Au `subscribe`, le serveur fige `snapshot_offset = buffer.current_offset()` **avant** d’assembler le catch-up.
-2. Catch-up = demi-intervalle `[from_offset, snapshot_offset]` via `replay_range`.
-3. Chaque `output` live porte l’offset buffer réel ; le serveur **drop** `offset <= snapshot_offset` par connexion.
-4. Le client **drop** `output` avec `offset <= liveFence` après replay.
+1. On `subscribe`, server freezes `snapshot_offset = buffer.current_offset()` **before** assembling catch-up.
+2. Catch-up = half-open interval `[from_offset, snapshot_offset]` via `replay_range`.
+3. Each live `output` carries the real buffer offset; server **drops** `offset <= snapshot_offset` per connection.
+4. Client **drops** `output` with `offset <= liveFence` after replay.
 
-Le buffer attach n’est **jamais** rechargé depuis le disque (`hydrate`) au reconnect. Les commandes Discord sont **appendées** au buffer attach (avec broadcast live) en plus de la persistance disque (recovery agent mort).
-
----
-
-## Tests d’acceptation
-
-### Anti-doublon F5 (obligatoire)
-
-1. Ouvrir shell, lancer `npm run dev` (≥ 30 s de sortie, ≥ 50 lignes).
-2. **F5** (reload complet).
-3. Attendre stabilisation (< 3 s après resize).
-
-**PASS :** chaque ligne une fois ; un seul prompt en bas ; ordre chronologique strict ; scroll en haut sans trou ni répétition.
-
-**FAIL typique :** double `ready in Xms`, double prompt, bloc récent au-dessus d’un bloc ancien.
-
-### Scénarios complémentaires
-
-| Scénario | Attendu |
-|----------|---------|
-| Nouveau shell | prompt < 1 s, mode `none`, refresh-client une fois |
-| `ls` + saisie | pas de cascade (`convertEol`) |
-| WS drop sans F5 | catch-up depuis `last_client_offset` |
-| Restart agent | recovery disque, reset xterm, pas de refresh |
-| 2 onglets shell | indépendants, offsets séparés |
-
-Tests unitaires : `cargo test -p bunny-pty buffer::` (fencing `replay_range`).
+The attach buffer is **never** reloaded from disk (`hydrate`) on reconnect. Discord commands are **appended** to the attach buffer (with live broadcast) in addition to disk persistence (for dead-agent recovery).
 
 ---
 
-## API REST (résumé)
+## Acceptance tests
 
-| Action | Route | Côté web |
+### F5 anti-duplication (required)
+
+1. Open shell, run `npm run dev` (≥ 30 s output, ≥ 50 lines).
+2. **F5** (full reload).
+3. Wait for stabilization (< 3 s after resize).
+
+**PASS:** each line once; single prompt at bottom; strict chronological order; scroll to top without gaps or repeats.
+
+**Typical FAIL:** double `ready in Xms`, double prompt, recent block above an older block.
+
+### Additional scenarios
+
+| Scenario | Expected |
+|----------|----------|
+| New shell | prompt < 1 s, mode `none`, refresh-client once |
+| `ls` + typing | no cascade (`convertEol`) |
+| WS drop without F5 | catch-up from `last_client_offset` |
+| Agent restart | disk recovery, xterm reset, no refresh |
+| 2 shell tabs | independent, separate offsets |
+
+Unit tests: `cargo test -p bunny-pty buffer::` (fencing `replay_range`).
+
+---
+
+## REST API (summary)
+
+| Action | Route | Web side |
 |--------|-------|----------|
-| Créer | `POST /api/v1/terminals` | `createTerminal()` |
-| Lister | `GET /api/v1/terminals?session_id=` | `listSessionTerminals()` — déclenche `ensure_session_terminals_live` |
+| Create | `POST /api/v1/terminals` | `createTerminal()` |
+| List | `GET /api/v1/terminals?session_id=` | `listSessionTerminals()` — triggers `ensure_session_terminals_live` |
 | WS | `GET /api/v1/terminals/{id}/ws` | `terminalWsUrl()` |
-| Input HTTP | `POST /api/v1/terminals/{id}/input` | inject Discord / fallback |
-| Supprimer | `DELETE /api/v1/terminals/{id}` | fermeture onglet × |
-| Renommer | `PATCH /api/v1/terminals/{id}` | double-clic sur le nom d’onglet |
+| HTTP input | `POST /api/v1/terminals/{id}/input` | Discord inject / fallback |
+| Delete | `DELETE /api/v1/terminals/{id}` | tab close × |
+| Rename | `PATCH /api/v1/terminals/{id}` | double-click tab name |
 
 ---
 
-## Pistes d’amélioration (restantes)
+## Remaining improvement tracks
 
-### 1. Latence du premier prompt
+### 1. First prompt latency
 
-**Causes connues :**
+**Known causes:**
 
-- tmux attend le **resize** PTY ;
-- layout CSS pas prêt → `FitAddon` renvoie des cols incorrectes ;
-- `prepare_terminal_connection` / attach depuis SQLite au connect.
+- tmux waits for PTY **resize**;
+- CSS layout not ready → `FitAddon` returns wrong cols;
+- `prepare_terminal_connection` / SQLite attach on connect.
 
-**Déjà en place :** resize immédiat, fallback 80×24, `ResizeObserver`, `refresh-client` au premier resize (mode `none` seulement).
+**Already in place:** immediate resize, 80×24 fallback, `ResizeObserver`, `refresh-client` on first resize (`none` mode only).
 
-### 2. Lignes en cascade / encodage
+### 2. Cascading lines / encoding
 
-- **`convertEol: true`** côté xterm (obligatoire avec tmux).
-- Option serveur : `normalize_tty_newlines` dans `bunny-pty` avant broadcast (une seule couche).
+- **`convertEol: true`** on xterm (required with tmux).
+- Server option: `normalize_tty_newlines` in `bunny-pty` before broadcast (single layer).
 
-### 3. Scroll `npm run dev` / alternate screen
+### 3. `npm run dev` scroll / alternate screen
 
-tmux sessions Web UI : `alternate-screen off` + filtrage côté client des CSI `\x1b[?1049h` / `\x1b[?1047h`. Le scrollback xterm (10k lignes) reste actif pendant les processus longs ; barre de scroll visible sur `.xterm-viewport` (CSS `bunny-terminal-host`). **vim/htop** full-screen dans le navigateur peuvent se comporter différemment — utiliser le terminal local si besoin.
+tmux web UI sessions: `alternate-screen off` + client-side filtering of CSI `\x1b[?1049h` / `\x1b[?1047h`. xterm scrollback (10k lines) stays active during long processes; scrollbar visible on `.xterm-viewport` (CSS `bunny-terminal-host`). **vim/htop** full-screen in the browser may behave differently — use a local terminal if needed.
 
-### 4. Multi-onglets : coût N WebSockets
+### 4. Multi-tab: N WebSocket cost
 
-Chaque shell = WS + xterm actif même caché. Piste : connecter seulement l’onglet actif, suspendre les autres (tmux reste vivant).
+Each shell = active WS + xterm even when hidden. Option: connect only the active tab, suspend others (tmux stays alive).
 
-### 5. Buffer ring evicted au F5
+### 5. Ring buffer evicted on F5
 
-Si `last_client_offset` pointe hors anneau, lignes anciennes perdues au catch-up (v1 accepté). Alternative future : une seule `capture-pane visible` tmux comme autorité visuelle au reconnect.
+If `last_client_offset` points outside the ring, old lines are lost on catch-up (v1 accepted). Future alternative: single tmux `capture-pane visible` as visual authority on reconnect.
 
-### 6. Observabilité
+### 6. Observability
 
-- Logs structurés : replay mode, bytes catch-up/recovery, `snapshot_offset` ;
-- Métrique temps subscribe → premier `output` avec prompt.
+- Structured logs: replay mode, catch-up/recovery bytes, `snapshot_offset`;
+- Metric: time from subscribe → first `output` with prompt.
 
 ---
 
-## Index des fonctions clés
+## Key function index
 
-**Serveur**
+**Server**
 
 - `create_terminal`, `terminal_ws`, `list_terminals` — `api.rs`
 - `handle_terminal_ws`, `build_replay`, `send_replay` — `ws.rs`
@@ -400,8 +400,8 @@ Si `last_client_offset` pointe hors anneau, lignes anciennes perdues au catch-up
 
 ---
 
-## Voir aussi
+## See also
 
 - [Architecture overview](./overview.md)
 - [API](../api/README.md)
-- Config exemple : `.bunny.yaml.example` (`terminal`, `output_buffer_lines`)
+- Example config: `.bunny.yaml.example` (`terminal`, `output_buffer_lines`)

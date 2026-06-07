@@ -10,6 +10,7 @@ const SessionWorkspace = lazy(() => import('./components/SessionWorkspace'));
 const SecretsPage = lazy(() => import('./components/SecretsPage'));
 const SecurityPage = lazy(() => import('./components/SecurityPage'));
 const TeamPage = lazy(() => import('./components/TeamPage'));
+const DiscordSetupPage = lazy(() => import('./components/DiscordSetupPage'));
 const WatchPage = lazy(() => import('./components/WatchPage'));
 
 function parseSessionFromPath(): string | null {
@@ -121,6 +122,20 @@ export default function App() {
         fallback={<LoadingScreen message={tr('web.common.loading')} />}
       >
         <TeamPage email={user.email} />
+      </Suspense>
+    );
+  }
+
+  if (location.pathname === '/discord/setup') {
+    if (!user.isOwner) {
+      location.href = '/';
+      return null;
+    }
+    return (
+      <Suspense
+        fallback={<LoadingScreen message={tr('web.common.loading')} />}
+      >
+        <DiscordSetupPage email={user.email} />
       </Suspense>
     );
   }

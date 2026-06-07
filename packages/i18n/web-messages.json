@@ -1,254 +1,1314 @@
 {
-  "web.common.loading": { "en": "Loading…", "fr": "Chargement…" },
-  "web.common.loadingSession": { "en": "Loading session…", "fr": "Chargement de la session…" },
-  "web.common.loadingWatch": { "en": "Loading watch…", "fr": "Chargement du watch…" },
-  "web.common.signOut": { "en": "Sign out", "fr": "Déconnexion" },
-  "web.common.signingOut": { "en": "Signing out…", "fr": "Déconnexion…" },
-  "web.common.back": { "en": "← Back", "fr": "← Retour" },
-  "web.common.email": { "en": "Email", "fr": "E-mail" },
-  "web.common.password": { "en": "Password", "fr": "Mot de passe" },
-  "web.common.confirm": { "en": "Confirm", "fr": "Confirmer" },
-  "web.common.cancel": { "en": "Cancel", "fr": "Annuler" },
-  "web.common.save": { "en": "Save", "fr": "Enregistrer" },
-  "web.common.delete": { "en": "Delete", "fr": "Supprimer" },
-  "web.common.close": { "en": "Close", "fr": "Fermer" },
-  "web.common.copy": { "en": "Copy", "fr": "Copier" },
-  "web.common.copied": { "en": "Copied", "fr": "Copié" },
-  "web.common.error": { "en": "Error", "fr": "Erreur" },
-  "web.common.yes": { "en": "Yes", "fr": "Oui" },
-  "web.common.no": { "en": "No", "fr": "Non" },
-  "web.api.timeout": { "en": "Request timed out. Please try again.", "fr": "Délai dépassé. Réessayez." },
-
-  "web.login.title": { "en": "bunny", "fr": "bunny" },
-  "web.login.subtitle": { "en": "Authentication required. No anonymous access.", "fr": "Authentification requise. Pas d’accès anonyme." },
-  "web.login.signIn": { "en": "Sign in", "fr": "Connexion" },
-  "web.login.signingIn": { "en": "Signing in…", "fr": "Connexion…" },
-  "web.login.failed": { "en": "Login failed", "fr": "Échec de la connexion" },
-  "web.login.mfaTitle": { "en": "Two-factor authentication", "fr": "Authentification à deux facteurs" },
-  "web.login.mfaHint": { "en": "Enter the code from your authenticator app for {email}.", "fr": "Saisissez le code de votre application d’authentification pour {email}." },
-  "web.login.recoveryCode": { "en": "Recovery code", "fr": "Code de récupération" },
-  "web.login.sixDigitCode": { "en": "6-digit code", "fr": "Code à 6 chiffres" },
-  "web.login.useAuthenticator": { "en": "Use authenticator code instead", "fr": "Utiliser le code de l’application" },
-  "web.login.useRecovery": { "en": "Use a recovery code", "fr": "Utiliser un code de récupération" },
-  "web.login.verify": { "en": "Verify", "fr": "Vérifier" },
-  "web.login.verifying": { "en": "Verifying…", "fr": "Vérification…" },
-  "web.login.backToSignIn": { "en": "Back to sign in", "fr": "Retour à la connexion" },
-  "web.login.mfaInvalid": { "en": "Invalid code. Check your authenticator app or recovery code and try again.", "fr": "Code invalide. Vérifiez l’application ou le code de récupération." },
-  "web.login.inviteTitle": { "en": "Accept invitation", "fr": "Accepter l’invitation" },
-  "web.login.inviteSubtitle": { "en": "Create your account to join the session. You do not need an existing password.", "fr": "Créez votre compte pour rejoindre la session. Aucun mot de passe existant requis." },
-  "web.login.choosePassword": { "en": "Choose a password", "fr": "Choisir un mot de passe" },
-  "web.login.newPasswordPlaceholder": { "en": "New password (min. 8 characters)", "fr": "Nouveau mot de passe (min. 8 caractères)" },
-  "web.login.confirmPassword": { "en": "Confirm password", "fr": "Confirmer le mot de passe" },
-  "web.login.passwordMismatch": { "en": "Passwords do not match", "fr": "Les mots de passe ne correspondent pas" },
-  "web.login.passwordMinLength": { "en": "Password must be at least 8 characters", "fr": "Le mot de passe doit contenir au moins 8 caractères" },
-  "web.login.creatingAccount": { "en": "Creating account…", "fr": "Création du compte…" },
-  "web.login.createAndJoin": { "en": "Create account & join", "fr": "Créer le compte et rejoindre" },
-  "web.login.alreadyHaveAccount": { "en": "Already have an account?", "fr": "Vous avez déjà un compte ?" },
-  "web.login.signInInstead": { "en": "Sign in instead", "fr": "Se connecter" },
-  "web.login.inviteFailed": { "en": "Invitation acceptance failed", "fr": "Échec de l’acceptation de l’invitation" },
-
-  "web.invite.pendingTitle": { "en": "Invitation pending", "fr": "Invitation en attente" },
-  "web.invite.signedInAs": { "en": "You are signed in as {email}.", "fr": "Vous êtes connecté en tant que {email}." },
-  "web.invite.forEmail": { "en": "This invitation is for {email}.", "fr": "Cette invitation est pour {email}." },
-  "web.invite.signOutHint": { "en": "Sign out to create or use the invited account.", "fr": "Déconnectez-vous pour utiliser le compte invité." },
-  "web.invite.signOutAccept": { "en": "Sign out & accept invitation", "fr": "Déconnexion et accepter l’invitation" },
-
-  "web.home.welcome": { "en": "Welcome, {email}", "fr": "Bienvenue, {email}" },
-  "web.home.subtitle": { "en": "Start or resume a remote dev session.", "fr": "Démarrez ou reprenez une session de développement à distance." },
-  "web.home.newSession": { "en": "New session", "fr": "Nouvelle session" },
-  "web.home.creating": { "en": "Creating…", "fr": "Création…" },
-  "web.home.security": { "en": "Security", "fr": "Sécurité" },
-  "web.home.team": { "en": "Team", "fr": "Équipe" },
-  "web.home.secretsVault": { "en": "Secrets vault", "fr": "Coffre de secrets" },
-  "web.home.setupClaude": { "en": "Setup Claude", "fr": "Configurer Claude" },
-  "web.home.settingUp": { "en": "Setting up…", "fr": "Configuration…" },
-  "web.home.claudeReady": { "en": "Claude is installed and authenticated.", "fr": "Claude est installé et authentifié." },
-  "web.home.recentSessions": { "en": "Recent sessions", "fr": "Sessions récentes" },
-  "web.home.noSessions": { "en": "No sessions yet.", "fr": "Aucune session pour l’instant." },
-  "web.home.deleteSessionConfirm": { "en": "Delete this session? All shells will be stopped and removed.", "fr": "Supprimer cette session ? Tous les shells seront arrêtés et supprimés." },
-  "web.home.deleteSession": { "en": "Delete session", "fr": "Supprimer la session" },
-  "web.home.renameHint": { "en": "Double-click to rename session", "fr": "Double-clic pour renommer la session" },
-  "web.home.claudeInstallFailed": { "en": "Claude installation failed", "fr": "Échec de l’installation de Claude" },
-  "web.home.claudeInstallTimeout": { "en": "Claude installation timed out", "fr": "Délai d’installation de Claude dépassé" },
-
-  "web.security.title": { "en": "Security", "fr": "Sécurité" },
-
-  "web.team.title": { "en": "Team", "fr": "Équipe" },
-  "web.team.subtitle": { "en": "Manage users and invitations (owner only).", "fr": "Gérer les utilisateurs et invitations (propriétaire uniquement)." },
-  "web.team.loadFailed": { "en": "Cannot load users", "fr": "Impossible de charger les utilisateurs" },
-  "web.team.inviteFailed": { "en": "Invite failed", "fr": "Échec de l’invitation" },
-  "web.team.updateFailed": { "en": "Update failed", "fr": "Échec de la mise à jour" },
-  "web.team.revokeFailed": { "en": "Revoke failed", "fr": "Échec de la révocation" },
-  "web.team.removeConfirm": { "en": "Remove {email}? They will be signed out and lose access to all sessions.", "fr": "Retirer {email} ? L’utilisateur sera déconnecté et perdra l’accès à toutes les sessions." },
-  "web.team.inviteUser": { "en": "Invite user", "fr": "Inviter un utilisateur" },
-  "web.team.inviteEmail": { "en": "Email address", "fr": "Adresse e-mail" },
-  "web.team.defaultRole": { "en": "Default session role", "fr": "Rôle de session par défaut" },
-  "web.team.canCreateSessions": { "en": "Can create sessions", "fr": "Peut créer des sessions" },
-  "web.team.canInstallClaude": { "en": "Can install Claude", "fr": "Peut installer Claude" },
-  "web.team.canManageVault": { "en": "Can manage secrets vault", "fr": "Peut gérer le coffre de secrets" },
-  "web.team.sendInvite": { "en": "Send invite", "fr": "Envoyer l’invitation" },
-  "web.team.sending": { "en": "Sending…", "fr": "Envoi…" },
-  "web.team.inviteLink": { "en": "Invitation link (share once)", "fr": "Lien d’invitation (à partager une fois)" },
-  "web.team.members": { "en": "Members", "fr": "Membres" },
-  "web.team.owner": { "en": "Owner", "fr": "Propriétaire" },
-  "web.team.disabled": { "en": "Disabled", "fr": "Désactivé" },
-  "web.team.remove": { "en": "Remove", "fr": "Retirer" },
-  "web.team.removing": { "en": "Removing…", "fr": "Retrait…" },
-  "web.team.home": { "en": "← Home", "fr": "← Accueil" },
-  "web.team.signedInAs": { "en": "Signed in as {email}.", "fr": "Connecté en tant que {email}." },
-  "web.team.createInviteLink": { "en": "Create invite link", "fr": "Créer le lien d’invitation" },
-  "web.team.creating": { "en": "Creating…", "fr": "Création…" },
-  "web.team.invitationCreated": { "en": "Invitation created for {email}", "fr": "Invitation créée pour {email}" },
-  "web.team.shareLink": { "en": "Share this link (valid 7 days):", "fr": "Partagez ce lien (valide 7 jours) :" },
-  "web.team.copyLink": { "en": "Copy link", "fr": "Copier le lien" },
-  "web.team.noUsers": { "en": "No users.", "fr": "Aucun utilisateur." },
-  "web.team.colUser": { "en": "User", "fr": "Utilisateur" },
-  "web.team.colStatus": { "en": "Status", "fr": "Statut" },
-  "web.team.colSessions": { "en": "Sessions", "fr": "Sessions" },
-  "web.team.colClaude": { "en": "Claude", "fr": "Claude" },
-  "web.team.colVault": { "en": "Vault", "fr": "Coffre" },
-  "web.team.colRole": { "en": "Default role", "fr": "Rôle par défaut" },
-  "web.team.systemOwner": { "en": "system owner", "fr": "propriétaire système" },
-  "web.team.active": { "en": "active", "fr": "actif" },
-  "web.team.create": { "en": "create", "fr": "créer" },
-  "web.team.install": { "en": "install", "fr": "installer" },
-  "web.team.manage": { "en": "manage", "fr": "gérer" },
-
-  "web.secrets.title": { "en": "Secrets vault", "fr": "Coffre de secrets" },
-  "web.secrets.subtitle": { "en": "Encrypted secrets for shells and automation.", "fr": "Secrets chiffrés pour les shells et l’automatisation." },
-  "web.secrets.locked": { "en": "Vault is locked", "fr": "Coffre verrouillé" },
-  "web.secrets.unlocked": { "en": "Vault unlocked", "fr": "Coffre déverrouillé" },
-  "web.secrets.initTitle": { "en": "Initialize vault", "fr": "Initialiser le coffre" },
-  "web.secrets.initHint": { "en": "Choose a passphrase (shown only at setup).", "fr": "Choisissez une phrase secrète (affichée uniquement à la configuration)." },
-  "web.secrets.passphrase": { "en": "Passphrase", "fr": "Phrase secrète" },
-  "web.secrets.confirmPassphrase": { "en": "Confirm passphrase", "fr": "Confirmer la phrase secrète" },
-  "web.secrets.unlock": { "en": "Unlock", "fr": "Déverrouiller" },
-  "web.secrets.lock": { "en": "Lock vault", "fr": "Verrouiller le coffre" },
-  "web.secrets.addSecret": { "en": "Add secret", "fr": "Ajouter un secret" },
-  "web.secrets.name": { "en": "Name", "fr": "Nom" },
-  "web.secrets.scope": { "en": "Scope", "fr": "Portée" },
-  "web.secrets.scopeSystem": { "en": "System", "fr": "Système" },
-  "web.secrets.scopeProject": { "en": "Project", "fr": "Projet" },
-  "web.secrets.scopeSession": { "en": "Session", "fr": "Session" },
-  "web.secrets.value": { "en": "Value", "fr": "Valeur" },
-  "web.secrets.reveal": { "en": "Reveal", "fr": "Afficher" },
-  "web.secrets.hide": { "en": "Hide", "fr": "Masquer" },
-  "web.secrets.envVar": { "en": "Env var", "fr": "Variable d’env." },
-  "web.secrets.savedAs": { "en": "Saved as {env_var}", "fr": "Enregistré sous {env_var}" },
-  "web.secrets.deleteConfirm": { "en": "Delete secret \"{name}\"?", "fr": "Supprimer le secret « {name} » ?" },
-  "web.secrets.noSecrets": { "en": "No secrets in this vault.", "fr": "Aucun secret dans ce coffre." },
-
-  "web.mfa.title": { "en": "Two-factor authentication (TOTP)", "fr": "Authentification à deux facteurs (TOTP)" },
-  "web.mfa.enabled": { "en": "MFA is enabled.", "fr": "La MFA est activée." },
-  "web.mfa.disabled": { "en": "MFA is not enabled.", "fr": "La MFA n’est pas activée." },
-  "web.mfa.recoveryRemaining": { "en": "{count} recovery codes remaining", "fr": "{count} codes de récupération restants" },
-  "web.mfa.enable": { "en": "Enable MFA", "fr": "Activer la MFA" },
-  "web.mfa.disable": { "en": "Disable MFA", "fr": "Désactiver la MFA" },
-  "web.mfa.regenerateRecovery": { "en": "Regenerate recovery codes", "fr": "Régénérer les codes de récupération" },
-  "web.mfa.needPassword": { "en": "Enter your password to continue.", "fr": "Saisissez votre mot de passe pour continuer." },
-  "web.mfa.scanQr": { "en": "Scan this QR code or enter the secret manually:", "fr": "Scannez ce QR code ou saisissez le secret manuellement :" },
-  "web.mfa.confirmCode": { "en": "Confirmation code", "fr": "Code de confirmation" },
-  "web.mfa.recoveryTitle": { "en": "Recovery codes — save now", "fr": "Codes de récupération — enregistrez-les maintenant" },
-  "web.mfa.done": { "en": "Done", "fr": "Terminé" },
-  "web.mfa.loading": { "en": "Loading security settings…", "fr": "Chargement des paramètres de sécurité…" },
-  "web.mfa.compatHint": { "en": "Compatible with Google Authenticator, Microsoft Authenticator, GitHub Mobile, and other TOTP apps.", "fr": "Compatible avec Google Authenticator, Microsoft Authenticator, GitHub Mobile et autres applications TOTP." },
-  "web.mfa.statusLabel": { "en": "Status:", "fr": "État :" },
-  "web.mfa.enabledLabel": { "en": "Enabled", "fr": "Activée" },
-  "web.mfa.disabledLabel": { "en": "Disabled", "fr": "Désactivée" },
-  "web.mfa.recoveryLeft": { "en": "· {count} recovery codes left", "fr": "· {count} codes de récupération restants" },
-  "web.mfa.passwordPrompt": { "en": "Re-enter your password if your session is older than 5 minutes.", "fr": "Resaisissez votre mot de passe si la session a plus de 5 minutes." },
-  "web.mfa.passwordIfPrompted": { "en": "Password (if prompted)", "fr": "Mot de passe (si demandé)" },
-  "web.mfa.setupAuthenticator": { "en": "Set up authenticator", "fr": "Configurer l’application" },
-  "web.mfa.secretWarning": { "en": "Never share this secret. It is shown only during setup.", "fr": "Ne partagez jamais ce secret. Affiché uniquement lors de la configuration." },
-  "web.mfa.manualEntry": { "en": "Manual entry:", "fr": "Saisie manuelle :" },
-  "web.mfa.sixDigitFromApp": { "en": "6-digit code from app", "fr": "Code à 6 chiffres de l’application" },
-  "web.mfa.confirmEnable": { "en": "Confirm and enable", "fr": "Confirmer et activer" },
-  "web.mfa.recoverySaveNow": { "en": "Save these recovery codes now. They will not be shown again.", "fr": "Enregistrez ces codes maintenant. Ils ne seront plus affichés." },
-  "web.mfa.savedThem": { "en": "I have saved them", "fr": "Je les ai enregistrés" },
-  "web.mfa.currentTotp": { "en": "Current TOTP code", "fr": "Code TOTP actuel" },
-  "web.mfa.generateNewRecovery": { "en": "Generate new recovery codes", "fr": "Générer de nouveaux codes" },
-  "web.mfa.disableTitle": { "en": "Disable MFA", "fr": "Désactiver la MFA" },
-  "web.mfa.disableButton": { "en": "Disable two-factor authentication", "fr": "Désactiver l’authentification à deux facteurs" },
-  "web.mfa.account": { "en": "Account: {email}", "fr": "Compte : {email}" },
-  "web.mfa.qrAlt": { "en": "QR code for authenticator app", "fr": "QR code pour l’application d’authentification" },
-
-  "web.session.home": { "en": "← Sessions", "fr": "← Sessions" },
-  "web.session.statusSeparator": { "en": "—", "fr": "—" },
-  "web.session.renameHint": { "en": "Double-click to rename session", "fr": "Double-clic pour renommer la session" },
-  "web.session.statusConnecting": { "en": "connecting", "fr": "connexion" },
-  "web.session.statusReady": { "en": "ready", "fr": "prêt" },
-  "web.session.statusNoShells": { "en": "no shells", "fr": "aucun shell" },
-  "web.session.discord": { "en": "Discord", "fr": "Discord" },
-  "web.session.discordTitle": { "en": "Link Discord channel to this session", "fr": "Lier un canal Discord à cette session" },
-  "web.session.members": { "en": "Members", "fr": "Membres" },
-  "web.session.membersTitle": { "en": "Manage session members", "fr": "Gérer les membres de la session" },
-  "web.session.vault": { "en": "Vault", "fr": "Coffre" },
-  "web.session.vaultLockedTitle": { "en": "Vault locked — click to unlock", "fr": "Coffre verrouillé — cliquer pour déverrouiller" },
-  "web.session.vaultHide": { "en": "Hide vault panel", "fr": "Masquer le panneau coffre" },
-  "web.session.vaultShow": { "en": "Show vault panel", "fr": "Afficher le panneau coffre" },
-  "web.session.tabTerminal": { "en": "Terminal", "fr": "Terminal" },
-  "web.session.tabPreview": { "en": "Preview", "fr": "Aperçu" },
-  "web.session.tabBrowser": { "en": "Browser", "fr": "Navigateur" },
-  "web.session.noActiveShell": { "en": "No active shell", "fr": "Aucun shell actif" },
-  "web.session.shellUnavailable": { "en": "Shell unavailable", "fr": "Shell indisponible" },
-
-  "web.shell.new": { "en": "New shell", "fr": "Nouveau shell" },
-  "web.shell.close": { "en": "Close shell", "fr": "Fermer le shell" },
-  "web.shell.closeConfirm": { "en": "Close shell \"{name}\"?", "fr": "Fermer le shell « {name} » ?" },
-
-  "web.claude.setupTitle": { "en": "Claude Code setup", "fr": "Configuration Claude Code" },
-  "web.claude.install": { "en": "Install Claude", "fr": "Installer Claude" },
-  "web.claude.authenticate": { "en": "Authenticate", "fr": "Authentifier" },
-  "web.claude.waitingUrl": { "en": "Open this URL to sign in:", "fr": "Ouvrez cette URL pour vous connecter :" },
-  "web.claude.waitingCode": { "en": "Enter the code shown in your browser:", "fr": "Saisissez le code affiché dans le navigateur :" },
-
-  "web.watch.title": { "en": "Live watch", "fr": "Watch en direct" },
-  "web.watch.expires": { "en": "expires {date}", "fr": "expire le {date}" },
-  "web.watch.readOnly": { "en": "Read-only", "fr": "Lecture seule" },
-  "web.watch.interactive": { "en": "Interactive", "fr": "Interactif" },
-  "web.watch.requestAccess": { "en": "Request access", "fr": "Demander l’accès" },
-  "web.watch.connecting": { "en": "Connecting…", "fr": "Connexion…" },
-  "web.watch.unavailable": { "en": "Watch stream ended or unavailable", "fr": "Flux watch terminé ou indisponible" },
-  "web.watch.header": { "en": "Bunny watch · layout {layout} · {mode}", "fr": "Bunny watch · disposition {layout} · {mode}" },
-  "web.watch.noBrowser": { "en": "No browser stream in this session.", "fr": "Aucun flux navigateur dans cette session." },
-  "web.watch.iframeTitle": { "en": "Bunny watch", "fr": "Bunny watch" },
-  "web.session.tmuxHint": { "en": "Shells run in tmux and survive agent restarts. Closing the browser only disconnects you — stop the agent, restart it, then re-open this session. Use × to close a shell for good.", "fr": "Les shells tournent dans tmux et survivent aux redémarrages de l’agent. Fermer le navigateur vous déconnecte seulement — arrêtez l’agent, redémarrez-le, puis rouvrez cette session. Utilisez × pour fermer un shell définitivement." },
-  "web.session.noShellOpen": { "en": "No shell open.", "fr": "Aucun shell ouvert." },
-  "web.session.vaultLockedHint": { "en": "Vault is locked — unlock it then open a shell to inject secrets (BUNNY_SECRET_*).", "fr": "Le coffre est verrouillé — déverrouillez-le puis ouvrez un shell pour injecter les secrets (BUNNY_SECRET_*)." },
-  "web.session.vaultUnlockHint": { "en": "Unlock the vault to inject BUNNY_SECRET_* variables into open shells.", "fr": "Déverrouillez le coffre pour injecter les variables BUNNY_SECRET_* dans les shells ouverts." },
-
-  "web.discord.modalTitle": { "en": "Discord link", "fr": "Lien Discord" },
-  "web.discord.generateCode": { "en": "Generate link code", "fr": "Générer un code de liaison" },
-  "web.discord.codeExpires": { "en": "Code expires in {minutes} min", "fr": "Le code expire dans {minutes} min" },
-  "web.discord.useInDiscord": { "en": "Use in Discord: /bunny link code:…", "fr": "Dans Discord : /bunny link code:…" },
-  "web.discord.revoke": { "en": "Revoke links", "fr": "Révoquer les liens" },
-
-  "web.members.modalTitle": { "en": "Session members", "fr": "Membres de la session" },
-  "web.members.invite": { "en": "Invite by email", "fr": "Inviter par e-mail" },
-  "web.members.role": { "en": "Role", "fr": "Rôle" },
-  "web.members.remove": { "en": "Remove", "fr": "Retirer" },
-
-  "web.preview.noPort": { "en": "No preview port configured.", "fr": "Aucun port d’aperçu configuré." },
-  "web.preview.open": { "en": "Open preview", "fr": "Ouvrir l’aperçu" },
-
-  "web.browser.start": { "en": "Start browser", "fr": "Démarrer le navigateur" },
-  "web.browser.stop": { "en": "Stop browser", "fr": "Arrêter le navigateur" },
-  "web.browser.notRunning": { "en": "Browser is not running.", "fr": "Le navigateur n’est pas démarré." },
-
-  "web.vault.panelTitle": { "en": "Vault", "fr": "Coffre" },
-  "web.vault.locked": { "en": "Locked", "fr": "Verrouillé" },
-  "web.vault.clickToInsert": { "en": "Click → insert at cursor", "fr": "Clic → insère au curseur" },
-  "web.vault.manage": { "en": "Manage →", "fr": "Gérer →" },
-  "web.vault.noSecrets": { "en": "No secrets.", "fr": "Aucun secret." },
-  "web.vault.insertAtCursor": { "en": "Insert ${env_var} at cursor", "fr": "Insérer ${env_var} au curseur" },
-  "web.vault.bannerLocked": { "en": "Secrets vault locked — terminals cannot access secrets.", "fr": "Coffre verrouillé — les terminaux n’ont pas accès aux secrets." },
-  "web.vault.sidebarHintPrefix": { "en": "Vault locked — {count} secret{plural} waiting.", "fr": "Coffre verrouillé — {count} secret{plural} en attente." },
-  "web.vault.sidebarHintSuffix": { "en": "Then open a new shell.", "fr": "Puis ouvrez un nouveau shell." },
-  "web.vault.unlockTitle": { "en": "Unlock secrets vault", "fr": "Déverrouiller le coffre de secrets" },
-  "web.vault.unlockHintSession": { "en": "Open shells in this session will reload (values are not shown).", "fr": "Les shells ouverts dans cette session seront rechargés (sans afficher les valeurs)." },
-  "web.vault.unlockHintGlobal": { "en": "Running shells will reload (values are not shown).", "fr": "Les shells en cours seront rechargés (sans afficher les valeurs)." },
-  "web.vault.passphrase": { "en": "Passphrase", "fr": "Phrase secrète" },
-  "web.vault.unlockButton": { "en": "Unlock", "fr": "Déverrouiller" },
-  "web.vault.unlocking": { "en": "Unlocking…", "fr": "Déverrouillage…" },
-  "web.vault.inject": { "en": "Inject into session", "fr": "Injecter dans la session" }
+  "web.common.loading": {
+    "en": "Loading…",
+    "fr": "Chargement…"
+  },
+  "web.common.loadingSession": {
+    "en": "Loading session…",
+    "fr": "Chargement de la session…"
+  },
+  "web.common.loadingWatch": {
+    "en": "Loading watch…",
+    "fr": "Chargement du watch…"
+  },
+  "web.common.signOut": {
+    "en": "Sign out",
+    "fr": "Déconnexion"
+  },
+  "web.common.signingOut": {
+    "en": "Signing out…",
+    "fr": "Déconnexion…"
+  },
+  "web.common.back": {
+    "en": "← Back",
+    "fr": "← Retour"
+  },
+  "web.common.email": {
+    "en": "Email",
+    "fr": "E-mail"
+  },
+  "web.common.password": {
+    "en": "Password",
+    "fr": "Mot de passe"
+  },
+  "web.common.confirm": {
+    "en": "Confirm",
+    "fr": "Confirmer"
+  },
+  "web.common.cancel": {
+    "en": "Cancel",
+    "fr": "Annuler"
+  },
+  "web.common.save": {
+    "en": "Save",
+    "fr": "Enregistrer"
+  },
+  "web.common.delete": {
+    "en": "Delete",
+    "fr": "Supprimer"
+  },
+  "web.common.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
+  "web.common.copy": {
+    "en": "Copy",
+    "fr": "Copier"
+  },
+  "web.common.copied": {
+    "en": "Copied",
+    "fr": "Copié"
+  },
+  "web.common.error": {
+    "en": "Error",
+    "fr": "Erreur"
+  },
+  "web.common.yes": {
+    "en": "Yes",
+    "fr": "Oui"
+  },
+  "web.common.no": {
+    "en": "No",
+    "fr": "Non"
+  },
+  "web.api.timeout": {
+    "en": "Request timed out. Please try again.",
+    "fr": "Délai dépassé. Réessayez."
+  },
+  "web.login.title": {
+    "en": "bunny",
+    "fr": "bunny"
+  },
+  "web.login.subtitle": {
+    "en": "Authentication required. No anonymous access.",
+    "fr": "Authentification requise. Pas d’accès anonyme."
+  },
+  "web.login.signIn": {
+    "en": "Sign in",
+    "fr": "Connexion"
+  },
+  "web.login.signingIn": {
+    "en": "Signing in…",
+    "fr": "Connexion…"
+  },
+  "web.login.failed": {
+    "en": "Login failed",
+    "fr": "Échec de la connexion"
+  },
+  "web.login.mfaTitle": {
+    "en": "Two-factor authentication",
+    "fr": "Authentification à deux facteurs"
+  },
+  "web.login.mfaHint": {
+    "en": "Enter the code from your authenticator app for {email}.",
+    "fr": "Saisissez le code de votre application d’authentification pour {email}."
+  },
+  "web.login.recoveryCode": {
+    "en": "Recovery code",
+    "fr": "Code de récupération"
+  },
+  "web.login.sixDigitCode": {
+    "en": "6-digit code",
+    "fr": "Code à 6 chiffres"
+  },
+  "web.login.useAuthenticator": {
+    "en": "Use authenticator code instead",
+    "fr": "Utiliser le code de l’application"
+  },
+  "web.login.useRecovery": {
+    "en": "Use a recovery code",
+    "fr": "Utiliser un code de récupération"
+  },
+  "web.login.verify": {
+    "en": "Verify",
+    "fr": "Vérifier"
+  },
+  "web.login.verifying": {
+    "en": "Verifying…",
+    "fr": "Vérification…"
+  },
+  "web.login.backToSignIn": {
+    "en": "Back to sign in",
+    "fr": "Retour à la connexion"
+  },
+  "web.login.mfaInvalid": {
+    "en": "Invalid code. Check your authenticator app or recovery code and try again.",
+    "fr": "Code invalide. Vérifiez l’application ou le code de récupération."
+  },
+  "web.login.inviteTitle": {
+    "en": "Accept invitation",
+    "fr": "Accepter l’invitation"
+  },
+  "web.login.inviteSubtitle": {
+    "en": "Create your account to join the session. You do not need an existing password.",
+    "fr": "Créez votre compte pour rejoindre la session. Aucun mot de passe existant requis."
+  },
+  "web.login.choosePassword": {
+    "en": "Choose a password",
+    "fr": "Choisir un mot de passe"
+  },
+  "web.login.newPasswordPlaceholder": {
+    "en": "New password (min. 8 characters)",
+    "fr": "Nouveau mot de passe (min. 8 caractères)"
+  },
+  "web.login.confirmPassword": {
+    "en": "Confirm password",
+    "fr": "Confirmer le mot de passe"
+  },
+  "web.login.passwordMismatch": {
+    "en": "Passwords do not match",
+    "fr": "Les mots de passe ne correspondent pas"
+  },
+  "web.login.passwordMinLength": {
+    "en": "Password must be at least 8 characters",
+    "fr": "Le mot de passe doit contenir au moins 8 caractères"
+  },
+  "web.login.creatingAccount": {
+    "en": "Creating account…",
+    "fr": "Création du compte…"
+  },
+  "web.login.createAndJoin": {
+    "en": "Create account & join",
+    "fr": "Créer le compte et rejoindre"
+  },
+  "web.login.alreadyHaveAccount": {
+    "en": "Already have an account?",
+    "fr": "Vous avez déjà un compte ?"
+  },
+  "web.login.signInInstead": {
+    "en": "Sign in instead",
+    "fr": "Se connecter"
+  },
+  "web.login.inviteFailed": {
+    "en": "Invitation acceptance failed",
+    "fr": "Échec de l’acceptation de l’invitation"
+  },
+  "web.invite.pendingTitle": {
+    "en": "Invitation pending",
+    "fr": "Invitation en attente"
+  },
+  "web.invite.signedInAs": {
+    "en": "You are signed in as {email}.",
+    "fr": "Vous êtes connecté en tant que {email}."
+  },
+  "web.invite.forEmail": {
+    "en": "This invitation is for {email}.",
+    "fr": "Cette invitation est pour {email}."
+  },
+  "web.invite.signOutHint": {
+    "en": "Sign out to create or use the invited account.",
+    "fr": "Déconnectez-vous pour utiliser le compte invité."
+  },
+  "web.invite.signOutAccept": {
+    "en": "Sign out & accept invitation",
+    "fr": "Déconnexion et accepter l’invitation"
+  },
+  "web.home.welcome": {
+    "en": "Welcome, {email}",
+    "fr": "Bienvenue, {email}"
+  },
+  "web.home.subtitle": {
+    "en": "Start or resume a remote dev session.",
+    "fr": "Démarrez ou reprenez une session de développement à distance."
+  },
+  "web.home.newSession": {
+    "en": "New session",
+    "fr": "Nouvelle session"
+  },
+  "web.home.creating": {
+    "en": "Creating…",
+    "fr": "Création…"
+  },
+  "web.home.security": {
+    "en": "Security",
+    "fr": "Sécurité"
+  },
+  "web.home.team": {
+    "en": "Team",
+    "fr": "Équipe"
+  },
+  "web.home.secretsVault": {
+    "en": "Secrets vault",
+    "fr": "Coffre de secrets"
+  },
+  "web.home.setupClaude": {
+    "en": "Setup Claude",
+    "fr": "Configurer Claude"
+  },
+  "web.home.settingUp": {
+    "en": "Setting up…",
+    "fr": "Configuration…"
+  },
+  "web.home.claudeReady": {
+    "en": "Claude is installed and authenticated.",
+    "fr": "Claude est installé et authentifié."
+  },
+  "web.home.recentSessions": {
+    "en": "Recent sessions",
+    "fr": "Sessions récentes"
+  },
+  "web.home.noSessions": {
+    "en": "No sessions yet.",
+    "fr": "Aucune session pour l’instant."
+  },
+  "web.home.deleteSessionConfirm": {
+    "en": "Delete this session? All shells will be stopped and removed.",
+    "fr": "Supprimer cette session ? Tous les shells seront arrêtés et supprimés."
+  },
+  "web.home.deleteSession": {
+    "en": "Delete session",
+    "fr": "Supprimer la session"
+  },
+  "web.home.renameHint": {
+    "en": "Double-click to rename session",
+    "fr": "Double-clic pour renommer la session"
+  },
+  "web.home.claudeInstallFailed": {
+    "en": "Claude installation failed",
+    "fr": "Échec de l’installation de Claude"
+  },
+  "web.home.claudeInstallTimeout": {
+    "en": "Claude installation timed out",
+    "fr": "Délai d’installation de Claude dépassé"
+  },
+  "web.security.title": {
+    "en": "Security",
+    "fr": "Sécurité"
+  },
+  "web.team.title": {
+    "en": "Team",
+    "fr": "Équipe"
+  },
+  "web.team.subtitle": {
+    "en": "Manage users and invitations (owner only).",
+    "fr": "Gérer les utilisateurs et invitations (propriétaire uniquement)."
+  },
+  "web.team.loadFailed": {
+    "en": "Cannot load users",
+    "fr": "Impossible de charger les utilisateurs"
+  },
+  "web.team.inviteFailed": {
+    "en": "Invite failed",
+    "fr": "Échec de l’invitation"
+  },
+  "web.team.updateFailed": {
+    "en": "Update failed",
+    "fr": "Échec de la mise à jour"
+  },
+  "web.team.revokeFailed": {
+    "en": "Revoke failed",
+    "fr": "Échec de la révocation"
+  },
+  "web.team.removeConfirm": {
+    "en": "Remove {email}? They will be signed out and lose access to all sessions.",
+    "fr": "Retirer {email} ? L’utilisateur sera déconnecté et perdra l’accès à toutes les sessions."
+  },
+  "web.team.inviteUser": {
+    "en": "Invite user",
+    "fr": "Inviter un utilisateur"
+  },
+  "web.team.inviteEmail": {
+    "en": "Email address",
+    "fr": "Adresse e-mail"
+  },
+  "web.team.defaultRole": {
+    "en": "Default session role",
+    "fr": "Rôle de session par défaut"
+  },
+  "web.team.canCreateSessions": {
+    "en": "Can create sessions",
+    "fr": "Peut créer des sessions"
+  },
+  "web.team.canInstallClaude": {
+    "en": "Can install Claude",
+    "fr": "Peut installer Claude"
+  },
+  "web.team.canManageVault": {
+    "en": "Can manage secrets vault",
+    "fr": "Peut gérer le coffre de secrets"
+  },
+  "web.team.sendInvite": {
+    "en": "Send invite",
+    "fr": "Envoyer l’invitation"
+  },
+  "web.team.sending": {
+    "en": "Sending…",
+    "fr": "Envoi…"
+  },
+  "web.team.inviteLink": {
+    "en": "Invitation link (share once)",
+    "fr": "Lien d’invitation (à partager une fois)"
+  },
+  "web.team.members": {
+    "en": "Members",
+    "fr": "Membres"
+  },
+  "web.team.owner": {
+    "en": "Owner",
+    "fr": "Propriétaire"
+  },
+  "web.team.disabled": {
+    "en": "Disabled",
+    "fr": "Désactivé"
+  },
+  "web.team.remove": {
+    "en": "Remove",
+    "fr": "Retirer"
+  },
+  "web.team.removing": {
+    "en": "Removing…",
+    "fr": "Retrait…"
+  },
+  "web.team.home": {
+    "en": "← Home",
+    "fr": "← Accueil"
+  },
+  "web.team.signedInAs": {
+    "en": "Signed in as {email}.",
+    "fr": "Connecté en tant que {email}."
+  },
+  "web.team.createInviteLink": {
+    "en": "Create invite link",
+    "fr": "Créer le lien d’invitation"
+  },
+  "web.team.creating": {
+    "en": "Creating…",
+    "fr": "Création…"
+  },
+  "web.team.invitationCreated": {
+    "en": "Invitation created for {email}",
+    "fr": "Invitation créée pour {email}"
+  },
+  "web.team.shareLink": {
+    "en": "Share this link (valid 7 days):",
+    "fr": "Partagez ce lien (valide 7 jours) :"
+  },
+  "web.team.copyLink": {
+    "en": "Copy link",
+    "fr": "Copier le lien"
+  },
+  "web.team.noUsers": {
+    "en": "No users.",
+    "fr": "Aucun utilisateur."
+  },
+  "web.team.colUser": {
+    "en": "User",
+    "fr": "Utilisateur"
+  },
+  "web.team.colStatus": {
+    "en": "Status",
+    "fr": "Statut"
+  },
+  "web.team.colSessions": {
+    "en": "Sessions",
+    "fr": "Sessions"
+  },
+  "web.team.colClaude": {
+    "en": "Claude",
+    "fr": "Claude"
+  },
+  "web.team.colVault": {
+    "en": "Vault",
+    "fr": "Coffre"
+  },
+  "web.team.colRole": {
+    "en": "Default role",
+    "fr": "Rôle par défaut"
+  },
+  "web.team.systemOwner": {
+    "en": "system owner",
+    "fr": "propriétaire système"
+  },
+  "web.team.active": {
+    "en": "active",
+    "fr": "actif"
+  },
+  "web.team.create": {
+    "en": "create",
+    "fr": "créer"
+  },
+  "web.team.install": {
+    "en": "install",
+    "fr": "installer"
+  },
+  "web.team.manage": {
+    "en": "manage",
+    "fr": "gérer"
+  },
+  "web.secrets.title": {
+    "en": "Secrets vault",
+    "fr": "Coffre de secrets"
+  },
+  "web.secrets.subtitle": {
+    "en": "Encrypted secrets for shells and automation.",
+    "fr": "Secrets chiffrés pour les shells et l’automatisation."
+  },
+  "web.secrets.locked": {
+    "en": "Vault is locked",
+    "fr": "Coffre verrouillé"
+  },
+  "web.secrets.unlocked": {
+    "en": "Vault unlocked",
+    "fr": "Coffre déverrouillé"
+  },
+  "web.secrets.initTitle": {
+    "en": "Initialize vault",
+    "fr": "Initialiser le coffre"
+  },
+  "web.secrets.initHint": {
+    "en": "Choose a passphrase (shown only at setup).",
+    "fr": "Choisissez une phrase secrète (affichée uniquement à la configuration)."
+  },
+  "web.secrets.passphrase": {
+    "en": "Passphrase",
+    "fr": "Phrase secrète"
+  },
+  "web.secrets.confirmPassphrase": {
+    "en": "Confirm passphrase",
+    "fr": "Confirmer la phrase secrète"
+  },
+  "web.secrets.unlock": {
+    "en": "Unlock",
+    "fr": "Déverrouiller"
+  },
+  "web.secrets.lock": {
+    "en": "Lock vault",
+    "fr": "Verrouiller le coffre"
+  },
+  "web.secrets.addSecret": {
+    "en": "Add secret",
+    "fr": "Ajouter un secret"
+  },
+  "web.secrets.name": {
+    "en": "Name",
+    "fr": "Nom"
+  },
+  "web.secrets.scope": {
+    "en": "Scope",
+    "fr": "Portée"
+  },
+  "web.secrets.scopeSystem": {
+    "en": "System",
+    "fr": "Système"
+  },
+  "web.secrets.scopeProject": {
+    "en": "Project",
+    "fr": "Projet"
+  },
+  "web.secrets.scopeSession": {
+    "en": "Session",
+    "fr": "Session"
+  },
+  "web.secrets.value": {
+    "en": "Value",
+    "fr": "Valeur"
+  },
+  "web.secrets.reveal": {
+    "en": "Reveal",
+    "fr": "Afficher"
+  },
+  "web.secrets.hide": {
+    "en": "Hide",
+    "fr": "Masquer"
+  },
+  "web.secrets.envVar": {
+    "en": "Env var",
+    "fr": "Variable d’env."
+  },
+  "web.secrets.savedAs": {
+    "en": "Saved as {env_var}",
+    "fr": "Enregistré sous {env_var}"
+  },
+  "web.secrets.deleteConfirm": {
+    "en": "Delete secret \"{name}\"?",
+    "fr": "Supprimer le secret « {name} » ?"
+  },
+  "web.secrets.noSecrets": {
+    "en": "No secrets in this vault.",
+    "fr": "Aucun secret dans ce coffre."
+  },
+  "web.mfa.title": {
+    "en": "Two-factor authentication (TOTP)",
+    "fr": "Authentification à deux facteurs (TOTP)"
+  },
+  "web.mfa.enabled": {
+    "en": "MFA is enabled.",
+    "fr": "La MFA est activée."
+  },
+  "web.mfa.disabled": {
+    "en": "MFA is not enabled.",
+    "fr": "La MFA n’est pas activée."
+  },
+  "web.mfa.recoveryRemaining": {
+    "en": "{count} recovery codes remaining",
+    "fr": "{count} codes de récupération restants"
+  },
+  "web.mfa.enable": {
+    "en": "Enable MFA",
+    "fr": "Activer la MFA"
+  },
+  "web.mfa.disable": {
+    "en": "Disable MFA",
+    "fr": "Désactiver la MFA"
+  },
+  "web.mfa.regenerateRecovery": {
+    "en": "Regenerate recovery codes",
+    "fr": "Régénérer les codes de récupération"
+  },
+  "web.mfa.needPassword": {
+    "en": "Enter your password to continue.",
+    "fr": "Saisissez votre mot de passe pour continuer."
+  },
+  "web.mfa.scanQr": {
+    "en": "Scan this QR code or enter the secret manually:",
+    "fr": "Scannez ce QR code ou saisissez le secret manuellement :"
+  },
+  "web.mfa.confirmCode": {
+    "en": "Confirmation code",
+    "fr": "Code de confirmation"
+  },
+  "web.mfa.recoveryTitle": {
+    "en": "Recovery codes — save now",
+    "fr": "Codes de récupération — enregistrez-les maintenant"
+  },
+  "web.mfa.done": {
+    "en": "Done",
+    "fr": "Terminé"
+  },
+  "web.mfa.loading": {
+    "en": "Loading security settings…",
+    "fr": "Chargement des paramètres de sécurité…"
+  },
+  "web.mfa.compatHint": {
+    "en": "Compatible with Google Authenticator, Microsoft Authenticator, GitHub Mobile, and other TOTP apps.",
+    "fr": "Compatible avec Google Authenticator, Microsoft Authenticator, GitHub Mobile et autres applications TOTP."
+  },
+  "web.mfa.statusLabel": {
+    "en": "Status:",
+    "fr": "État :"
+  },
+  "web.mfa.enabledLabel": {
+    "en": "Enabled",
+    "fr": "Activée"
+  },
+  "web.mfa.disabledLabel": {
+    "en": "Disabled",
+    "fr": "Désactivée"
+  },
+  "web.mfa.recoveryLeft": {
+    "en": "· {count} recovery codes left",
+    "fr": "· {count} codes de récupération restants"
+  },
+  "web.mfa.passwordPrompt": {
+    "en": "Re-enter your password if your session is older than 5 minutes.",
+    "fr": "Resaisissez votre mot de passe si la session a plus de 5 minutes."
+  },
+  "web.mfa.passwordIfPrompted": {
+    "en": "Password (if prompted)",
+    "fr": "Mot de passe (si demandé)"
+  },
+  "web.mfa.setupAuthenticator": {
+    "en": "Set up authenticator",
+    "fr": "Configurer l’application"
+  },
+  "web.mfa.secretWarning": {
+    "en": "Never share this secret. It is shown only during setup.",
+    "fr": "Ne partagez jamais ce secret. Affiché uniquement lors de la configuration."
+  },
+  "web.mfa.manualEntry": {
+    "en": "Manual entry:",
+    "fr": "Saisie manuelle :"
+  },
+  "web.mfa.sixDigitFromApp": {
+    "en": "6-digit code from app",
+    "fr": "Code à 6 chiffres de l’application"
+  },
+  "web.mfa.confirmEnable": {
+    "en": "Confirm and enable",
+    "fr": "Confirmer et activer"
+  },
+  "web.mfa.recoverySaveNow": {
+    "en": "Save these recovery codes now. They will not be shown again.",
+    "fr": "Enregistrez ces codes maintenant. Ils ne seront plus affichés."
+  },
+  "web.mfa.savedThem": {
+    "en": "I have saved them",
+    "fr": "Je les ai enregistrés"
+  },
+  "web.mfa.currentTotp": {
+    "en": "Current TOTP code",
+    "fr": "Code TOTP actuel"
+  },
+  "web.mfa.generateNewRecovery": {
+    "en": "Generate new recovery codes",
+    "fr": "Générer de nouveaux codes"
+  },
+  "web.mfa.disableTitle": {
+    "en": "Disable MFA",
+    "fr": "Désactiver la MFA"
+  },
+  "web.mfa.disableButton": {
+    "en": "Disable two-factor authentication",
+    "fr": "Désactiver l’authentification à deux facteurs"
+  },
+  "web.mfa.account": {
+    "en": "Account: {email}",
+    "fr": "Compte : {email}"
+  },
+  "web.mfa.qrAlt": {
+    "en": "QR code for authenticator app",
+    "fr": "QR code pour l’application d’authentification"
+  },
+  "web.session.home": {
+    "en": "← Sessions",
+    "fr": "← Sessions"
+  },
+  "web.session.statusSeparator": {
+    "en": "—",
+    "fr": "—"
+  },
+  "web.session.renameHint": {
+    "en": "Double-click to rename session",
+    "fr": "Double-clic pour renommer la session"
+  },
+  "web.session.statusConnecting": {
+    "en": "connecting",
+    "fr": "connexion"
+  },
+  "web.session.statusReady": {
+    "en": "ready",
+    "fr": "prêt"
+  },
+  "web.session.statusNoShells": {
+    "en": "no shells",
+    "fr": "aucun shell"
+  },
+  "web.session.discord": {
+    "en": "Discord",
+    "fr": "Discord"
+  },
+  "web.session.discordTitle": {
+    "en": "Link Discord channel to this session",
+    "fr": "Lier un canal Discord à cette session"
+  },
+  "web.session.members": {
+    "en": "Members",
+    "fr": "Membres"
+  },
+  "web.session.membersTitle": {
+    "en": "Manage session members",
+    "fr": "Gérer les membres de la session"
+  },
+  "web.session.vault": {
+    "en": "Vault",
+    "fr": "Coffre"
+  },
+  "web.session.vaultLockedTitle": {
+    "en": "Vault locked — click to unlock",
+    "fr": "Coffre verrouillé — cliquer pour déverrouiller"
+  },
+  "web.session.vaultHide": {
+    "en": "Hide vault panel",
+    "fr": "Masquer le panneau coffre"
+  },
+  "web.session.vaultShow": {
+    "en": "Show vault panel",
+    "fr": "Afficher le panneau coffre"
+  },
+  "web.session.tabTerminal": {
+    "en": "Terminal",
+    "fr": "Terminal"
+  },
+  "web.session.tabPreview": {
+    "en": "Preview",
+    "fr": "Aperçu"
+  },
+  "web.session.tabBrowser": {
+    "en": "Browser",
+    "fr": "Navigateur"
+  },
+  "web.session.noActiveShell": {
+    "en": "No active shell",
+    "fr": "Aucun shell actif"
+  },
+  "web.session.shellUnavailable": {
+    "en": "Shell unavailable",
+    "fr": "Shell indisponible"
+  },
+  "web.shell.new": {
+    "en": "New shell",
+    "fr": "Nouveau shell"
+  },
+  "web.shell.close": {
+    "en": "Close shell",
+    "fr": "Fermer le shell"
+  },
+  "web.shell.closeConfirm": {
+    "en": "Close shell \"{name}\"?",
+    "fr": "Fermer le shell « {name} » ?"
+  },
+  "web.claude.setupTitle": {
+    "en": "Claude Code setup",
+    "fr": "Configuration Claude Code"
+  },
+  "web.claude.install": {
+    "en": "Install Claude",
+    "fr": "Installer Claude"
+  },
+  "web.claude.authenticate": {
+    "en": "Authenticate",
+    "fr": "Authentifier"
+  },
+  "web.claude.waitingUrl": {
+    "en": "Open this URL to sign in:",
+    "fr": "Ouvrez cette URL pour vous connecter :"
+  },
+  "web.claude.waitingCode": {
+    "en": "Enter the code shown in your browser:",
+    "fr": "Saisissez le code affiché dans le navigateur :"
+  },
+  "web.watch.title": {
+    "en": "Live watch",
+    "fr": "Watch en direct"
+  },
+  "web.watch.expires": {
+    "en": "expires {date}",
+    "fr": "expire le {date}"
+  },
+  "web.watch.readOnly": {
+    "en": "Read-only",
+    "fr": "Lecture seule"
+  },
+  "web.watch.interactive": {
+    "en": "Interactive",
+    "fr": "Interactif"
+  },
+  "web.watch.requestAccess": {
+    "en": "Request access",
+    "fr": "Demander l’accès"
+  },
+  "web.watch.connecting": {
+    "en": "Connecting…",
+    "fr": "Connexion…"
+  },
+  "web.watch.unavailable": {
+    "en": "Watch stream ended or unavailable",
+    "fr": "Flux watch terminé ou indisponible"
+  },
+  "web.watch.header": {
+    "en": "Bunny watch · layout {layout} · {mode}",
+    "fr": "Bunny watch · disposition {layout} · {mode}"
+  },
+  "web.watch.noBrowser": {
+    "en": "No browser stream in this session.",
+    "fr": "Aucun flux navigateur dans cette session."
+  },
+  "web.watch.iframeTitle": {
+    "en": "Bunny watch",
+    "fr": "Bunny watch"
+  },
+  "web.session.tmuxHint": {
+    "en": "Shells run in tmux and survive agent restarts. Closing the browser only disconnects you — stop the agent, restart it, then re-open this session. Use × to close a shell for good.",
+    "fr": "Les shells tournent dans tmux et survivent aux redémarrages de l’agent. Fermer le navigateur vous déconnecte seulement — arrêtez l’agent, redémarrez-le, puis rouvrez cette session. Utilisez × pour fermer un shell définitivement."
+  },
+  "web.session.noShellOpen": {
+    "en": "No shell open.",
+    "fr": "Aucun shell ouvert."
+  },
+  "web.session.vaultLockedHint": {
+    "en": "Vault is locked — unlock it then open a shell to inject secrets (BUNNY_SECRET_*).",
+    "fr": "Le coffre est verrouillé — déverrouillez-le puis ouvrez un shell pour injecter les secrets (BUNNY_SECRET_*)."
+  },
+  "web.session.vaultUnlockHint": {
+    "en": "Unlock the vault to inject BUNNY_SECRET_* variables into open shells.",
+    "fr": "Déverrouillez le coffre pour injecter les variables BUNNY_SECRET_* dans les shells ouverts."
+  },
+  "web.discord.modalTitle": {
+    "en": "Discord link",
+    "fr": "Lien Discord"
+  },
+  "web.discord.generateCode": {
+    "en": "Generate link code",
+    "fr": "Générer un code de liaison"
+  },
+  "web.discord.codeExpires": {
+    "en": "Code expires in {minutes} min",
+    "fr": "Le code expire dans {minutes} min"
+  },
+  "web.discord.useInDiscord": {
+    "en": "Use in Discord: /bunny link code:…",
+    "fr": "Dans Discord : /bunny link code:…"
+  },
+  "web.discord.revoke": {
+    "en": "Revoke links",
+    "fr": "Révoquer les liens"
+  },
+  "web.members.modalTitle": {
+    "en": "Session members",
+    "fr": "Membres de la session"
+  },
+  "web.members.invite": {
+    "en": "Invite by email",
+    "fr": "Inviter par e-mail"
+  },
+  "web.members.role": {
+    "en": "Role",
+    "fr": "Rôle"
+  },
+  "web.members.remove": {
+    "en": "Remove",
+    "fr": "Retirer"
+  },
+  "web.preview.noPort": {
+    "en": "No preview port configured.",
+    "fr": "Aucun port d’aperçu configuré."
+  },
+  "web.preview.open": {
+    "en": "Open preview",
+    "fr": "Ouvrir l’aperçu"
+  },
+  "web.browser.start": {
+    "en": "Start browser",
+    "fr": "Démarrer le navigateur"
+  },
+  "web.browser.stop": {
+    "en": "Stop browser",
+    "fr": "Arrêter le navigateur"
+  },
+  "web.browser.notRunning": {
+    "en": "Browser is not running.",
+    "fr": "Le navigateur n’est pas démarré."
+  },
+  "web.vault.panelTitle": {
+    "en": "Vault",
+    "fr": "Coffre"
+  },
+  "web.vault.locked": {
+    "en": "Locked",
+    "fr": "Verrouillé"
+  },
+  "web.vault.clickToInsert": {
+    "en": "Click → insert at cursor",
+    "fr": "Clic → insère au curseur"
+  },
+  "web.vault.manage": {
+    "en": "Manage →",
+    "fr": "Gérer →"
+  },
+  "web.vault.noSecrets": {
+    "en": "No secrets.",
+    "fr": "Aucun secret."
+  },
+  "web.vault.insertAtCursor": {
+    "en": "Insert ${env_var} at cursor",
+    "fr": "Insérer ${env_var} au curseur"
+  },
+  "web.vault.bannerLocked": {
+    "en": "Secrets vault locked — terminals cannot access secrets.",
+    "fr": "Coffre verrouillé — les terminaux n’ont pas accès aux secrets."
+  },
+  "web.vault.sidebarHintPrefix": {
+    "en": "Vault locked — {count} secret{plural} waiting.",
+    "fr": "Coffre verrouillé — {count} secret{plural} en attente."
+  },
+  "web.vault.sidebarHintSuffix": {
+    "en": "Then open a new shell.",
+    "fr": "Puis ouvrez un nouveau shell."
+  },
+  "web.vault.unlockTitle": {
+    "en": "Unlock secrets vault",
+    "fr": "Déverrouiller le coffre de secrets"
+  },
+  "web.vault.unlockHintSession": {
+    "en": "Open shells in this session will reload (values are not shown).",
+    "fr": "Les shells ouverts dans cette session seront rechargés (sans afficher les valeurs)."
+  },
+  "web.vault.unlockHintGlobal": {
+    "en": "Running shells will reload (values are not shown).",
+    "fr": "Les shells en cours seront rechargés (sans afficher les valeurs)."
+  },
+  "web.vault.passphrase": {
+    "en": "Passphrase",
+    "fr": "Phrase secrète"
+  },
+  "web.vault.unlockButton": {
+    "en": "Unlock",
+    "fr": "Déverrouiller"
+  },
+  "web.vault.unlocking": {
+    "en": "Unlocking…",
+    "fr": "Déverrouillage…"
+  },
+  "web.vault.inject": {
+    "en": "Inject into session",
+    "fr": "Injecter dans la session"
+  },
+  "web.discord.account.title": {
+    "en": "Discord account",
+    "fr": "Compte Discord"
+  },
+  "web.discord.account.description": {
+    "en": "Link your Discord identity once. After that, you can use Bunny on any session channel already linked by your team — permissions follow your session role.",
+    "fr": "Liez votre identité Discord une fois. Ensuite, utilisez Bunny sur tout canal de session déjà lié par votre équipe — les permissions suivent votre rôle sur la session."
+  },
+  "web.discord.account.connect": {
+    "en": "Connect your Discord account",
+    "fr": "Connecter votre compte Discord"
+  },
+  "web.discord.account.disconnect": {
+    "en": "Disconnect",
+    "fr": "Déconnecter"
+  },
+  "web.discord.account.linkedAs": {
+    "en": "Linked as {name}",
+    "fr": "Lié en tant que {name}"
+  },
+  "web.discord.account.notConfigured": {
+    "en": "Discord is not configured on this server yet. Ask an admin to set it up.",
+    "fr": "Discord n’est pas encore configuré sur ce serveur. Demandez à un admin de le configurer."
+  },
+  "web.discord.account.notConfiguredOwner": {
+    "en": "Discord is not configured yet. Set up the bot and OAuth so you and your team can link accounts and use /bunny in Discord.",
+    "fr": "Discord n’est pas encore configuré. Configurez le bot et OAuth pour lier les comptes et utiliser /bunny dans Discord."
+  },
+  "web.discord.account.setupButton": {
+    "en": "Set up Discord",
+    "fr": "Configurer Discord"
+  },
+  "web.discord.account.manageButton": {
+    "en": "Manage server setup",
+    "fr": "Gérer la configuration serveur"
+  },
+  "web.discord.account.loadFailed": {
+    "en": "Could not load Discord status",
+    "fr": "Impossible de charger le statut Discord"
+  },
+  "web.discord.account.unlinkFailed": {
+    "en": "Could not disconnect Discord",
+    "fr": "Impossible de déconnecter Discord"
+  },
+  "web.discord.account.linkSuccess": {
+    "en": "Discord account linked successfully.",
+    "fr": "Compte Discord lié avec succès."
+  },
+  "web.discord.account.linkConflict": {
+    "en": "This Discord account is already linked to another Bunny user.",
+    "fr": "Ce compte Discord est déjà lié à un autre utilisateur Bunny."
+  },
+  "web.discord.account.linkError": {
+    "en": "Discord linking failed or was cancelled.",
+    "fr": "Échec ou annulation de la liaison Discord."
+  },
+  "web.discord.account.unlinkSuccess": {
+    "en": "Discord account disconnected.",
+    "fr": "Compte Discord déconnecté."
+  },
+  "web.discord.setup.title": {
+    "en": "Discord setup",
+    "fr": "Configuration Discord"
+  },
+  "web.discord.setup.subtitle": {
+    "en": "Follow these steps to create a Discord bot, connect it to Bunny, and enable account linking from the home page.",
+    "fr": "Suivez ces étapes pour créer un bot Discord, le connecter à Bunny et activer la liaison de compte depuis la home."
+  },
+  "web.discord.setup.loadFailed": {
+    "en": "Could not load Discord setup status",
+    "fr": "Impossible de charger l’état de configuration Discord"
+  },
+  "web.discord.setup.progressIntro": {
+    "en": "Overview",
+    "fr": "Aperçu"
+  },
+  "web.discord.setup.progressApplication": {
+    "en": "Application",
+    "fr": "Application"
+  },
+  "web.discord.setup.progressBot": {
+    "en": "Bot",
+    "fr": "Bot"
+  },
+  "web.discord.setup.progressInvite": {
+    "en": "Invite",
+    "fr": "Invitation"
+  },
+  "web.discord.setup.progressOauth": {
+    "en": "OAuth",
+    "fr": "OAuth"
+  },
+  "web.discord.setup.progressDone": {
+    "en": "Done",
+    "fr": "Terminé"
+  },
+  "web.discord.setup.introBody": {
+    "en": "This wizard helps you configure everything Bunny needs for Discord:",
+    "fr": "Cet assistant vous guide pour tout ce dont Bunny a besoin pour Discord :"
+  },
+  "web.discord.setup.introBulletBot": {
+    "en": "A bot for /bunny slash commands in your Discord server",
+    "fr": "Un bot pour les commandes /bunny dans votre serveur Discord"
+  },
+  "web.discord.setup.introBulletOAuth": {
+    "en": "OAuth so users can link their Discord identity from this home page",
+    "fr": "OAuth pour que les utilisateurs lient leur identité Discord depuis cette home"
+  },
+  "web.discord.setup.introBulletLink": {
+    "en": "Then link channels to Bunny sessions from the Web UI",
+    "fr": "Puis liez les canaux aux sessions Bunny depuis l’interface web"
+  },
+  "web.discord.setup.start": {
+    "en": "Start setup",
+    "fr": "Commencer"
+  },
+  "web.discord.setup.applicationTitle": {
+    "en": "Step 1 — Create a Discord application",
+    "fr": "Étape 1 — Créer une application Discord"
+  },
+  "web.discord.setup.portalHint": {
+    "en": "Open the Discord Developer Portal:",
+    "fr": "Ouvrez le portail Discord Developer :"
+  },
+  "web.discord.setup.applicationStep1": {
+    "en": "Click New Application and name it (e.g. “Bunny”).",
+    "fr": "Cliquez sur New Application et nommez-la (ex. « Bunny »)."
+  },
+  "web.discord.setup.applicationStep2": {
+    "en": "Open Bot → Add Bot (or Reset Token if you already have one).",
+    "fr": "Ouvrez Bot → Add Bot (ou Reset Token si vous en avez déjà un)."
+  },
+  "web.discord.setup.applicationStep3": {
+    "en": "Enable Bot → Privileged Gateway Intents → Message Content Intent → Save Changes.",
+    "fr": "Activez Bot → Privileged Gateway Intents → Message Content Intent → Save Changes."
+  },
+  "web.discord.setup.openPortal": {
+    "en": "Open Developer Portal",
+    "fr": "Ouvrir le portail Developer"
+  },
+  "web.discord.setup.continue": {
+    "en": "Continue",
+    "fr": "Continuer"
+  },
+  "web.discord.setup.botTitle": {
+    "en": "Step 2 — Enter bot credentials",
+    "fr": "Étape 2 — Saisir les identifiants du bot"
+  },
+  "web.discord.setup.botStep1": {
+    "en": "General Information → copy Application ID (long number).",
+    "fr": "General Information → copiez l’Application ID (long numéro)."
+  },
+  "web.discord.setup.botStep2": {
+    "en": "Bot → Token → Reset Token → Copy. This is not the OAuth Client Secret.",
+    "fr": "Bot → Token → Reset Token → Copier. Ce n’est pas le Client Secret OAuth."
+  },
+  "web.discord.setup.botStep3": {
+    "en": "Optional: copy your Discord server ID (Developer Mode → right-click server → Copy Server ID).",
+    "fr": "Optionnel : copiez l’ID de votre serveur Discord (Mode développeur → clic droit sur le serveur → Copy Server ID)."
+  },
+  "web.discord.setup.appIdLabel": {
+    "en": "Application ID",
+    "fr": "Application ID"
+  },
+  "web.discord.setup.botTokenLabel": {
+    "en": "Bot token",
+    "fr": "Jeton du bot"
+  },
+  "web.discord.setup.guildIdLabel": {
+    "en": "Server ID (optional, recommended for dev)",
+    "fr": "ID du serveur (optionnel, recommandé en dev)"
+  },
+  "web.discord.setup.guildIdPlaceholder": {
+    "en": "Leave empty to register commands globally",
+    "fr": "Laisser vide pour enregistrer les commandes globalement"
+  },
+  "web.discord.setup.publicUrlLabel": {
+    "en": "Public URL",
+    "fr": "URL publique"
+  },
+  "web.discord.setup.publicUrlHint": {
+    "en": "How users reach Bunny (localhost in dev, HTTPS domain in production). Use the same host in your browser (localhost vs 127.0.0.1).",
+    "fr": "Comment les utilisateurs accèdent à Bunny (localhost en dev, domaine HTTPS en prod). Utilisez le même hôte que dans votre navigateur (localhost vs 127.0.0.1)."
+  },
+  "web.discord.setup.saveBot": {
+    "en": "Save bot configuration",
+    "fr": "Enregistrer la configuration du bot"
+  },
+  "web.discord.setup.invalidAppId": {
+    "en": "Enter a valid Application ID (numbers only).",
+    "fr": "Saisissez un Application ID valide (chiffres uniquement)."
+  },
+  "web.discord.setup.invalidGuildId": {
+    "en": "Enter a valid server ID or leave the field empty.",
+    "fr": "Saisissez un ID de serveur valide ou laissez le champ vide."
+  },
+  "web.discord.setup.tokenRequired": {
+    "en": "Bot token is required.",
+    "fr": "Le jeton du bot est requis."
+  },
+  "web.discord.setup.botFailed": {
+    "en": "Could not save bot configuration",
+    "fr": "Impossible d’enregistrer la configuration du bot"
+  },
+  "web.discord.setup.inviteTitle": {
+    "en": "Step 3 — Invite the bot to your server",
+    "fr": "Étape 3 — Inviter le bot sur votre serveur"
+  },
+  "web.discord.setup.botSaved": {
+    "en": "Bot configuration saved.",
+    "fr": "Configuration du bot enregistrée."
+  },
+  "web.discord.setup.inviteStep1": {
+    "en": "In the Developer Portal: OAuth2 → URL Generator.",
+    "fr": "Dans le portail Developer : OAuth2 → URL Generator."
+  },
+  "web.discord.setup.inviteStep2": {
+    "en": "Scopes: check bot and applications.commands.",
+    "fr": "Scopes : cochez bot et applications.commands."
+  },
+  "web.discord.setup.inviteStep3": {
+    "en": "Text Permissions: check all boxes in this section.",
+    "fr": "Permissions textuelles : cochez toutes les cases de cette section."
+  },
+  "web.discord.setup.inviteStep4": {
+    "en": "Copy the URL, open it, pick your server, and authorize. The bot should appear in the member list.",
+    "fr": "Copiez l’URL, ouvrez-la, choisissez votre serveur et autorisez. Le bot doit apparaître dans la liste des membres."
+  },
+  "web.discord.setup.openUrlGenerator": {
+    "en": "Open Developer Portal",
+    "fr": "Ouvrir le portail Developer"
+  },
+  "web.discord.setup.continueOAuth": {
+    "en": "Continue to OAuth setup",
+    "fr": "Continuer vers la configuration OAuth"
+  },
+  "web.discord.setup.oauthTitle": {
+    "en": "Step 4 — OAuth for home-page linking",
+    "fr": "Étape 4 — OAuth pour la liaison depuis la home"
+  },
+  "web.discord.setup.oauthIntro": {
+    "en": "Same Discord application as the bot. OAuth lets each user link their Discord account once from the Bunny home page.",
+    "fr": "Même application Discord que le bot. OAuth permet à chaque utilisateur de lier son compte Discord une fois depuis la home Bunny."
+  },
+  "web.discord.setup.oauthStep1": {
+    "en": "OAuth2 → Client information → Client Secret → Reset Secret → Copy (shown once).",
+    "fr": "OAuth2 → Client information → Client Secret → Reset Secret → Copier (affiché une fois)."
+  },
+  "web.discord.setup.oauthStep2": {
+    "en": "OAuth2 → Redirects → Add Redirect → paste the URI below → Save Changes.",
+    "fr": "OAuth2 → Redirects → Add Redirect → coller l’URI ci-dessous → Save Changes."
+  },
+  "web.discord.setup.oauthStep3": {
+    "en": "Paste the Client Secret below and save.",
+    "fr": "Collez le Client Secret ci-dessous et enregistrez."
+  },
+  "web.discord.setup.redirectLabel": {
+    "en": "Redirect URI to add in the Developer Portal:",
+    "fr": "URI de redirection à ajouter dans le portail Developer :"
+  },
+  "web.discord.setup.copy": {
+    "en": "Copy",
+    "fr": "Copier"
+  },
+  "web.discord.setup.copied": {
+    "en": "Copied",
+    "fr": "Copié"
+  },
+  "web.discord.setup.oauthSecretLabel": {
+    "en": "OAuth Client Secret",
+    "fr": "Client Secret OAuth"
+  },
+  "web.discord.setup.secretRequired": {
+    "en": "OAuth Client Secret is required.",
+    "fr": "Le Client Secret OAuth est requis."
+  },
+  "web.discord.setup.saveOAuth": {
+    "en": "Save OAuth configuration",
+    "fr": "Enregistrer la configuration OAuth"
+  },
+  "web.discord.setup.oauthFailed": {
+    "en": "Could not save OAuth configuration",
+    "fr": "Impossible d’enregistrer la configuration OAuth"
+  },
+  "web.discord.setup.doneTitle": {
+    "en": "Discord setup complete.",
+    "fr": "Configuration Discord terminée."
+  },
+  "web.discord.setup.doneBody": {
+    "en": "Restart Bunny so the new configuration is loaded, then return to the home page to link your Discord account.",
+    "fr": "Redémarrez Bunny pour charger la nouvelle configuration, puis revenez sur la home pour lier votre compte Discord."
+  },
+  "web.discord.setup.doneStep1": {
+    "en": "Restart bunny run (or your Docker dev container).",
+    "fr": "Redémarrez bunny run (ou votre conteneur Docker de dev)."
+  },
+  "web.discord.setup.doneStep2": {
+    "en": "The Discord bridge starts automatically when configured.",
+    "fr": "Le pont Discord démarre automatiquement une fois configuré."
+  },
+  "web.discord.setup.doneStep3": {
+    "en": "On the home page, click Connect your Discord account.",
+    "fr": "Sur la home, cliquez sur Connecter votre compte Discord."
+  },
+  "web.discord.setup.backHome": {
+    "en": "Back to home",
+    "fr": "Retour à la home"
+  },
+  "web.discord.setup.manageTitle": {
+    "en": "Server configuration",
+    "fr": "Configuration serveur"
+  },
+  "web.discord.setup.manageIntro": {
+    "en": "Update bot or OAuth credentials. Secrets are never shown — re-enter them to replace the saved values. Use Restart Discord bridge below after bot changes (no SSH needed).",
+    "fr": "Modifiez les identifiants bot ou OAuth. Les secrets ne sont jamais affichés — saisissez-les à nouveau pour remplacer les valeurs enregistrées. Utilisez Redémarrer le pont Discord ci-dessous après un changement bot (sans SSH)."
+  },
+  "web.discord.setup.statusBridge": {
+    "en": "Bot & bridge",
+    "fr": "Bot & pont"
+  },
+  "web.discord.setup.statusOAuth": {
+    "en": "OAuth (home linking)",
+    "fr": "OAuth (liaison home)"
+  },
+  "web.discord.setup.statusConfigured": {
+    "en": "Configured",
+    "fr": "Configuré"
+  },
+  "web.discord.setup.statusMissing": {
+    "en": "Not configured",
+    "fr": "Non configuré"
+  },
+  "web.discord.setup.editBot": {
+    "en": "Update bot credentials",
+    "fr": "Modifier les identifiants bot"
+  },
+  "web.discord.setup.editOAuth": {
+    "en": "Update OAuth credentials",
+    "fr": "Modifier les identifiants OAuth"
+  },
+  "web.discord.setup.startSetup": {
+    "en": "Run full setup wizard",
+    "fr": "Relancer l’assistant complet"
+  },
+  "web.discord.setup.botReconfigureHint": {
+    "en": "Re-enter the bot token (and other fields if needed). The previous token is not displayed.",
+    "fr": "Saisissez à nouveau le jeton du bot (et les autres champs si besoin). L’ancien jeton n’est pas affiché."
+  },
+  "web.discord.setup.oauthReconfigureHint": {
+    "en": "Re-enter the OAuth Client Secret to replace the saved value.",
+    "fr": "Saisissez à nouveau le Client Secret OAuth pour remplacer la valeur enregistrée."
+  },
+  "web.discord.setup.restartReminder": {
+    "en": "After updating bot credentials, restart the Discord bridge so /bunny commands pick up the new token. You can do it here — no SSH required.",
+    "fr": "Après modification des identifiants bot, redémarrez le pont Discord pour que /bunny prenne le nouveau jeton. Vous pouvez le faire ici — sans SSH."
+  },
+  "web.discord.setup.restartBridge": {
+    "en": "Restart Discord bridge",
+    "fr": "Redémarrer le pont Discord"
+  },
+  "web.discord.setup.bridgeRestartOk": {
+    "en": "Discord bridge restarted. Try /bunny status in Discord.",
+    "fr": "Pont Discord redémarré. Essayez /bunny status dans Discord."
+  },
+  "web.discord.setup.bridgeRestartFailed": {
+    "en": "Discord bridge did not stay running. Check the bot token and agent logs.",
+    "fr": "Le pont Discord ne reste pas actif. Vérifiez le jeton bot et les logs de l’agent."
+  }
 }

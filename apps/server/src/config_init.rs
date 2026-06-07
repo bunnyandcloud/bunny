@@ -14,6 +14,7 @@ struct BridgeDevFile {
 
 #[derive(Deserialize)]
 struct BridgeDevDiscord {
+    application_id: Option<u64>,
     guild_id: Option<u64>,
 }
 
@@ -69,16 +70,56 @@ pub fn apply_discord_to_config(bridge_token_hash: &str, public_url: &str) -> Res
     Ok(path)
 }
 
-pub fn write_bridge_dev_file(path: &Path, application_id: u64, bot_token: &str, bridge_token: &str, internal_url: &str, public_url: &str) -> Result<()> {
+/// Store Discord OAuth client credentials in config.yaml (for user account linking from the Web UI).
+pub fn apply_oauth_to_config(
+    oauth_client_id: &str,
+    oauth_client_secret: &str,
+    oauth_redirect_uri: &str,
+) -> Result<PathBuf> {
+    let path = config_path();
+    let _ = ensure_user_config()?;
+    let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
+    let mut cfg = BunnyConfig::load(&paths)?;
+    cfg.discord.oauth_client_id = Some(oauth_client_id.to_string());
+    cfg.discord.oauth_client_secret = Some(oauth_client_secret.to_string());
+    cfg.discord.oauth_redirect_uri = Some(oauth_redirect_uri.to_string());
+    write_config(&path, &cfg)?;
+    Ok(path)
+}
+
+/// Read Discord Application ID from an existing bridge YAML (for OAuth setup hints).
+pub fn read_bridge_application_id(path: &Path) -> Option<u64> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed: BridgeDevFile = serde_yaml::from_str(&text).ok()?;
+    parsed.discord?.application_id
+}
+
+/// Read optional guild ID from an existing bridge YAML.
+pub fn read_bridge_guild_id(path: &Path) -> Option<u64> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed: BridgeDevFile = serde_yaml::from_str(&text).ok()?;
+    parsed.discord?.guild_id
+}
+
+pub fn write_bridge_dev_file(
+    path: &Path,
+    application_id: u64,
+    bot_token: &str,
+    bridge_token: &str,
+    internal_url: &str,
+    public_url: &str,
+    guild_id: Option<u64>,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let guild_id = path
-        .is_file()
-        .then(|| std::fs::read_to_string(path).ok())
-        .flatten()
-        .and_then(|text| serde_yaml::from_str::<BridgeDevFile>(&text).ok())
-        .and_then(|f| f.discord.and_then(|d| d.guild_id));
+    let guild_id = guild_id.or_else(|| {
+        path.is_file()
+            .then(|| std::fs::read_to_string(path).ok())
+            .flatten()
+            .and_then(|text| serde_yaml::from_str::<BridgeDevFile>(&text).ok())
+            .and_then(|f| f.discord.and_then(|d| d.guild_id))
+    });
     let guild_line = guild_id
         .map(|id| format!("  guild_id: {id}\n"))
         .unwrap_or_default();

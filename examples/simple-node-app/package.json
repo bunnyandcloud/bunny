@@ -1,8 +1,0 @@
-{
-  "name": "bunny-example-app",
-  "private": true,
-  "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js"
-  }
-}

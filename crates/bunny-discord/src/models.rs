@@ -225,6 +225,8 @@ pub struct WatchSession {
 pub struct DiscordUserLink {
     pub discord_user_id: String,
     pub user_id: Uuid,
+    pub discord_username: Option<String>,
+    pub discord_global_name: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
