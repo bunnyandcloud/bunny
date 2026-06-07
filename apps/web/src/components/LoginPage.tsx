@@ -1,7 +1,17 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { acceptInvitation, apiErrorMessage, type LoginResponse } from '../lib/api';
 import { useT } from '../i18n';
 import { useAuth } from '../store/auth';
+import BunnyLogo from './BunnyLogo';
+
+function LoginShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 gap-6">
+      <BunnyLogo />
+      {children}
+    </div>
+  );
+}
 
 function readInviteParams() {
   const params = new URLSearchParams(location.search);
@@ -112,7 +122,7 @@ export default function LoginPage() {
 
   if (mfaChallenge) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <LoginShell>
         <form
           onSubmit={onMfaSubmit}
           className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
@@ -154,7 +164,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
+            className="w-full py-2 bg-bunny-accent text-bunny-on-accent font-semibold rounded hover:opacity-90 disabled:opacity-50"
           >
             {loading ? tr('web.login.verifying') : tr('web.login.verify')}
           </button>
@@ -172,13 +182,13 @@ export default function LoginPage() {
             {tr('web.login.backToSignIn')}
           </button>
         </form>
-      </div>
+      </LoginShell>
     );
   }
 
   if (inviteToken) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <LoginShell>
         <form
           onSubmit={onAcceptInviteSubmit}
           className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
@@ -229,7 +239,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
+            className="w-full py-2 bg-bunny-accent text-bunny-on-accent font-semibold rounded hover:opacity-90 disabled:opacity-50"
           >
             {loading ? tr('web.login.creatingAccount') : tr('web.login.createAndJoin')}
           </button>
@@ -246,12 +256,12 @@ export default function LoginPage() {
             </button>
           </p>
         </form>
-      </div>
+      </LoginShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <LoginShell>
       <form
         onSubmit={onPasswordSubmit}
         className="w-full max-w-md bg-bunny-panel border border-bunny-border rounded-lg p-8 space-y-4"
@@ -278,11 +288,11 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
+          className="w-full py-2 bg-bunny-accent text-bunny-on-accent font-semibold rounded hover:opacity-90 disabled:opacity-50"
         >
           {loading ? tr('web.login.signingIn') : tr('web.login.signIn')}
         </button>
       </form>
-    </div>
+    </LoginShell>
   );
 }

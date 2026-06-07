@@ -308,7 +308,7 @@ export default function SecretsPage({ email }: Props) {
                 <button
                   type="submit"
                   disabled={busy}
-                  className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                  className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90 disabled:opacity-50"
                 >
                   {busy ? 'Creating…' : 'Create vault'}
                 </button>
@@ -348,7 +348,7 @@ export default function SecretsPage({ email }: Props) {
                 <button
                   type="submit"
                   disabled={busy}
-                  className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                  className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90 disabled:opacity-50"
                 >
                   {busy ? 'Unlocking…' : 'Unlock vault'}
                 </button>
@@ -385,7 +385,7 @@ export default function SecretsPage({ email }: Props) {
                   type="button"
                   disabled={busy}
                   onClick={() => setShowForm((v) => !v)}
-                  className="text-sm px-3 py-1.5 rounded bg-bunny-accent text-bunny-bg font-medium hover:opacity-90 disabled:opacity-50"
+                  className="text-sm px-3 py-1.5 rounded bg-bunny-accent text-bunny-on-accent font-medium hover:opacity-90 disabled:opacity-50"
                 >
                   {showForm ? 'Cancel' : 'Add secret'}
                 </button>
@@ -457,7 +457,7 @@ export default function SecretsPage({ email }: Props) {
                   <button
                     type="submit"
                     disabled={busy}
-                    className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                    className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90 disabled:opacity-50"
                   >
                     {busy ? 'Saving…' : 'Save secret'}
                   </button>

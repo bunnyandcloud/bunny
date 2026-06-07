@@ -84,7 +84,7 @@ export default function SessionDiscordModal(props: {
             <button
               type="button"
               disabled={loading || !discordPassword}
-              className="px-3 py-2 bg-bunny-accent text-bunny-bg rounded font-semibold disabled:opacity-50"
+              className="px-3 py-2 bg-bunny-accent text-bunny-on-accent rounded font-semibold disabled:opacity-50"
               onClick={async () => {
                 setLoading(true);
                 setError('');

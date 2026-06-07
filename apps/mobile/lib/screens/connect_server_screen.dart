@@ -143,7 +143,7 @@ class _ConnectServerScreenState extends State<ConnectServerScreen> {
         label = 'Tunnel connected';
       case TunnelStatus.connecting:
         icon = Icons.hourglass_top;
-        color = const Color(0xFF58A6FF);
+        color = const Color(0xFF9498FF);
         label = 'Connecting…';
       case TunnelStatus.error:
         icon = Icons.error_outline;

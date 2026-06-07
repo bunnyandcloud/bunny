@@ -158,7 +158,7 @@ export default function ClaudeSetupPanel({
       status.auth.phase === 'waiting_code' ||
       status.auth.phase === 'code_submitted');
   const primaryBtn =
-    'px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium disabled:opacity-50';
+    'px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium disabled:opacity-50';
   const secondaryBtn =
     'px-4 py-2 rounded border border-bunny-border text-bunny-muted text-sm disabled:opacity-40 cursor-not-allowed';
   const installBusy =
@@ -186,7 +186,7 @@ export default function ClaudeSetupPanel({
             type="button"
             disabled={installBusy}
             onClick={handleInstall}
-            className="px-3 py-1.5 rounded bg-bunny-accent text-bunny-bg text-xs font-medium disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-bunny-accent text-bunny-on-accent text-xs font-medium disabled:opacity-50"
           >
             {installBusy ? 'Installing…' : 'Install Claude'}
           </button>

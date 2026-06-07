@@ -21,7 +21,7 @@ export default function LanguageSelect({ className = '' }: Props) {
       }}
       className={
         className ||
-        'text-xs px-1.5 py-0.5 rounded border border-bunny-border bg-bunny-bg text-bunny-muted hover:text-gray-200 cursor-pointer disabled:opacity-50'
+        'text-xs px-1.5 py-0.5 rounded border border-bunny-border bg-bunny-bg text-bunny-muted hover:text-bunny-fg cursor-pointer disabled:opacity-50'
       }
     >
       <option value="en">{t(locale, 'web.home.language_en')}</option>

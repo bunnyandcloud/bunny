@@ -1,5 +1,6 @@
 import LanguageSelect from './LanguageSelect';
 import LogoutButton from './LogoutButton';
+import ThemeSelect from './ThemeSelect';
 
 interface Props {
   /** Extra nodes between language and sign out (e.g. session actions). */
@@ -17,6 +18,7 @@ export default function AppTopBar({
   return (
     <div className={className}>
       {children}
+      <ThemeSelect />
       <LanguageSelect />
       <LogoutButton className={logoutClassName} />
     </div>

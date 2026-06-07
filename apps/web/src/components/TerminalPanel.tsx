@@ -4,6 +4,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { terminalWsUrl } from '../lib/api';
 import { filterClientInput, filterServerOutput } from '../lib/terminalSanitize';
+import { getTerminalTheme } from '../lib/terminalThemes';
+import { useTerminalTheme } from '../store/terminalTheme';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalPanelHandle {
@@ -59,6 +61,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   const activeRef = useRef(active);
   activeRef.current = active;
   const connectedOnceRef = useRef(false);
+  const terminalThemeId = useTerminalTheme((s) => s.themeId);
 
   useImperativeHandle(
     ref,
@@ -103,11 +106,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       fontFamily: 'Menlo, Monaco, Consolas, monospace',
       convertEol: true,
       scrollback: 10000,
-      theme: {
-        background: '#0d1117',
-        foreground: '#c9d1d9',
-        cursor: '#58a6ff',
-      },
+      theme: getTerminalTheme(terminalThemeId),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -337,6 +336,12 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       term.dispose();
     };
   }, [terminalId, readonly, active]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.theme = getTerminalTheme(terminalThemeId);
+  }, [terminalThemeId]);
 
   return (
     <div className="bunny-terminal-host flex h-full w-full min-h-0">

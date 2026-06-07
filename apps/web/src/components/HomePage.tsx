@@ -11,6 +11,7 @@ import {
 } from '../lib/api';
 import { useT } from '../i18n';
 import AppTopBar from './AppTopBar';
+import BunnyLogo from './BunnyLogo';
 import DiscordAccountPanel from './DiscordAccountPanel';
 import InlineRename from './InlineRename';
 
@@ -136,6 +137,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
       <div className="w-full max-w-lg flex justify-end">
         <AppTopBar />
       </div>
+      <BunnyLogo />
       <div className="text-center space-y-1">
         <h1 className="text-xl text-bunny-accent">
           {tr('web.home.welcome', { email })}
@@ -149,7 +151,7 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
             type="button"
             onClick={handleNewSession}
             disabled={creating}
-            className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-bg font-medium text-sm hover:opacity-90 disabled:opacity-50"
+            className="px-5 py-2.5 rounded bg-bunny-accent text-bunny-on-accent font-medium text-sm hover:opacity-90 disabled:opacity-50"
           >
             {creating ? tr('web.home.creating') : tr('web.home.newSession')}
           </button>

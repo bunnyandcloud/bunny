@@ -2,10 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --bunny-bg: #0d1117;
+  --bunny-panel: #161b22;
+  --bunny-border: #30363d;
+  --bunny-accent: #9498ff;
+  --bunny-muted: #8b949e;
+  --bunny-fg: #e6edf3;
+  --bunny-on-accent: #0d1117;
+  --bunny-scrollbar-track: #161b22;
+  --bunny-scrollbar-thumb: #484f58;
+  --bunny-scrollbar-thumb-hover: #6e7681;
+}
+
+html.light {
+  color-scheme: light;
+  --bunny-bg: #f6f8fa;
+  --bunny-panel: #ffffff;
+  --bunny-border: #d0d7de;
+  --bunny-accent: #7b83f0;
+  --bunny-muted: #656d76;
+  --bunny-fg: #1f2328;
+  --bunny-on-accent: #ffffff;
+  --bunny-locked: #c2255c;
+  --bunny-scrollbar-track: #eef1f4;
+  --bunny-scrollbar-thumb: #c9d1d9;
+  --bunny-scrollbar-thumb-hover: #afb8c1;
+}
+
 body {
-  @apply bg-bunny-bg text-gray-100 antialiased;
+  @apply bg-bunny-bg text-bunny-fg antialiased;
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Legacy gray utilities — remap in light mode without touching every component. */
+html.light .text-gray-100,
+html.light .text-gray-200 {
+  color: var(--bunny-fg);
+}
+
+html.light .text-gray-300 {
+  color: #424a53;
+}
+
+html.light .text-gray-400 {
+  color: var(--bunny-muted);
+}
+
+html.light .hover\:text-gray-200:hover {
+  color: var(--bunny-fg);
 }
 
 /* Web UI shells: always show a scroll rail and keep full scrollback while processes run. */
@@ -18,7 +65,7 @@ body {
   overflow-y: auto !important;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #484f58 #161b22;
+  scrollbar-color: var(--bunny-scrollbar-thumb) var(--bunny-scrollbar-track);
 }
 
 .bunny-terminal-host .xterm-viewport::-webkit-scrollbar {
@@ -26,16 +73,16 @@ body {
 }
 
 .bunny-terminal-host .xterm-viewport::-webkit-scrollbar-track {
-  background: #161b22;
+  background: var(--bunny-scrollbar-track);
   border-radius: 6px;
 }
 
 .bunny-terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #484f58;
+  background: var(--bunny-scrollbar-thumb);
   border-radius: 6px;
-  border: 2px solid #161b22;
+  border: 2px solid var(--bunny-scrollbar-track);
 }
 
 .bunny-terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: #6e7681;
+  background: var(--bunny-scrollbar-thumb-hover);
 }

@@ -543,7 +543,7 @@ export default function DiscordSetupPage({ email: _email }: Props) {
                 type="button"
                 onClick={handleBridgeReload}
                 disabled={busy || !status.bridge_configured}
-                className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90 disabled:opacity-50"
               >
                 {busy ? tr('web.common.loading') : tr('web.discord.setup.restartBridge')}
               </button>
@@ -593,7 +593,7 @@ export default function DiscordSetupPage({ email: _email }: Props) {
             <button
               type="button"
               onClick={() => { location.href = '/'; }}
-              className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90"
+              className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90"
             >
               {tr('web.discord.setup.backHome')}
             </button>

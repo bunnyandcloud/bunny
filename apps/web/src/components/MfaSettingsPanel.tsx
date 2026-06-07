@@ -167,7 +167,7 @@ export default function MfaSettingsPanel({ email }: Props) {
           <button
             type="submit"
             disabled={busy}
-            className="px-4 py-2 bg-bunny-accent text-bunny-bg rounded text-sm font-medium disabled:opacity-50"
+            className="px-4 py-2 bg-bunny-accent text-bunny-on-accent rounded text-sm font-medium disabled:opacity-50"
           >
             {tr('web.mfa.setupAuthenticator')}
           </button>
@@ -202,7 +202,7 @@ export default function MfaSettingsPanel({ email }: Props) {
           <button
             type="submit"
             disabled={busy}
-            className="w-full py-2 bg-bunny-accent text-bunny-bg rounded font-medium disabled:opacity-50"
+            className="w-full py-2 bg-bunny-accent text-bunny-on-accent rounded font-medium disabled:opacity-50"
           >
             {tr('web.mfa.confirmEnable')}
           </button>

@@ -18,6 +18,7 @@ import InlineRename from './InlineRename';
 import SecretsVaultBanner from './SecretsVaultBanner';
 import TerminalPanel, { type TerminalPanelHandle } from './TerminalPanel';
 import TerminalShellBar, { type ShellTab } from './TerminalShellBar';
+import TerminalThemeSelect from './TerminalThemeSelect';
 import VaultInjectPanel from './VaultInjectPanel';
 import VaultUnlockModal from './VaultUnlockModal';
 import PreviewPanel from './PreviewPanel';
@@ -398,7 +399,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
                 showVaultSection
                   ? 'border-bunny-accent bg-bunny-accent/10 text-bunny-accent'
                   : vaultLocked
-                    ? 'border-orange-400/40 text-orange-300 hover:bg-orange-400/10'
+                    ? 'border-bunny-locked/40 text-bunny-locked hover:bg-bunny-locked/10'
                     : 'border-bunny-border text-bunny-muted hover:text-bunny-accent hover:bg-bunny-bg'
               }`}
               title={
@@ -448,6 +449,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
               </div>
             )}
             <div className="flex items-center gap-1 px-2 py-1 border-b border-bunny-border bg-bunny-panel shrink-0">
+              <div className="flex items-center gap-1">
               {(
                 [
                   ['terminal', tr('web.session.tabTerminal')],
@@ -459,15 +461,19 @@ export default function SessionWorkspace({ sessionId }: Props) {
                   key={id}
                   type="button"
                   onClick={() => setWorkspaceTab(id)}
-                  className={`text-xs px-2.5 py-1 rounded border ${
+                  className={`text-sm px-2.5 py-1 rounded border ${
                     workspaceTab === id
-                      ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10'
-                      : 'border-transparent text-bunny-muted hover:text-gray-200'
+                      ? 'border-bunny-accent text-bunny-accent bg-bunny-accent/10 font-bold'
+                      : 'border-transparent text-bunny-fg/75 hover:text-bunny-fg font-semibold'
                   }`}
                 >
                   {label}
                 </button>
               ))}
+              </div>
+              {workspaceTab === 'terminal' ? (
+                <TerminalThemeSelect className="ml-auto shrink-0" />
+              ) : null}
             </div>
             {workspaceTab === 'preview' && (
               <PreviewPanel
@@ -490,7 +496,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
               onNew={handleNewShell}
               busy={busy}
             />
-            <p className="px-2 py-1 text-xs text-bunny-muted border-b border-bunny-border">
+            <p className="px-2 py-1 text-xs font-medium text-bunny-fg/80 border-b border-bunny-border">
               {tr('web.session.tmuxHint')}
             </p>
             <div className="flex-1 min-h-0 relative">
@@ -526,7 +532,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
                 <div className="p-4 text-bunny-muted text-sm space-y-2">
                   <p>{tr('web.session.noShellOpen')}</p>
                   {vaultLocked && hasStoredSecrets && (
-                    <p className="text-xs text-orange-300/80">{tr('web.session.vaultLockedHint')}</p>
+                    <p className="text-xs text-bunny-locked font-medium">{tr('web.session.vaultLockedHint')}</p>
                   )}
                   {vaultStatus?.status === 'unlocked' && hasStoredSecrets && (
                     <p className="text-xs text-bunny-muted">{tr('web.session.vaultUnlockHint')}</p>

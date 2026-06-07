@@ -327,6 +327,18 @@
     "en": "Could not update language: {error}",
     "fr": "Impossible de mettre à jour la langue : {error}"
   },
+  "web.home.theme_label": {
+    "en": "Theme",
+    "fr": "Thème"
+  },
+  "web.home.theme_dark": {
+    "en": "Dark",
+    "fr": "Sombre"
+  },
+  "web.home.theme_light": {
+    "en": "Light",
+    "fr": "Clair"
+  },
   "discord.language.updated": {
     "en": "Language set to **{locale}** (`en` or `fr`).",
     "fr": "Langue définie sur **{locale}** (`en` ou `fr`)."

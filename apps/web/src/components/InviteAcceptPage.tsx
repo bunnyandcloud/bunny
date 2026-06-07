@@ -31,7 +31,7 @@ export default function InviteAcceptPage(props: {
             await onSignOut();
             location.reload();
           }}
-          className="w-full py-2 bg-bunny-accent text-bunny-bg font-semibold rounded hover:opacity-90 disabled:opacity-50"
+          className="w-full py-2 bg-bunny-accent text-bunny-on-accent font-semibold rounded hover:opacity-90 disabled:opacity-50"
         >
           {busy ? tr('web.common.signingOut') : tr('web.invite.signOutAccept')}
         </button>

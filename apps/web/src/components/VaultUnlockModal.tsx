@@ -92,7 +92,7 @@ export default function VaultUnlockModal({
             <button
               type="submit"
               disabled={busy}
-              className="px-3 py-1.5 rounded bg-bunny-accent text-bunny-bg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              className="px-3 py-1.5 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium hover:opacity-90 disabled:opacity-50"
             >
               {busy ? tr('web.vault.unlocking') : tr('web.vault.unlockButton')}
             </button>

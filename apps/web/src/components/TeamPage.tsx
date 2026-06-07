@@ -188,7 +188,7 @@ export default function TeamPage(props: { email: string }) {
           <button
             type="submit"
             disabled={saving === 'invite'}
-            className="px-4 py-2 rounded bg-bunny-accent text-bunny-bg text-sm font-medium disabled:opacity-50"
+            className="px-4 py-2 rounded bg-bunny-accent text-bunny-on-accent text-sm font-medium disabled:opacity-50"
           >
             {saving === 'invite' ? tr('web.team.creating') : tr('web.team.createInviteLink')}
           </button>

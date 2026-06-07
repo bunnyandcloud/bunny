@@ -727,6 +727,30 @@
     "en": "Browser",
     "fr": "Navigateur"
   },
+  "web.terminalTheme.label": {
+    "en": "Terminal theme",
+    "fr": "Thème du terminal"
+  },
+  "web.terminalTheme.bunnyDark": {
+    "en": "Bunny dark",
+    "fr": "Bunny sombre"
+  },
+  "web.terminalTheme.bunnyLight": {
+    "en": "Bunny light",
+    "fr": "Bunny clair"
+  },
+  "web.terminalTheme.classic": {
+    "en": "Classic",
+    "fr": "Classique"
+  },
+  "web.terminalTheme.midnight": {
+    "en": "Midnight",
+    "fr": "Minuit"
+  },
+  "web.terminalTheme.paper": {
+    "en": "Paper",
+    "fr": "Papier"
+  },
   "web.session.noActiveShell": {
     "en": "No active shell",
     "fr": "Aucun shell actif"

@@ -149,7 +149,7 @@ export default function SessionMembersModal(props: {
           <button
             type="submit"
             disabled={loading}
-            className="px-3 py-2 bg-bunny-accent text-bunny-bg rounded font-semibold disabled:opacity-50"
+            className="px-3 py-2 bg-bunny-accent text-bunny-on-accent rounded font-semibold disabled:opacity-50"
           >
             Invite
           </button>

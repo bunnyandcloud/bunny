@@ -5,11 +5,14 @@ export default {
     extend: {
       colors: {
         bunny: {
-          bg: '#0d1117',
-          panel: '#161b22',
-          border: '#30363d',
-          accent: '#58a6ff',
-          muted: '#8b949e',
+          bg: 'var(--bunny-bg)',
+          panel: 'var(--bunny-panel)',
+          border: 'var(--bunny-border)',
+          accent: 'var(--bunny-accent)',
+          muted: 'var(--bunny-muted)',
+          fg: 'var(--bunny-fg)',
+          'on-accent': 'var(--bunny-on-accent)',
+          locked: 'var(--bunny-locked)',
         },
       },
     },

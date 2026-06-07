@@ -25,7 +25,7 @@ export default function VaultInjectPanel({
           <h2 className="text-xs uppercase tracking-wide text-bunny-muted">
             {tr('web.vault.panelTitle')}
           </h2>
-          <p className="text-[10px] text-bunny-muted truncate">
+          <p className={`text-[10px] truncate ${locked ? 'text-bunny-locked font-medium' : 'text-bunny-muted'}`}>
             {locked ? tr('web.vault.locked') : tr('web.vault.clickToInsert')}
           </p>
         </div>
@@ -41,11 +41,11 @@ export default function VaultInjectPanel({
       <div className="flex-1 overflow-y-auto p-2 min-h-0">
         {locked ? (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-orange-300/90">{tr('web.vault.locked')}</span>
+            <span className="text-xs text-bunny-locked font-semibold">{tr('web.vault.locked')}</span>
             <button
               type="button"
               onClick={onUnlock}
-              className="text-xs px-2 py-1 rounded bg-bunny-accent text-bunny-bg font-medium hover:opacity-90"
+              className="text-xs px-2 py-1 rounded bg-bunny-accent text-bunny-on-accent font-medium hover:opacity-90"
             >
               {tr('web.vault.unlockButton')}
             </button>

@@ -3,6 +3,7 @@ import HomePage from './components/HomePage';
 import InviteAcceptPage from './components/InviteAcceptPage';
 import LoginPage from './components/LoginPage';
 import LanguageSelect from './components/LanguageSelect';
+import ThemeSelect from './components/ThemeSelect';
 import { useT } from './i18n';
 import { useAuth } from './store/auth';
 
@@ -70,7 +71,8 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen relative">
-        <div className="absolute top-4 right-4 z-10">
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+          <ThemeSelect />
           <LanguageSelect />
         </div>
         <LoginPage />

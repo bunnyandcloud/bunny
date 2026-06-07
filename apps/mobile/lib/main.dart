@@ -84,7 +84,7 @@ class _BunnyAppState extends State<BunnyApp> {
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.dark(
-          primary: const Color(0xFF58A6FF),
+          primary: const Color(0xFF9498FF),
           surface: const Color(0xFF0D1117),
         ),
       ),

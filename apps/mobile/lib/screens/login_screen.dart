@@ -102,7 +102,7 @@ class _BunnyLoginScreenState extends State<BunnyLoginScreen> {
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF58A6FF),
+                  color: Color(0xFF9498FF),
                 ),
               ),
               const SizedBox(height: 8),
