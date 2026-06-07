@@ -719,10 +719,6 @@
     "en": "Terminal",
     "fr": "Terminal"
   },
-  "web.session.tabPreview": {
-    "en": "Preview",
-    "fr": "Aperçu"
-  },
   "web.session.tabBrowser": {
     "en": "Browser",
     "fr": "Navigateur"
@@ -882,14 +878,6 @@
   "web.members.remove": {
     "en": "Remove",
     "fr": "Retirer"
-  },
-  "web.preview.noPort": {
-    "en": "No preview port configured.",
-    "fr": "Aucun port d’aperçu configuré."
-  },
-  "web.preview.open": {
-    "en": "Open preview",
-    "fr": "Ouvrir l’aperçu"
   },
   "web.browser.start": {
     "en": "Start browser",

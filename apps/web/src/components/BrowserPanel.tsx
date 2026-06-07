@@ -8,7 +8,6 @@ import {
 
 interface Props {
   sessionId: string;
-  targetPort?: number;
 }
 
 type ViewMode = 'novnc' | 'stream';
@@ -30,13 +29,14 @@ async function waitForBrowserNovncReady(browserId: string, timeoutMs = 20_000) {
   throw new Error('Le navigateur distant met trop de temps à démarrer — clique Recharger.');
 }
 
-export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
+export default function BrowserPanel({ sessionId }: Props) {
+  const [port, setPort] = useState(3000);
   const [browserId, setBrowserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('novnc');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const targetUrl = `http://127.0.0.1:${targetPort}`;
+  const targetUrl = `http://127.0.0.1:${port}`;
   const initStarted = useRef(false);
 
   const showBrowser = useCallback((id: string) => {
@@ -106,16 +106,25 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
     void ensureBrowser();
   }, [ensureBrowser]);
 
-  const prevPort = useRef(targetPort);
+  const prevPort = useRef(port);
   useEffect(() => {
-    if (prevPort.current === targetPort) return;
-    prevPort.current = targetPort;
+    if (prevPort.current === port) return;
+    prevPort.current = port;
     if (browserId) void reloadBrowser();
-  }, [targetPort, browserId, reloadBrowser]);
+  }, [port, browserId, reloadBrowser]);
 
   return (
     <div className="h-full flex flex-col bg-bunny-bg">
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-bunny-border bg-bunny-panel text-xs shrink-0 flex-wrap">
+        <span className="text-bunny-muted">Port</span>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          value={port}
+          onChange={(e) => setPort(Number(e.target.value) || 3000)}
+          className="w-20 px-1.5 py-0.5 rounded bg-bunny-bg border border-bunny-border text-gray-200"
+        />
         <span className="text-bunny-muted">URL</span>
         <code className="text-gray-300">{targetUrl}</code>
         <div className="ml-auto flex gap-1 flex-wrap">
@@ -157,7 +166,7 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <p className="text-sm text-red-400 max-w-md">{error}</p>
             <p className="text-xs text-bunny-muted max-w-md">
-              Vérifie que ton serveur écoute sur le port {targetPort}, puis clique Recharger.
+              Vérifie que ton serveur écoute sur le port {port}, puis clique Recharger.
             </p>
             <button
               type="button"
@@ -207,9 +216,8 @@ export default function BrowserPanel({ sessionId, targetPort = 3000 }: Props) {
         </p>
         <p>
           « Échec de connexion » au premier essai ? Attends la fin du démarrage ou clique{' '}
-          <strong className="text-gray-300">Recharger</strong> une fois. Pour le dev quotidien,
-          l’onglet <strong className="text-gray-300">Preview</strong> est plus instantané (même
-          port).
+          <strong className="text-gray-300">Recharger</strong> une fois le serveur prêt sur le
+          port indiqué.
         </p>
       </div>
     </div>

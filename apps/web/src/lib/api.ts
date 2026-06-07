@@ -501,16 +501,6 @@ export function revealSecret(name: string, scope: string, sessionId?: string) {
   return api<{ value: string }>(`/secrets/${encodeURIComponent(name)}/reveal?${params}`);
 }
 
-export function createPreview(sessionId: string, localPort: number) {
-  return api<{ id: string; public_path: string }>('/previews', {
-    method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, local_port: localPort }),
-  });
-}
-
-export function listPreviews() {
-  return api<Array<{ id: string; public_path: string }>>('/previews');
-}
 
 export function createBrowser(sessionId: string, targetUrl?: string) {
   return api<{
@@ -654,9 +644,6 @@ export function sessionRealtimeWsUrl(sessionId: string) {
   return `${proto}://${location.host}/api/v1/sessions/${sessionId}/realtime`;
 }
 
-export function previewUrl(sessionId: string, port: number) {
-  return `/s/${sessionId}/ports/${port}/`;
-}
 
 export function browserNovncUrl(browserId: string, opts?: { viewOnly?: boolean }) {
   const path = `api/v1/browser-sessions/${browserId}/vnc/ws`;

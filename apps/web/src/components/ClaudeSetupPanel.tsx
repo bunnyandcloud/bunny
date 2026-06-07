@@ -142,7 +142,7 @@ export default function ClaudeSetupPanel({
 
   if (status.authenticated) {
     return (
-      <div className="rounded border border-emerald-900/50 bg-emerald-950/30 p-3 text-sm text-emerald-300">
+      <div className="rounded border border-bunny-success-border bg-bunny-success-bg p-3 text-sm text-bunny-success-fg">
         Claude Code is signed in
         {status.version ? ` (${status.version})` : ''}.
       </div>
@@ -256,7 +256,7 @@ export default function ClaudeSetupPanel({
           </form>
 
           {feedback && (
-            <p className="text-emerald-300 text-xs" role="status">
+            <p className="text-bunny-success-fg text-xs" role="status">
               {feedback}
             </p>
           )}

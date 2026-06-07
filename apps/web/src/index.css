@@ -11,6 +11,9 @@
   --bunny-muted: #8b949e;
   --bunny-fg: #e6edf3;
   --bunny-on-accent: #0d1117;
+  --bunny-success-fg: #6ee7b7;
+  --bunny-success-bg: rgba(2, 44, 34, 0.35);
+  --bunny-success-border: rgba(6, 78, 59, 0.55);
   --bunny-scrollbar-track: #161b22;
   --bunny-scrollbar-thumb: #484f58;
   --bunny-scrollbar-thumb-hover: #6e7681;
@@ -26,6 +29,9 @@ html.light {
   --bunny-fg: #1f2328;
   --bunny-on-accent: #ffffff;
   --bunny-locked: #c2255c;
+  --bunny-success-fg: #047857;
+  --bunny-success-bg: #ecfdf5;
+  --bunny-success-border: #6ee7b7;
   --bunny-scrollbar-track: #eef1f4;
   --bunny-scrollbar-thumb: #c9d1d9;
   --bunny-scrollbar-thumb-hover: #afb8c1;

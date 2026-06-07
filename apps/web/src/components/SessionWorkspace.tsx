@@ -21,7 +21,6 @@ import TerminalShellBar, { type ShellTab } from './TerminalShellBar';
 import TerminalThemeSelect from './TerminalThemeSelect';
 import VaultInjectPanel from './VaultInjectPanel';
 import VaultUnlockModal from './VaultUnlockModal';
-import PreviewPanel from './PreviewPanel';
 import BrowserPanel from './BrowserPanel';
 import ClaudeSetupPanel from './ClaudeSetupPanel';
 import { useT } from '../i18n';
@@ -41,7 +40,7 @@ interface Props {
   sessionId: string;
 }
 
-type WorkspaceTab = 'terminal' | 'preview' | 'browser';
+type WorkspaceTab = 'terminal' | 'browser';
 
 function nextShellName(existing: ShellTab[]): string {
   const used = new Set(existing.map((s) => s.name));
@@ -88,7 +87,6 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [vaultCollapsed, setVaultCollapsed] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('terminal');
   const [suppressTerminalFocus, setSuppressTerminalFocus] = useState(false);
-  const [previewPort, setPreviewPort] = useState(3000);
   const [claudeBrowserId, setClaudeBrowserId] = useState<string | null>(() =>
     sessionStorage.getItem(browserStorageKey(sessionId)),
   );
@@ -453,7 +451,6 @@ export default function SessionWorkspace({ sessionId }: Props) {
               {(
                 [
                   ['terminal', tr('web.session.tabTerminal')],
-                  ['preview', tr('web.session.tabPreview')],
                   ['browser', tr('web.session.tabBrowser')],
                 ] as const
               ).map(([id, label]) => (
@@ -475,15 +472,8 @@ export default function SessionWorkspace({ sessionId }: Props) {
                 <TerminalThemeSelect className="ml-auto shrink-0" />
               ) : null}
             </div>
-            {workspaceTab === 'preview' && (
-              <PreviewPanel
-                sessionId={sessionId}
-                defaultPort={previewPort}
-                onPortChange={setPreviewPort}
-              />
-            )}
             {workspaceTab === 'browser' && (
-              <BrowserPanel sessionId={sessionId} targetPort={previewPort} />
+              <BrowserPanel sessionId={sessionId} />
             )}
             {workspaceTab === 'terminal' && (
               <>
