@@ -1549,6 +1549,7 @@ struct DiscordSetupBotResponse {
     public_url: String,
     oauth_redirect_uri: String,
     bridge_running: bool,
+    bridge_starting: bool,
 }
 
 async fn discord_setup_bot(
@@ -1595,17 +1596,14 @@ async fn discord_setup_bot(
     )
     .map_err(|e| ApiError::validation(&e.to_string()))?;
     let oauth_redirect_uri = format!("{public_url}/api/v1/auth/discord/callback");
-    let bridge_reload = crate::discord_bridge::restart_managed(&state)
-        .await
-        .ok()
-        .map(|r| r.bridge_running)
-        .unwrap_or(false);
+    crate::discord_bridge::spawn_restart_managed(state.clone());
     Ok(Json(DiscordSetupBotResponse {
         ok: true,
         bridge_path: bridge_path.display().to_string(),
         public_url,
         oauth_redirect_uri,
-        bridge_running: bridge_reload,
+        bridge_running: false,
+        bridge_starting: true,
     }))
 }
 
@@ -1663,10 +1661,17 @@ async fn discord_setup_reload(
     Extension(user): Extension<Uuid>,
 ) -> Result<Json<crate::discord_bridge::DiscordBridgeReloadResponse>, ApiError> {
     ensure_discord_setup_owner(&state, user)?;
-    crate::discord_bridge::restart_managed(&state)
-        .await
-        .map(Json)
-        .map_err(|e| ApiError::validation(&e.to_string()))
+    if !discord_bridge_configured(&state) {
+        return Err(ApiError::validation("discord bridge is not configured"));
+    }
+    let bridge_path = default_bridge_path();
+    crate::discord_bridge::spawn_restart_managed(state);
+    Ok(Json(crate::discord_bridge::DiscordBridgeReloadResponse {
+        ok: true,
+        bridge_running: false,
+        bridge_starting: true,
+        bridge_path: bridge_path.display().to_string(),
+    }))
 }
 
 #[derive(Serialize)]

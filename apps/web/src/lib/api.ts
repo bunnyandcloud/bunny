@@ -153,6 +153,7 @@ export function setupDiscordBot(body: {
     public_url: string;
     oauth_redirect_uri: string;
     bridge_running: boolean;
+    bridge_starting: boolean;
   }>('/discord/setup/bot', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -171,10 +172,12 @@ export function setupDiscordOAuth(body: {
 }
 
 export function reloadDiscordBridge() {
-  return api<{ ok: boolean; bridge_running: boolean; bridge_path: string }>(
-    '/discord/setup/reload',
-    { method: 'POST' },
-  );
+  return api<{
+    ok: boolean;
+    bridge_running: boolean;
+    bridge_starting: boolean;
+    bridge_path: string;
+  }>('/discord/setup/reload', { method: 'POST' });
 }
 
 export function updateLocale(locale: 'en' | 'fr') {

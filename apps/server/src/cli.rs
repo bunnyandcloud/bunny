@@ -1407,6 +1407,7 @@ async fn serve(
             tracing::warn!("claude install script prefetch: {e}");
         }
     });
+    crate::discord_bridge::spawn_prefetch_binary();
     if state.config.webrtc.enabled {
         match crate::webrtc::spawn_webrtc_sidecar(state.clone()).await {
             Ok(sidecar) => {

@@ -134,7 +134,9 @@ export default function DiscordSetupPage({ email: _email }: Props) {
       setOauthRedirectUri(res.oauth_redirect_uri);
       setPublicUrl(res.public_url);
       setStatus((prev) => (prev ? { ...prev, bridge_configured: true } : prev));
-      if (res.bridge_running) {
+      if (res.bridge_starting) {
+        setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartStarting'));
+      } else if (res.bridge_running) {
         setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartOk'));
       } else {
         setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartFailed'));
@@ -210,7 +212,9 @@ export default function DiscordSetupPage({ email: _email }: Props) {
     setBridgeReloadMsg(null);
     try {
       const res = await reloadDiscordBridge();
-      if (res.bridge_running) {
+      if (res.bridge_starting) {
+        setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartStarting'));
+      } else if (res.bridge_running) {
         setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartOk'));
       } else {
         setBridgeReloadMsg(tr('web.discord.setup.bridgeRestartFailed'));

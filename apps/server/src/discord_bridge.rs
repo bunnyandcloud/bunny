@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::Child;
 
 pub struct DiscordBridgeSidecar {
@@ -14,6 +15,8 @@ pub struct DiscordBridgeSidecar {
 pub struct DiscordBridgeReloadResponse {
     pub ok: bool,
     pub bridge_running: bool,
+    /// Bridge restart was queued; build/start may still be in progress.
+    pub bridge_starting: bool,
     pub bridge_path: String,
 }
 
@@ -68,8 +71,36 @@ pub async fn restart_managed(state: &AppState) -> Result<DiscordBridgeReloadResp
     Ok(DiscordBridgeReloadResponse {
         ok: still_running,
         bridge_running: still_running,
+        bridge_starting: false,
         bridge_path: bridge_path.display().to_string(),
     })
+}
+
+/// Restart the bridge without blocking the caller (e.g. HTTP handlers).
+pub fn spawn_restart_managed(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        match restart_managed(&state).await {
+            Ok(r) => tracing::info!(
+                running = r.bridge_running,
+                "discord bridge background restart finished"
+            ),
+            Err(e) => tracing::warn!("discord bridge background restart: {e}"),
+        }
+    });
+}
+
+/// Build the bridge binary in the background so first setup does not block HTTP requests.
+pub fn spawn_prefetch_binary() {
+    tokio::spawn(async move {
+        if locate_bridge_binary().is_some() {
+            return;
+        }
+        if let Err(e) = ensure_bridge_binary().await {
+            tracing::debug!("discord bridge binary prefetch: {e}");
+        } else {
+            tracing::info!("discord bridge binary prefetched");
+        }
+    });
 }
 
 async fn bridge_process_alive(state: &AppState) -> bool {
@@ -89,7 +120,7 @@ async fn bridge_process_alive(state: &AppState) -> bool {
 
 async fn stop_orphan_bridge_processes() {
     let _ = tokio::process::Command::new("pkill")
-        .args(["-x", "bunny-discord-bridge"])
+        .args(["-f", "bunny-discord-bridge"])
         .status()
         .await;
 }

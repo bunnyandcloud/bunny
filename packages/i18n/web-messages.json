@@ -1319,6 +1319,10 @@
     "en": "Discord bridge restarted. Try /bunny status in Discord.",
     "fr": "Pont Discord redémarré. Essayez /bunny status dans Discord."
   },
+  "web.discord.setup.bridgeRestartStarting": {
+    "en": "Configuration saved. The Discord bridge is starting in the background (first run may take a few minutes to compile).",
+    "fr": "Configuration enregistrée. Le pont Discord démarre en arrière-plan (la première compilation peut prendre quelques minutes)."
+  },
   "web.discord.setup.bridgeRestartFailed": {
     "en": "Discord bridge did not stay running. Check the bot token and agent logs.",
     "fr": "Le pont Discord ne reste pas actif. Vérifiez le jeton bot et les logs de l’agent."
