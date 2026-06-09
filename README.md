@@ -106,4 +106,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache 2.0
+This project is licensed under the Business Source License 1.1.
+
+The source code is available for use, modification, self-hosting,
+internal business use, and professional services.
+
+You may not offer this software as a competing hosted, managed, or SaaS
+service without a separate commercial license.
