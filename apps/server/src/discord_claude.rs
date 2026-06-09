@@ -459,9 +459,13 @@ fn truncate_thread_transcript(messages: &[DiscordThreadMessage]) -> String {
     lines.join("\n")
 }
 
-fn build_thread_claude_cmd(prompt: &str, resume: Option<&str>) -> String {
-    let mut cmd = String::from(
-        "claude -p --output-format json --permission-mode acceptEdits --max-turns 10 ",
+fn thread_claude_max_turns(state: &AppState) -> u32 {
+    state.config.discord.claude_max_turns.max(1)
+}
+
+fn build_thread_claude_cmd(prompt: &str, resume: Option<&str>, max_turns: u32) -> String {
+    let mut cmd = format!(
+        "claude -p --output-format json --permission-mode acceptEdits --max-turns {max_turns} ",
     );
     if let Some(sid) = resume.filter(|s| !s.is_empty()) {
         cmd.push_str("--resume ");
@@ -508,7 +512,8 @@ pub fn run_thread_claude(
         .get_thread_claude_session_id(thread_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
 
-    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref());
+    let max_turns = thread_claude_max_turns(state);
+    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns);
     let (raw, exit_code) =
         terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd)?;
     thread_claude_result_from_raw(
@@ -518,7 +523,7 @@ pub fn run_thread_claude(
         session_id,
         &raw,
         exit_code,
-        || build_thread_claude_cmd(&prompt, None),
+        || build_thread_claude_cmd(&prompt, None, max_turns),
     )
 }
 
@@ -631,7 +636,8 @@ pub fn run_thread_claude_with_answers(
         .get_thread_claude_session_id(thread_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     let prompt = build_thread_claude_answers_prompt(answers);
-    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref());
+    let max_turns = thread_claude_max_turns(state);
+    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns);
     let (raw, exit_code) =
         terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd)?;
     thread_claude_result_from_raw(
@@ -641,7 +647,7 @@ pub fn run_thread_claude_with_answers(
         session_id,
         &raw,
         exit_code,
-        || build_thread_claude_cmd(&prompt, None),
+        || build_thread_claude_cmd(&prompt, None, max_turns),
     )
 }
 
@@ -1041,5 +1047,16 @@ mod tests {
         let p = build_thread_claude_answers_prompt(&answers);
         assert!(p.contains("Which stack?"));
         assert!(p.contains("Vite"));
+    }
+
+    #[test]
+    fn build_thread_claude_cmd_includes_configurable_max_turns() {
+        let cmd = build_thread_claude_cmd("hello", None, 30);
+        assert!(cmd.contains("--max-turns 30"));
+        assert!(cmd.ends_with("'hello'"));
+
+        let resumed = build_thread_claude_cmd("go", Some("sess-1"), 25);
+        assert!(resumed.contains("--max-turns 25"));
+        assert!(resumed.contains("--resume sess-1"));
     }
 }

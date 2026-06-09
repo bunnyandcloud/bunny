@@ -19,7 +19,7 @@ pub struct BunnyConfig {
     pub discord: DiscordConfig,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -31,6 +31,9 @@ pub struct DiscordConfig {
     pub public_url: Option<String>,
     #[serde(default = "default_discord_link_ttl")]
     pub link_code_ttl_minutes: u64,
+    /// Max agent turns per `claude -p` call in Discord threads (`--max-turns`).
+    #[serde(default = "default_discord_claude_max_turns")]
+    pub claude_max_turns: u32,
     #[serde(default = "default_discord_oauth_client_id")]
     pub oauth_client_id: Option<String>,
     #[serde(default)]
@@ -39,12 +42,31 @@ pub struct DiscordConfig {
     pub oauth_redirect_uri: Option<String>,
 }
 
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bridge_token_hash: None,
+            public_url: None,
+            link_code_ttl_minutes: default_discord_link_ttl(),
+            claude_max_turns: default_discord_claude_max_turns(),
+            oauth_client_id: default_discord_oauth_client_id(),
+            oauth_client_secret: None,
+            oauth_redirect_uri: None,
+        }
+    }
+}
+
 fn default_discord_oauth_client_id() -> Option<String> {
     None
 }
 
 fn default_discord_link_ttl() -> u64 {
     15
+}
+
+fn default_discord_claude_max_turns() -> u32 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

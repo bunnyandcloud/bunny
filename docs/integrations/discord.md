@@ -139,6 +139,7 @@ discord:
   bridge_token_hash: "<sha256 of bridge_token — written by bunny discord setup>"
   public_url: "https://your-bunny-host.example.com"
   link_code_ttl_minutes: 15
+  claude_max_turns: 30   # `--max-turns` for @mention thread agents (default 30)
 ```
 
 **Bridge** (`.discord/bridge.yaml` or `~/.config/bunny/discord-bridge.yaml`):
@@ -214,7 +215,7 @@ In the thread:
 - **Goal!** / **Cancel** buttons → close shell (tab disappears from Web UI); Cancel resets git to thread start when git was enabled
 - **⛔** reaction on your last input message → interrupt the running Claude subprocess
 - **AskUserQuestion**: if Claude needs a choice, the bot posts **buttons** in the thread; after click, `claude -p --resume` continues with your answers
-- `error_max_turns`: partial plan extracted from JSON if present
+- `error_max_turns`: agent hit `discord.claude_max_turns` (default **30**); partial plan extracted from JSON if present — raise the limit in `~/.config/bunny/config.yaml` or continue in the thread (`--resume`)
 - The `discord-*` shell in the Web UI shows the transcript `[discord] $ claude -p …` after each call (reload tab if needed)
 - `/bunny project` / `/bunny git` — see below
 

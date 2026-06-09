@@ -15,7 +15,7 @@ Best for a VPS, cloud VM, or any machine where you develop over SSH.
 **From a git clone** (recommended for development):
 
 ```bash
-git clone https://github.com/bunny-dev/bunny.git && cd bunny
+git clone https://github.com/bunnyandcloud/bunny.git && cd bunny
 ./bunny setup
 bunny configure
 bunny run
@@ -33,7 +33,7 @@ By default, the agent listens on **localhost only** (`127.0.0.1` on the server).
 ssh -L 7681:127.0.0.1:7681 user@your-server
 ```
 
-Then open **http://127.0.0.1:7681** in your browser — on your laptop, not the server’s public IP.
+Then open **[http://127.0.0.1:7681](http://127.0.0.1:7681)** in your browser — on your laptop, not the server’s public IP.
 
 To reach the UI via the server’s IP directly, bind on all interfaces and open the firewall (less secure — see [Installation](docs/install/README.md)):
 
@@ -67,7 +67,7 @@ bunny run
 
 Same as above: first `./bunny setup` and `bunny run` compile from source — allow a few minutes.
 
-Open **http://127.0.0.1:7681** on the host.
+Open **[http://127.0.0.1:7681](http://127.0.0.1:7681)** on the host.
 
 **Mac / local dev** — use the helper script (agent in Docker, optional Discord bridge on the host):
 
@@ -87,16 +87,18 @@ Discord server for questions, feedback, and release announcements — **invite l
 
 ## Documentation
 
-| Topic | Link |
-|-------|------|
-| Full install guide (systemd, secrets) | [docs/install/README.md](docs/install/README.md) |
-| macOS local dev | [docs/install/README.md#macos-local-development](docs/install/README.md#macos-local-development) |
-| Architecture | [docs/architecture/overview.md](docs/architecture/overview.md) |
-| Security | [docs/security/README.md](docs/security/README.md) |
-| API | [docs/api/README.md](docs/api/README.md) |
+
+| Topic                                     | Link                                                                                                                       |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Full install guide (systemd, secrets)     | [docs/install/README.md](docs/install/README.md)                                                                           |
+| macOS local dev                           | [docs/install/README.md#macos-local-development](docs/install/README.md#macos-local-development)                           |
+| Architecture                              | [docs/architecture/overview.md](docs/architecture/overview.md)                                                             |
+| Security                                  | [docs/security/README.md](docs/security/README.md)                                                                         |
+| API                                       | [docs/api/README.md](docs/api/README.md)                                                                                   |
 | Discord (app, bot, server, `/bunny link`) | [docs/integrations/discord.md#discord-application-and-server](docs/integrations/discord.md#discord-application-and-server) |
-| Mobile app | [docs/mobile/README.md](docs/mobile/README.md) |
-| Everything else | [docs/README.md](docs/README.md) |
+| Mobile app                                | [docs/mobile/README.md](docs/mobile/README.md)                                                                             |
+| Everything else                           | [docs/README.md](docs/README.md)                                                                                           |
+
 
 ## Contributing
 
