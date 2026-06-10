@@ -5,6 +5,7 @@ import {
   listDiscordLinks,
   revokeDiscordLinks,
 } from '../lib/api';
+import { copyToClipboard } from '../lib/copyToClipboard';
 
 export default function SessionDiscordModal(props: {
   open: boolean;
@@ -15,6 +16,7 @@ export default function SessionDiscordModal(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [discordCode, setDiscordCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [discordPassword, setDiscordPassword] = useState('');
   const [discordLinks, setDiscordLinks] = useState<
     Array<{ guild_id: string; channel_id: string; status: string }>
@@ -23,6 +25,7 @@ export default function SessionDiscordModal(props: {
   useEffect(() => {
     if (!open) return;
     setDiscordCode(null);
+    setCodeCopied(false);
     setDiscordPassword('');
     setError('');
     setLoading(true);
@@ -31,6 +34,23 @@ export default function SessionDiscordModal(props: {
       .catch((e) => setError(apiErrorMessage(e, 'Cannot load Discord links')))
       .finally(() => setLoading(false));
   }, [open, sessionId]);
+
+  async function handleGenerateCode(e?: { preventDefault: () => void }) {
+    e?.preventDefault();
+    if (loading || !discordPassword) return;
+    setLoading(true);
+    setError('');
+    setDiscordCode(null);
+    setCodeCopied(false);
+    try {
+      const res = await createDiscordLinkCode(sessionId, discordPassword);
+      setDiscordCode(res.code);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Discord link code failed'));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   if (!open) return null;
 
@@ -70,7 +90,10 @@ export default function SessionDiscordModal(props: {
               you want to link.
             </li>
           </ol>
-          <div className="flex flex-wrap items-end gap-2">
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={handleGenerateCode}
+          >
             <label className="text-xs text-bunny-muted flex flex-col gap-1">
               Password (recent auth)
               <input
@@ -82,30 +105,38 @@ export default function SessionDiscordModal(props: {
               />
             </label>
             <button
-              type="button"
+              type="submit"
               disabled={loading || !discordPassword}
               className="px-3 py-2 bg-bunny-accent text-bunny-on-accent rounded font-semibold disabled:opacity-50"
-              onClick={async () => {
-                setLoading(true);
-                setError('');
-                setDiscordCode(null);
-                try {
-                  const res = await createDiscordLinkCode(sessionId, discordPassword);
-                  setDiscordCode(res.code);
-                } catch (err) {
-                  setError(apiErrorMessage(err, 'Discord link code failed'));
-                } finally {
-                  setLoading(false);
-                }
-              }}
             >
               Generate code
             </button>
-          </div>
+          </form>
           {discordCode ? (
-            <p className="text-sm font-mono text-bunny-accent">
-              Code: {discordCode} — use within 15 minutes
-            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await copyToClipboard(discordCode);
+                  if (ok) {
+                    setCodeCopied(true);
+                    setTimeout(() => setCodeCopied(false), 2000);
+                  }
+                }}
+                className="w-full rounded-lg border-2 border-bunny-accent/50 bg-bunny-accent/10 px-4 py-4 text-center transition hover:bg-bunny-accent/20 hover:border-bunny-accent cursor-pointer"
+                title="Click to copy"
+              >
+                <span className="block text-3xl font-bold font-mono tracking-[0.2em] text-bunny-accent">
+                  {discordCode}
+                </span>
+                <span className="block text-xs mt-2 text-bunny-muted">
+                  {codeCopied ? 'Copied!' : 'Click to copy'}
+                </span>
+              </button>
+              <p className="text-xs text-bunny-muted text-center">
+                Use within 15 minutes
+              </p>
+            </div>
           ) : null}
         </div>
 
