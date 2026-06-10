@@ -84,7 +84,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
-  const [vaultCollapsed, setVaultCollapsed] = useState(false);
+  const [vaultCollapsed, setVaultCollapsed] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('terminal');
   const [suppressTerminalFocus, setSuppressTerminalFocus] = useState(false);
   const [claudeBrowserId, setClaudeBrowserId] = useState<string | null>(() =>
