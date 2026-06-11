@@ -990,9 +990,9 @@ async fn handle_command(
                     output.trim().to_string()
                 };
                 if persistent {
-                    Ok(format_persistent_shell_run_reply(locale, shell, &text))
+                    Ok(format_persistent_shell_run_reply(locale, shell, command, &text))
                 } else {
-                    Ok(format_shell_run_reply(locale, shell, &text, exit_code))
+                    Ok(format_shell_run_reply(locale, shell, command, &text, exit_code))
                 }
             } else {
                 Ok(text_reply(format!(
@@ -1438,8 +1438,17 @@ fn format_shell_snapshot_reply(caption: &str, text: &str) -> CommandReply {
 }
 
 /// Long-running `/bunny run`: prose header + single fenced excerpt (no nested markdown).
-fn format_persistent_shell_run_reply(locale: Locale, shell: &str, excerpt: &str) -> CommandReply {
-    let header = t(locale, "discord.run.persistent_header", &[("shell", shell)]);
+fn format_persistent_shell_run_reply(
+    locale: Locale,
+    shell: &str,
+    command: &str,
+    excerpt: &str,
+) -> CommandReply {
+    let header = t(
+        locale,
+        "discord.run.persistent_header",
+        &[("shell", shell), ("command", command)],
+    );
     let no_out = t(locale, "discord.run.no_output", &[]);
     let body = if excerpt.trim().is_empty() || excerpt == no_out.as_str() {
         t(locale, "discord.run.no_output_yet", &[])
@@ -1458,7 +1467,13 @@ fn format_persistent_shell_run_reply(locale: Locale, shell: &str, excerpt: &str)
 }
 
 /// Paginate shell output so each Discord message stays under 2000 chars.
-fn format_shell_run_reply(locale: Locale, shell: &str, text: &str, exit_code: i64) -> CommandReply {
+fn format_shell_run_reply(
+    locale: Locale,
+    shell: &str,
+    command: &str,
+    text: &str,
+    exit_code: i64,
+) -> CommandReply {
     let suffix = if exit_code == 0 {
         String::new()
     } else {
@@ -1471,7 +1486,11 @@ fn format_shell_run_reply(locale: Locale, shell: &str, text: &str, exit_code: i6
             )
         )
     };
-    let header = t(locale, "discord.shell_run.header", &[("shell", shell)]);
+    let header = t(
+        locale,
+        "discord.shell_run.header",
+        &[("shell", shell), ("command", command)],
+    );
     // Leave room for header, fences, and "(suite N/M)" on follow-up messages.
     let chunk_budget = 1700usize;
     let chunks = if text.contains("```") {

@@ -1249,51 +1249,12 @@ fn resolve_bridge_config_path(explicit: Option<std::path::PathBuf>) -> Result<st
         .join(".config/bunny/discord-bridge.yaml"))
 }
 
-fn workspace_root() -> Result<std::path::PathBuf> {
-    let mut dir = std::env::current_dir()?;
-    loop {
-        let manifest = dir.join("Cargo.toml");
-        if manifest.is_file() {
-            let text = std::fs::read_to_string(&manifest)?;
-            if text.contains("[workspace]") {
-                return Ok(dir);
-            }
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    anyhow::bail!("run from the bunny repo root (workspace Cargo.toml not found)")
-}
-
 fn agent_info_reachable() -> bool {
     std::process::Command::new("curl")
         .args(["-sf", "http://127.0.0.1:7681/api/v1/agent/info"])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-fn resolve_bridge_binary(root: &std::path::Path) -> std::path::PathBuf {
-    let debug = root.join("target/debug/bunny-discord-bridge");
-    let release = root.join("target/release/bunny-discord-bridge");
-    if let Ok(path) = std::env::var("BUNNY_DISCORD_BRIDGE_BIN") {
-        if !path.is_empty() {
-            return std::path::PathBuf::from(path);
-        }
-    }
-    // `cargo build -p bunny-discord-bridge` writes debug; prefer it when newer than release.
-    if debug.is_file() {
-        if !release.is_file() {
-            return debug;
-        }
-        let debug_mtime = debug.metadata().and_then(|m| m.modified()).ok();
-        let release_mtime = release.metadata().and_then(|m| m.modified()).ok();
-        if debug_mtime >= release_mtime {
-            return debug;
-        }
-    }
-    release
 }
 
 fn run_discord_bridge(config: Option<std::path::PathBuf>) -> Result<()> {
@@ -1335,46 +1296,7 @@ fn prepare_discord_bridge(explicit_config: Option<std::path::PathBuf>) -> Result
 }
 
 fn ensure_discord_bridge_binary() -> Result<std::path::PathBuf> {
-    if let Some(bin) = locate_discord_bridge_binary() {
-        return Ok(bin);
-    }
-    build_discord_bridge_binary()?;
-    locate_discord_bridge_binary().ok_or_else(|| {
-        anyhow::anyhow!(
-            "bunny-discord-bridge binary not found after build (set BUNNY_DISCORD_BRIDGE_BIN)"
-        )
-    })
-}
-
-fn build_discord_bridge_binary() -> Result<()> {
-    let root = workspace_root()?;
-    eprintln!("→ Building discord bridge (first time)…");
-    let status = std::process::Command::new("cargo")
-        .current_dir(&root)
-        .args(["build", "--release", "-p", "bunny-discord-bridge", "-q"])
-        .status()?;
-    if !status.success() {
-        bail!("failed to build bunny-discord-bridge");
-    }
-    Ok(())
-}
-
-fn locate_discord_bridge_binary() -> Option<std::path::PathBuf> {
-    if let Ok(path) = std::env::var("BUNNY_DISCORD_BRIDGE_BIN") {
-        if !path.is_empty() {
-            let p = std::path::PathBuf::from(path);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    if let Ok(root) = workspace_root() {
-        let bin = resolve_bridge_binary(&root);
-        if bin.is_file() {
-            return Some(bin);
-        }
-    }
-    None
+    crate::discord_bridge_binary::ensure_bridge_binary_sync(Some(&|msg| eprintln!("{msg}")))
 }
 
 pub async fn run_service(command: ServiceCommands) -> Result<()> {

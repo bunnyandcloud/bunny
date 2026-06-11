@@ -1,8 +1,9 @@
+use crate::discord_bridge_binary;
 use crate::discord_ops;
 use crate::state::AppState;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Child;
@@ -26,7 +27,7 @@ pub async fn start_managed(state: &AppState) -> Result<bool> {
     }
     let cfg = discord_ops::default_bridge_path();
     if !cfg.is_file() {
-        bail!("bridge config not found at {}", cfg.display());
+        anyhow::bail!("bridge config not found at {}", cfg.display());
     }
     if let Err(e) = crate::config_init::sync_agent_from_bridge_file(&cfg) {
         tracing::warn!("discord bridge config sync: {e}");
@@ -61,7 +62,7 @@ pub async fn stop_managed(state: &AppState) -> Result<()> {
 
 pub async fn restart_managed(state: &AppState) -> Result<DiscordBridgeReloadResponse> {
     if !discord_ops::discord_bridge_configured(state) {
-        bail!("discord bridge is not configured");
+        anyhow::bail!("discord bridge is not configured");
     }
     let bridge_path = discord_ops::default_bridge_path();
     stop_managed(state).await?;
@@ -92,9 +93,6 @@ pub fn spawn_restart_managed(state: Arc<AppState>) {
 /// Build the bridge binary in the background so first setup does not block HTTP requests.
 pub fn spawn_prefetch_binary() {
     tokio::spawn(async move {
-        if locate_bridge_binary().is_some() {
-            return;
-        }
         if let Err(e) = ensure_bridge_binary().await {
             tracing::debug!("discord bridge binary prefetch: {e}");
         } else {
@@ -126,79 +124,9 @@ async fn stop_orphan_bridge_processes() {
 }
 
 async fn ensure_bridge_binary() -> Result<PathBuf> {
-    if let Some(bin) = locate_bridge_binary() {
-        return Ok(bin);
-    }
-    tokio::task::spawn_blocking(build_bridge_binary)
+    tokio::task::spawn_blocking(|| discord_bridge_binary::ensure_bridge_binary_sync(None))
         .await
-        .context("discord bridge build task")??;
-    locate_bridge_binary().ok_or_else(|| {
-        anyhow::anyhow!("bunny-discord-bridge binary not found (set BUNNY_DISCORD_BRIDGE_BIN)")
-    })
-}
-
-fn build_bridge_binary() -> Result<()> {
-    let root = workspace_root()?;
-    tracing::info!("building discord bridge (first time)…");
-    let status = std::process::Command::new("cargo")
-        .current_dir(&root)
-        .args(["build", "--release", "-p", "bunny-discord-bridge", "-q"])
-        .status()?;
-    if !status.success() {
-        bail!("failed to build bunny-discord-bridge");
-    }
-    Ok(())
-}
-
-fn locate_bridge_binary() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("BUNNY_DISCORD_BRIDGE_BIN") {
-        if !path.is_empty() {
-            let p = PathBuf::from(path);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    workspace_root()
-        .ok()
-        .map(|root| resolve_bridge_binary(&root))
-        .filter(|p| p.is_file())
-}
-
-fn resolve_bridge_binary(root: &Path) -> PathBuf {
-    let debug = root.join("target/debug/bunny-discord-bridge");
-    let release = root.join("target/release/bunny-discord-bridge");
-    if debug.is_file() {
-        if !release.is_file() {
-            return debug;
-        }
-        let debug_mtime = debug.metadata().and_then(|m| m.modified()).ok();
-        let release_mtime = release.metadata().and_then(|m| m.modified()).ok();
-        if debug_mtime >= release_mtime {
-            return debug;
-        }
-    }
-    release
-}
-
-fn workspace_root() -> Result<PathBuf> {
-    let mut dir = std::env::current_dir()?;
-    loop {
-        let manifest = dir.join("Cargo.toml");
-        if manifest.is_file() {
-            let text = std::fs::read_to_string(&manifest)?;
-            if text.contains("[workspace]") {
-                return Ok(dir);
-            }
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    if let Some(root) = crate::web_ui::find_repo_root() {
-        return Ok(root);
-    }
-    bail!("run from the bunny repo root (workspace Cargo.toml not found)")
+        .context("discord bridge build task")?
 }
 
 pub async fn shutdown_managed(state: &AppState) {
