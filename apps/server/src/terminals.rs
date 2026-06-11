@@ -830,11 +830,30 @@ pub fn exec_discord_shell_command_run(
     })
 }
 
+/// Shell builtins that must run in the interactive tmux pane (not a `bash -lc` subshell).
+fn discord_run_needs_interactive_shell(command: &str) -> bool {
+    let cmd = command.trim();
+    if cmd.is_empty() || cmd.starts_with('(') || cmd.starts_with('{') {
+        return false;
+    }
+    const BUILTINS: &[&str] = &["cd", "export", "unset", "source", "pushd", "popd"];
+    for b in BUILTINS {
+        if cmd == *b || cmd.starts_with(&format!("{b} ")) || cmd.starts_with(&format!("{b}\t")) {
+            return true;
+        }
+    }
+    cmd == "." || cmd.starts_with(". ") || cmd.starts_with(".\t")
+}
+
 fn discord_run_wrap_command(command: &str) -> String {
-    format!(
-        "bash -lc {}; echo {BUNNY_EXIT_MARKER}$?",
-        shell_single_quote(command)
-    )
+    if discord_run_needs_interactive_shell(command) {
+        format!("{}; echo {BUNNY_EXIT_MARKER}$?", command.trim())
+    } else {
+        format!(
+            "bash -lc {}; echo {BUNNY_EXIT_MARKER}$?",
+            shell_single_quote(command)
+        )
+    }
 }
 
 fn shell_single_quote(s: &str) -> String {
@@ -963,6 +982,22 @@ mod discord_run_tests {
     #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn cd_runs_in_interactive_shell_not_subshell() {
+        assert!(discord_run_needs_interactive_shell("cd my-app"));
+        assert!(discord_run_needs_interactive_shell("cd my-app && npm install"));
+        let wrapped = discord_run_wrap_command("cd my-app");
+        assert!(!wrapped.contains("bash -lc"));
+        assert!(wrapped.contains(BUNNY_EXIT_MARKER));
+    }
+
+    #[test]
+    fn ordinary_commands_still_use_bash_subshell() {
+        assert!(!discord_run_needs_interactive_shell("ls -la"));
+        let wrapped = discord_run_wrap_command("ls -la");
+        assert!(wrapped.starts_with("bash -lc "));
     }
 
     #[test]
