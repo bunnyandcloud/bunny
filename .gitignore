@@ -46,3 +46,5 @@ Thumbs.db
 # Project specific
 target/
 target-macos/
+
+.cursor/
