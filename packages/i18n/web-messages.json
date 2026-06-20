@@ -1188,8 +1188,8 @@
     "fr": "Générateur d’URL OAuth2 Discord — section Permissions textuelles avec toutes les cases cochées"
   },
   "web.discord.setup.inviteStep4": {
-    "en": "Copy the URL, open it, pick your server, and authorize. The bot should appear in the member list.",
-    "fr": "Copiez l’URL, ouvrez-la, choisissez votre serveur et autorisez. Le bot doit apparaître dans la liste des membres."
+    "en": "Scroll down under the Bot Permissions and copy the Generated URL, open it, pick your server, and authorize. The bot should appear in the member list.",
+    "fr": "Faites défiler vers le bas sous les Permissions du bot et copiez l’URL générée, ouvrez-la, choisissez votre serveur et autorisez. Le bot doit apparaître dans la liste des membres."
   },
   "web.discord.setup.openUrlGenerator": {
     "en": "Open Developer Portal",
