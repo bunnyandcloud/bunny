@@ -15,6 +15,7 @@ mod discord_threads;
 mod middleware;
 mod novnc_proxy;
 mod preview;
+mod prompt;
 mod realtime;
 mod recovery;
 mod secrets_cli;

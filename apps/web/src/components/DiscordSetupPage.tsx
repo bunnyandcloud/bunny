@@ -9,6 +9,8 @@ import {
 } from '../lib/api';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { useT } from '../i18n';
+import discordOAuth2ScopesImg from '../assets/discord-oauth2-scopes.png';
+import discordOAuth2TextPermissionsImg from '../assets/discord-oauth2-text-permissions.png';
 import AppTopBar from './AppTopBar';
 
 const PORTAL_URL = 'https://discord.com/developers/applications';
@@ -418,14 +420,26 @@ export default function DiscordSetupPage({ email: _email }: Props) {
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-gray-200">{tr('web.discord.setup.inviteTitle')}</h2>
             <p className="text-sm text-emerald-400">{tr('web.discord.setup.botSaved')}</p>
-            <StepList
-              items={[
-                tr('web.discord.setup.inviteStep1'),
-                tr('web.discord.setup.inviteStep2'),
-                tr('web.discord.setup.inviteStep3'),
-                tr('web.discord.setup.inviteStep4'),
-              ]}
-            />
+            <ol className="list-decimal list-inside space-y-2 text-sm text-gray-200">
+              <li className="text-bunny-muted">{tr('web.discord.setup.inviteStep1')}</li>
+              <li className="text-bunny-muted">
+                {tr('web.discord.setup.inviteStep2')}
+                <img
+                  src={discordOAuth2ScopesImg}
+                  alt={tr('web.discord.setup.inviteScopesAlt')}
+                  className="mt-3 block max-w-full rounded border border-bunny-border"
+                />
+              </li>
+              <li className="text-bunny-muted">
+                {tr('web.discord.setup.inviteStep3')}
+                <img
+                  src={discordOAuth2TextPermissionsImg}
+                  alt={tr('web.discord.setup.inviteTextPermissionsAlt')}
+                  className="mt-3 block max-w-full rounded border border-bunny-border"
+                />
+              </li>
+              <li className="text-bunny-muted">{tr('web.discord.setup.inviteStep4')}</li>
+            </ol>
             <a
               href={`${PORTAL_URL}?new_application=true`}
               target="_blank"
@@ -553,10 +567,10 @@ export default function DiscordSetupPage({ email: _email }: Props) {
               </button>
               <button
                 type="button"
-                onClick={openBotEditor}
+                onClick={() => setStep('intro')}
                 className="px-4 py-2 rounded bg-[#5865F2] text-white text-sm font-medium hover:opacity-90"
               >
-                {tr('web.discord.setup.editBot')}
+                {tr('web.discord.setup.startSetup')}
               </button>
               <button
                 type="button"
@@ -567,10 +581,10 @@ export default function DiscordSetupPage({ email: _email }: Props) {
               </button>
               <button
                 type="button"
-                onClick={() => setStep('intro')}
+                onClick={openBotEditor}
                 className="px-4 py-2 rounded border border-bunny-border text-gray-200 text-sm hover:bg-bunny-bg"
               >
-                {tr('web.discord.setup.startSetup')}
+                {tr('web.discord.setup.editBot')}
               </button>
               <button
                 type="button"

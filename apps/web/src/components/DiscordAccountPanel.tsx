@@ -74,6 +74,8 @@ export default function DiscordAccountPanel({ isOwner }: Props) {
   }
 
   const serverConfigured = discord.bridge_configured || discord.oauth_configured;
+  const showSetup = isOwner && !discord.oauth_configured;
+  const showManage = isOwner && serverConfigured && !showSetup;
 
   return (
     <div className="w-full max-w-lg border border-bunny-border rounded-lg p-4 bg-bunny-panel space-y-3">
@@ -103,7 +105,7 @@ export default function DiscordAccountPanel({ isOwner }: Props) {
               ? tr('web.discord.account.notConfiguredOwner')
               : tr('web.discord.account.notConfigured')}
           </p>
-          {isOwner ? (
+          {showSetup ? (
             <button
               type="button"
               onClick={() => { location.href = '/discord/setup'; }}
@@ -140,7 +142,7 @@ export default function DiscordAccountPanel({ isOwner }: Props) {
         </button>
       )}
 
-      {isOwner && serverConfigured ? (
+      {showManage ? (
         <button
           type="button"
           onClick={() => { location.href = '/discord/setup'; }}

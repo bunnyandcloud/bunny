@@ -1,4 +1,5 @@
 use crate::api;
+use crate::prompt::{prompt, prompt_password};
 use crate::state::AppState;
 use crate::terminals::{default_shell_cwd, persist_terminal};
 use anyhow::{bail, Result};
@@ -1388,19 +1389,6 @@ fn effective_listen_host(cli_host: &str, port: u16) -> String {
         return "0.0.0.0".into();
     }
     cli_host.to_string()
-}
-
-fn prompt(label: &str) -> String {
-    use std::io::{self, Write};
-    print!("{label}");
-    let _ = io::stdout().flush();
-    let mut s = String::new();
-    io::stdin().read_line(&mut s).unwrap();
-    s.trim().to_string()
-}
-
-fn prompt_password(label: &str) -> String {
-    prompt(label)
 }
 
 fn prompt_yes_no(label: &str, default: bool) -> bool {

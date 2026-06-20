@@ -1175,9 +1175,17 @@
     "en": "Scopes: check bot and applications.commands.",
     "fr": "Scopes : cochez bot et applications.commands."
   },
+  "web.discord.setup.inviteScopesAlt": {
+    "en": "Discord OAuth2 URL Generator — bot and applications.commands scopes selected",
+    "fr": "Générateur d’URL OAuth2 Discord — scopes bot et applications.commands cochés"
+  },
   "web.discord.setup.inviteStep3": {
     "en": "Text Permissions: check all boxes in this section.",
     "fr": "Permissions textuelles : cochez toutes les cases de cette section."
+  },
+  "web.discord.setup.inviteTextPermissionsAlt": {
+    "en": "Discord OAuth2 URL Generator — Text Permissions section with all boxes checked",
+    "fr": "Générateur d’URL OAuth2 Discord — section Permissions textuelles avec toutes les cases cochées"
   },
   "web.discord.setup.inviteStep4": {
     "en": "Copy the URL, open it, pick your server, and authorize. The bot should appear in the member list.",

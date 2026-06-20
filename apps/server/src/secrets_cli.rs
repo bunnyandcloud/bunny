@@ -1,13 +1,13 @@
+use crate::prompt::{prompt, prompt_password};
 use crate::state::AppState;
 use anyhow::Result;
 use bunny_secrets::{parse_scope, SecretEntry, SecretScope, SecretsError};
 use clap::{Parser, Subcommand};
+use uuid::Uuid;
 
 fn secrets_err(e: SecretsError) -> anyhow::Error {
     anyhow::anyhow!("{e}")
 }
-use std::io::{self, Write};
-use uuid::Uuid;
 
 #[derive(Parser)]
 pub struct SecretsOpts {
@@ -268,14 +268,3 @@ fn sync_secret_ref(
     )
 }
 
-fn prompt(label: &str) -> String {
-    print!("{label}");
-    let _ = io::stdout().flush();
-    let mut s = String::new();
-    io::stdin().read_line(&mut s).unwrap();
-    s.trim().to_string()
-}
-
-fn prompt_password(label: &str) -> String {
-    prompt(label)
-}

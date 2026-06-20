@@ -1,0 +1,944 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- SQL XML created for WWW SQL Designer — https://github.com/ondras/wwwsqldesigner/ -->
+<!-- Import: File → Load → coller ce XML, ou ouvrir ce fichier -->
+<!-- Schéma consolidé bunny.db (auth + discord) -->
+<sql>
+<datatypes db="sqlite">
+	<group label="Numeric" color="rgb(238,238,170)">
+		<type label="Integer" length="0" sql="INTEGER" quote=""/>
+	</group>
+	<group label="Character" color="rgb(255,255,200)">
+		<type label="Text" length="0" sql="TEXT" quote="'"/>
+		<type label="Varchar" length="1" sql="VARCHAR" quote="'"/>
+	</group>
+	<group label="Date &amp; Time" color="rgb(200,255,200)">
+		<type label="Date" length="0" sql="DATE" quote="'"/>
+		<type label="Datetime" length="0" sql="DATETIME" quote="'"/>
+	</group>
+</datatypes>
+
+<!-- ═══ AUTH & ÉQUIPE ═══ -->
+
+<table x="50" y="50" name="users">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="email" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="password_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="disabled_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="totp_secret_enc" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="totp_enabled_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="can_install_claude" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="can_manage_vault" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="can_create_sessions" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="default_session_role" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'viewer'</default></row>
+	<row name="preferred_locale" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'en'</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<key type="UNIQUE" name="">
+		<part>email</part>
+	</key>
+	<comment>Comptes utilisateurs Bunny</comment>
+</table>
+
+<table x="50" y="420" name="auth_sessions">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="token_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="device_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="revoked_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="password_verified_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="50" y="640" name="refresh_tokens">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="token_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="device_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="rotated_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="50" y="860" name="mfa_pending_setups">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="secret_enc" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<key type="UNIQUE" name="">
+		<part>user_id</part>
+	</key>
+</table>
+
+<table x="50" y="1060" name="mfa_recovery_codes">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="code_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="used_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="50" y="1260" name="mfa_challenges">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="token_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="failed_attempts" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="locked_until" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="50" y="1480" name="team_invitations">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="email" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="default_session_role" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'viewer'</default></row>
+	<row name="can_install_claude" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="can_manage_vault" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="can_create_sessions" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="token_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="accepted_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="invited_by" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="50" y="1760" name="push_devices">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="device_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="platform" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="provider" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="token" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="updated_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<key type="UNIQUE" name="">
+		<part>user_id</part>
+		<part>device_id</part>
+	</key>
+</table>
+
+<table x="50" y="2000" name="app_meta">
+	<row name="key" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="value" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>key</part>
+	</key>
+</table>
+
+<table x="50" y="2120" name="audit_logs">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="actor_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="action" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="resource" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="metadata_redacted" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="ts" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<!-- ═══ SESSIONS DE TRAVAIL ═══ -->
+
+<table x="420" y="50" name="stream_sessions">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="owner_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="project_path" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="config_json" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<comment>Environnement distant (pivot central)</comment>
+</table>
+
+<table x="420" y="320" name="session_members">
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="role" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>session_id</part>
+		<part>user_id</part>
+	</key>
+</table>
+
+<table x="420" y="480" name="invitations">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="email" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="role" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="token_hash" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="accepted_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="420" y="680" name="terminals">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="name" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="shell" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="init_command" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="cwd" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'/'</default></row>
+	<row name="tmux_target" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="cols" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>NULL</default></row>
+	<row name="rows" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="420" y="980" name="browser_sessions">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="target_url" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="420" y="1160" name="previews">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="local_port" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>NULL</default></row>
+	<row name="public_path" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="420" y="1320" name="timeline_events">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="source" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="event_type" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="payload_redacted_json" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="sequence" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>NULL</default></row>
+	<row name="ts" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="420" y="1520" name="secret_refs">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="scope" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="name" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="provider" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="ref_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<comment>Pointeurs vers secrets.enc (hors SQLite)</comment>
+</table>
+
+<!-- ═══ DISCORD ═══ -->
+
+<table x="820" y="50" name="discord_installations">
+	<row name="guild_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="installed_by_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>guild_id</part>
+	</key>
+</table>
+
+<table x="820" y="200" name="discord_user_links">
+	<row name="discord_user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="discord_username" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="discord_global_name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>discord_user_id</part>
+	</key>
+</table>
+
+<table x="820" y="380" name="discord_session_links">
+	<row name="guild_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="channel_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="created_by_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'active'</default></row>
+	<row name="last_shell_name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="claude_session_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="project_cwd_override" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>guild_id</part>
+		<part>channel_id</part>
+	</key>
+</table>
+
+<table x="820" y="640" name="discord_link_codes">
+	<row name="code" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="created_by_user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="used_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>code</part>
+	</key>
+</table>
+
+<table x="820" y="820" name="agent_tasks">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="source" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="discord_thread_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="requested_by_discord_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="requested_by_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="agent" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="mode" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="prompt" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="updated_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="820" y="1100" name="discord_thread_bindings">
+	<row name="guild_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="channel_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="task_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="agent_tasks" row="id" /></row>
+	<row name="default_shell_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="term_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="terminals" row="id" /></row>
+	<row name="project_cwd" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'active'</default></row>
+	<row name="goal_text" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="git_enabled" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="base_branch" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_branch" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="start_commit" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="last_pane_marker" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>0</default></row>
+	<row name="last_pane_snapshot" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>''</default></row>
+	<row name="last_input_discord_message_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="claude_session_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>thread_id</part>
+	</key>
+</table>
+
+<table x="820" y="1520" name="approval_requests">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="task_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="agent_tasks" row="id" /></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="action_summary" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="reason" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="discord_message_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="resolved_at" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="820" y="1740" name="watch_sessions">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="token" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="guild_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="channel_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="discord_thread_bindings" row="thread_id" /></row>
+	<row name="layout" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="visibility" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="mode" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="status" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="required_role_ids" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'[]'</default></row>
+	<row name="browser_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="browser_sessions" row="id" /></row>
+	<row name="expires_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+	<key type="UNIQUE" name="">
+		<part>token</part>
+	</key>
+</table>
+
+<table x="1220" y="1100" name="discord_thread_messages">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="discord_thread_bindings" row="thread_id" /></row>
+	<row name="role" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="discord_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="author_name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="content" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="1220" y="1320" name="discord_thread_discussion">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="discord_thread_bindings" row="thread_id" /></row>
+	<row name="discord_user_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="author_name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="content" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="1220" y="1500" name="discord_thread_pending_questions">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="discord_thread_bindings" row="thread_id" /></row>
+	<row name="questions_json" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="answers_json" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>'{}'</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="820" y="2040" name="discord_follows">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="guild_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="channel_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="target" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="shell_name" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="interval_secs" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>NULL</default></row>
+	<row name="active" null="0" autoincrement="0">
+		<datatype>INTEGER</datatype>
+		<default>1</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+<table x="820" y="2240" name="discord_audit_log">
+	<row name="id" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="discord_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="bunny_user_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="users" row="id" /></row>
+	<row name="guild_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="channel_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="thread_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="session_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="stream_sessions" row="id" /></row>
+	<row name="command" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="action_executed" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="agent" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="shell_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="terminals" row="id" /></row>
+	<row name="browser_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="browser_sessions" row="id" /></row>
+	<row name="approval_id" null="1" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default><relation table="approval_requests" row="id" /></row>
+	<row name="result" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<row name="created_at" null="0" autoincrement="0">
+		<datatype>TEXT</datatype>
+		<default>NULL</default></row>
+	<key type="PRIMARY" name="">
+		<part>id</part>
+	</key>
+</table>
+
+</sql>
