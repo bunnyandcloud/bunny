@@ -14,6 +14,7 @@ pub struct TerminalManager {
     buffer_lines: usize,
     use_tmux: bool,
     scrollback_dir: Option<PathBuf>,
+    data_dir: PathBuf,
 }
 
 impl TerminalManager {
@@ -22,6 +23,7 @@ impl TerminalManager {
         buffer_lines: usize,
         use_tmux: bool,
         scrollback_dir: Option<PathBuf>,
+        data_dir: PathBuf,
     ) -> Self {
         if let Some(dir) = &scrollback_dir {
             let _ = std::fs::create_dir_all(dir);
@@ -32,6 +34,7 @@ impl TerminalManager {
             buffer_lines,
             use_tmux: use_tmux && tmux::available(),
             scrollback_dir,
+            data_dir,
         }
     }
 
@@ -130,32 +133,63 @@ impl TerminalManager {
         initial_scrollback: Option<String>,
     ) -> Result<(Uuid, Option<String>)> {
         let recovery_scrollback = initial_scrollback.filter(|s| !s.trim().is_empty());
-        let mut env = build_allowlisted_env(cwd);
+        let mut env = build_allowlisted_env(cwd, &self.data_dir, id);
         for (k, v) in extra_env {
-            if k.starts_with("BUNNY_SECRET_") {
+            if k.starts_with("BUNNY_SECRET_")
+                || k.as_str() == "BUNNY_TERMINAL_ID"
+                || k.as_str() == "PATH"
+            {
                 env.insert(k, v);
             }
         }
-        let secret_env: HashMap<String, String> = env
+        let session_env: HashMap<String, String> = env
             .iter()
-            .filter(|(k, _)| k.starts_with("BUNNY_SECRET_"))
+            .filter(|(k, _)| {
+                k.starts_with("BUNNY_SECRET_")
+                    || **k == "BUNNY_TERMINAL_ID"
+                    || **k == "PATH"
+            })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        let interactive_shell = tmux::interactive_shell_command(
+            &self.data_dir,
+            id,
+            &self.default_shell,
+            &session_env,
+        )
+        .unwrap_or_else(|_| self.default_shell.clone());
 
         let (pty, tmux_target) = if self.use_tmux {
             let tmux_target = if let Some(target) = existing_tmux_target {
                 if tmux::target_alive(target) {
                     tmux::configure_session_for_web(tmux::session_name_from_target(target));
-                    tmux::ensure_shell_running(target, cwd, &self.default_shell, &secret_env)
+                    tmux::ensure_shell_running(
+                        target,
+                        cwd,
+                        &interactive_shell,
+                        &session_env,
+                    )
                         .context("respawn tmux shell")?;
                     target.to_string()
                 } else {
-                    tmux::ensure_terminal_session(id, cwd, init_command, &secret_env)
-                        .context("recreate tmux session for shell")?
+                    tmux::ensure_terminal_session(
+                        id,
+                        cwd,
+                        init_command,
+                        &interactive_shell,
+                        &session_env,
+                    )
+                    .context("recreate tmux session for shell")?
                 }
             } else {
-                tmux::ensure_terminal_session(id, cwd, init_command, &secret_env)
-                    .context("create tmux session for shell")?
+                tmux::ensure_terminal_session(
+                    id,
+                    cwd,
+                    init_command,
+                    &interactive_shell,
+                    &session_env,
+                )
+                .context("create tmux session for shell")?
             };
             let pty = PtySession::spawn_tmux_attach(
                 id,
@@ -346,7 +380,7 @@ impl TerminalManager {
     }
 }
 
-fn build_allowlisted_env(cwd: &Path) -> HashMap<String, String> {
+fn build_allowlisted_env(cwd: &Path, data_dir: &Path, terminal_id: Uuid) -> HashMap<String, String> {
     let mut env = HashMap::new();
     for (key, value) in crate::locale::utf8_locale_vars() {
         env.insert(key.into(), value.into());
@@ -356,10 +390,14 @@ fn build_allowlisted_env(cwd: &Path) -> HashMap<String, String> {
     env.insert("PWD".into(), cwd.display().to_string());
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     env.insert("HOME".into(), home.clone());
-    let local_bin = format!("{home}/.local/bin");
+    let bunny_bin = data_dir.join("bin");
     env.insert(
         "PATH".into(),
-        format!("{local_bin}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+        format!(
+            "{}:{home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            bunny_bin.display()
+        ),
     );
+    env.insert("BUNNY_TERMINAL_ID".into(), terminal_id.to_string());
     env
 }

@@ -144,6 +144,17 @@ pub struct DiscordThreadPendingQuestions {
     pub created_at: DateTime<Utc>,
 }
 
+/// Pending Bash/tool permission for a Discord thread (approved via Discord buttons).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordThreadPendingPermission {
+    pub id: Uuid,
+    pub thread_id: String,
+    pub claude_session_id: Option<String>,
+    pub command: String,
+    pub allowed_tools: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordLinkCode {
     pub code: String,

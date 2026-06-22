@@ -397,6 +397,18 @@ async fn post_thread_claude_response(
         return Ok(());
     }
 
+    if let (Some(pending_id), Some(command)) = (
+        res.get("pending_permission_id").and_then(|v| v.as_str()),
+        res.get("permission_command").and_then(|v| v.as_str()),
+    ) {
+        let intro = res
+            .get("response_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        post_thread_permission_prompt(http, channel_id, intro, pending_id, command).await?;
+        return Ok(());
+    }
+
     let text = res
         .get("response_text")
         .and_then(|v| v.as_str())
@@ -457,6 +469,215 @@ pub fn parse_thread_question_button(custom_id: &str) -> Option<(String, usize, u
 
 pub fn thread_question_button_id(pending_id: &str, q_index: usize, opt_index: usize) -> String {
     format!("bunny:tqa:{pending_id}:{q_index}:{opt_index}")
+}
+
+/// Discord button custom_id: `bunny:tperm:{pending_id}:{1|0}` (approve/deny).
+pub fn parse_thread_permission_button(custom_id: &str) -> Option<(String, bool)> {
+    let rest = custom_id.strip_prefix("bunny:tperm:")?;
+    let mut parts = rest.splitn(2, ':');
+    let pending_id = parts.next()?.to_string();
+    let approve = parts.next()? == "1";
+    Some((pending_id, approve))
+}
+
+pub fn thread_permission_button_id(pending_id: &str, approve: bool) -> String {
+    format!("bunny:tperm:{pending_id}:{}", if approve { 1 } else { 0 })
+}
+
+pub fn thread_merge_button_id(thread_id: &str) -> String {
+    format!("bunny:tmerge:{thread_id}")
+}
+
+pub fn parse_thread_merge_button(custom_id: &str) -> Option<String> {
+    custom_id.strip_prefix("bunny:tmerge:").map(str::to_string)
+}
+
+pub async fn handle_thread_merge_button(
+    comp: &serenity::model::application::ComponentInteraction,
+    http: &Http,
+    bunny: &BunnyClient,
+) -> anyhow::Result<()> {
+    let thread_id = parse_thread_merge_button(&comp.data.custom_id)
+        .ok_or_else(|| anyhow::anyhow!("invalid merge button"))?;
+
+    let parent_ch = parent_channel_id_for_id(http, comp.channel_id).await;
+    comp.create_response(
+        http,
+        CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
+    )
+    .await?;
+
+    let bctx = bridge_ctx(
+        comp.guild_id,
+        &parent_ch,
+        Some(&thread_id),
+        &comp.user.id.get().to_string(),
+    );
+    let locale = crate::user_locale(bunny, &bctx).await;
+    let mut body = bctx;
+    body["thread_id"] = serde_json::json!(thread_id);
+
+    let res = bunny.post_json("/thread/merge", &body).await?;
+    let base = res
+        .get("base_branch")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
+    let mut content = t(
+        locale,
+        "discord.thread.merge_success",
+        &[("base", base)],
+    );
+    if let Some(output) = res.get("output").and_then(|v| v.as_str()) {
+        if !output.trim().is_empty() {
+            content.push_str("\n```\n");
+            let out = if output.len() > 1500 {
+                format!("{}…", &output[..1500])
+            } else {
+                output.to_string()
+            };
+            content.push_str(&out);
+            content.push_str("\n```");
+        }
+    }
+
+    comp.create_followup(http, CreateInteractionResponseFollowup::new().content(&content))
+        .await?;
+
+    let _ = comp
+        .channel_id
+        .edit_message(
+            http,
+            comp.message.id,
+            EditMessage::new().components(vec![]),
+        )
+        .await;
+
+    Ok(())
+}
+
+fn truncate_shell_command_for_discord(command: &str) -> String {
+    const MAX: usize = 600;
+    let cmd = command.trim();
+    let n = cmd.chars().count();
+    if n <= MAX {
+        return cmd.to_string();
+    }
+    let truncated: String = cmd.chars().take(MAX).collect();
+    format!("{truncated}\n… ({n} chars)")
+}
+
+async fn post_thread_permission_prompt(
+    http: &Http,
+    channel_id: ChannelId,
+    intro: &str,
+    pending_id: &str,
+    command: &str,
+) -> anyhow::Result<()> {
+    let mut content = String::new();
+    if !intro.trim().is_empty() {
+        content.push_str(intro.trim());
+        content.push_str("\n\n");
+    }
+    content.push_str("**Commande :**\n```bash\n");
+    content.push_str(&truncate_shell_command_for_discord(command));
+    content.push_str("\n```");
+    if content.len() > 1900 {
+        content.truncate(1900);
+        content.push_str("…");
+    }
+
+    channel_id
+        .send_message(
+            http,
+            CreateMessage::new().content(content).components(vec![
+                CreateActionRow::Buttons(vec![
+                    CreateButton::new(thread_permission_button_id(pending_id, true))
+                        .label("Autoriser")
+                        .style(ButtonStyle::Success),
+                    CreateButton::new(thread_permission_button_id(pending_id, false))
+                        .label("Refuser")
+                        .style(ButtonStyle::Danger),
+                ]),
+            ]),
+        )
+        .await?;
+    Ok(())
+}
+
+pub async fn handle_thread_permission_button(
+    comp: &serenity::model::application::ComponentInteraction,
+    http: Arc<Http>,
+    bunny: &BunnyClient,
+) -> anyhow::Result<()> {
+    let (pending_id, approve) = parse_thread_permission_button(&comp.data.custom_id)
+        .ok_or_else(|| anyhow::anyhow!("invalid permission button"))?;
+
+    let parent_ch = parent_channel_id_for_id(&http, comp.channel_id).await;
+    let thread_id = comp.channel_id.get().to_string();
+
+    comp.create_response(
+        &http,
+        CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
+    )
+    .await?;
+
+    let bctx = bridge_ctx(
+        comp.guild_id,
+        &parent_ch,
+        Some(&thread_id),
+        &comp.user.id.get().to_string(),
+    );
+    let locale = crate::user_locale(bunny, &bctx).await;
+    let mut body = bctx.clone();
+    body["thread_id"] = serde_json::json!(thread_id);
+    body["pending_id"] = serde_json::json!(pending_id);
+    body["approve"] = serde_json::json!(approve);
+
+    let _ = comp
+        .edit_response(
+            &http,
+            EditInteractionResponse::new()
+                .content(if approve {
+                    "✓ Permission accordée — Claude reprend…"
+                } else {
+                    "✗ Permission refusée — Claude reprend…"
+                })
+                .components(vec![]),
+        )
+        .await;
+
+    let working_id = post_thread_working_message(&http, comp.channel_id, locale).await;
+    let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
+
+    let res = match bunny
+        .post_json_timeout("/thread/permission", &body, THREAD_CLAUDE_TIMEOUT)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
+            comp.create_followup(
+                &http,
+                CreateInteractionResponseFollowup::new().content(format!("❌ Erreur : {e}")),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
+
+    post_thread_claude_response(
+        &http,
+        comp.channel_id,
+        &res,
+        comp.message.id,
+        &thread_id,
+        &bctx,
+        bunny,
+        locale,
+    )
+    .await
 }
 
 async fn post_thread_question_prompt(
@@ -739,21 +960,48 @@ pub async fn handle_goal_cancel_button(
 
     let res = bunny.post_json("/thread/finalize", &body).await?;
     let status_emoji = if approve { "✅" } else { "❌" };
+    let offer_merge = res.get("offer_merge").and_then(|v| v.as_bool()) == Some(true);
+    let merge_base = res
+        .get("merge_base_branch")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
+    let merge_thread = res
+        .get("merge_thread_branch")
+        .and_then(|v| v.as_str())
+        .unwrap_or("bunny/thread");
     let mut content: String = if approve {
         t(locale, "discord.thread.goal_confirmed", &[])
     } else {
         t(locale, "discord.thread.goal_cancelled", &[])
     };
-    if let Some(git) = res.get("git_instructions").and_then(|v| v.as_str()) {
+    if offer_merge {
         content.push_str("\n\n");
-        content.push_str(git);
+        content.push_str(&t(
+            locale,
+            "discord.thread.goal_git_instructions",
+            &[("branch", merge_thread), ("base", merge_base)],
+        ));
     }
 
-    comp.create_followup(
-        http,
-        CreateInteractionResponseFollowup::new().content(&content),
-    )
-    .await?;
+    let mut followup = CreateInteractionResponseFollowup::new().content(&content);
+    if offer_merge {
+        let thread_id = comp.channel_id.get().to_string();
+        let mut btn_label = t(
+            locale,
+            "discord.thread.merge_button",
+            &[("base", merge_base)],
+        );
+        if btn_label.chars().count() > 80 {
+            btn_label = btn_label.chars().take(77).collect::<String>() + "…";
+        }
+        followup = followup.components(vec![CreateActionRow::Buttons(vec![
+            CreateButton::new(thread_merge_button_id(&thread_id))
+                .label(btn_label)
+                .style(ButtonStyle::Primary),
+        ])]);
+    }
+
+    comp.create_followup(http, followup).await?;
 
     let _ = comp
         .channel_id

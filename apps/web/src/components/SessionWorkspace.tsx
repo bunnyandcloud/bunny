@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
+  apiErrorMessage,
   createTerminal,
   deleteTerminal,
   getSecretsStatus,
@@ -27,6 +28,8 @@ import { useT } from '../i18n';
 import AppTopBar from './AppTopBar';
 import SessionMembersModal from './SessionMembersModal';
 import SessionDiscordModal from './SessionDiscordModal';
+import ApprovalPanel from './ApprovalPanel';
+import ErrorAlertModal from './ErrorAlertModal';
 
 function browserStorageKey(sessionId: string) {
   return `bunny-browser-id:${sessionId}`;
@@ -92,8 +95,20 @@ export default function SessionWorkspace({ sessionId }: Props) {
   );
   const [membersOpen, setMembersOpen] = useState(false);
   const [discordOpen, setDiscordOpen] = useState(false);
+  const [errorModal, setErrorModal] = useState<string | null>(null);
   const claudeSetup = isClaudeSetupMode();
   const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
+
+  const showError = useCallback(
+    (err: unknown, fallback?: string) => {
+      if (err == null && fallback) {
+        setErrorModal(fallback);
+        return;
+      }
+      setErrorModal(apiErrorMessage(err, fallback ?? tr('web.error.generic')));
+    },
+    [tr],
+  );
 
   const refreshVaultStatus = useCallback(async () => {
     if (!user?.isOwner) {
@@ -181,11 +196,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
         setStatus('no shells');
       }
     } catch (e) {
-      setStatus(String(e));
+      showError(e);
     } finally {
       setBusy(false);
     }
-  }, [sessionId, refreshShells]);
+  }, [sessionId, refreshShells, showError]);
 
   useEffect(() => {
     openShell(!claudeSetup);
@@ -224,8 +239,24 @@ export default function SessionWorkspace({ sessionId }: Props) {
           type?: string;
           terminalId?: string;
           name?: string;
+          cwd?: string;
+          gitProject?: string;
+          gitBranch?: string;
         };
-        if (msg.type === 'terminal.status.changed') {
+        if (msg.type === 'terminal.context.changed' && msg.terminalId) {
+          setShells((prev) =>
+            prev.map((s) =>
+              s.id === msg.terminalId
+                ? {
+                    ...s,
+                    cwd: msg.cwd ?? s.cwd,
+                    git_project: msg.gitProject ?? s.git_project,
+                    git_branch: msg.gitBranch ?? s.git_branch,
+                  }
+                : s,
+            ),
+          );
+        } else if (msg.type === 'terminal.status.changed') {
           void refreshShells().then((list) => {
             if (msg.name?.startsWith('discord-') && msg.terminalId) {
               if (list.some((s) => s.id === msg.terminalId)) {
@@ -244,7 +275,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
   useEffect(() => {
     const id = window.setInterval(() => {
       void refreshShells();
-    }, 3000);
+    }, 30000);
     return () => window.clearInterval(id);
   }, [refreshShells]);
 
@@ -260,7 +291,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
       }
       setStatus('ready');
     } catch (e) {
-      setStatus(String(e));
+      showError(e);
     } finally {
       setBusy(false);
     }
@@ -285,7 +316,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
         setStatus('no shells');
       }
     } catch (e) {
-      setStatus(String(e));
+      showError(e);
     } finally {
       setBusy(false);
     }
@@ -302,7 +333,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
 
   async function handleInjectSecret(envVar: string) {
     if (!activeId) {
-      setStatus('no_active_shell');
+      showError(null, tr('web.session.noActiveShell'));
       return;
     }
     const text = `$${envVar}`;
@@ -314,7 +345,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
       }
       panel?.focus();
     } catch (e) {
-      setStatus(String(e));
+      showError(e);
     }
   }
 
@@ -343,6 +374,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
         onClose={() => setUnlockOpen(false)}
         onUnlocked={handleVaultUnlocked}
         sessionId={sessionId}
+      />
+      <ErrorAlertModal
+        open={errorModal !== null}
+        message={errorModal}
+        onClose={() => setErrorModal(null)}
       />
       <header className="flex items-center justify-between px-4 py-2 border-b border-bunny-border bg-bunny-panel gap-4">
         <button
@@ -417,6 +453,7 @@ export default function SessionWorkspace({ sessionId }: Props) {
       {showVaultBanner && (
         <SecretsVaultBanner onUnlock={() => setUnlockOpen(true)} />
       )}
+      <ApprovalPanel sessionId={sessionId} />
       <PanelGroup direction="horizontal" className="flex-1">
         <Panel
           defaultSize={user?.isOwner && showVaultSection ? 75 : 100}

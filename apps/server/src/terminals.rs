@@ -1,5 +1,6 @@
 //! Terminal persistence and re-attach after agent restart or client disconnect.
 
+use crate::git_identity::{apply_bunny_path, apply_git_env, git_env_for_user};
 use crate::state::AppState;
 use anyhow::Result;
 use bunny_auth::db::TerminalRow;
@@ -7,6 +8,7 @@ use bunny_core::types::TerminalStatus;
 use bunny_pty::{scrollback, tmux};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -163,6 +165,24 @@ fn tmux_target_candidates(record: &TerminalRecord) -> Vec<String> {
     out
 }
 
+/// Read-only tmux target lookup (no DB writes — safe for list/poll endpoints).
+fn live_tmux_target_readonly(state: &AppState, record: &TerminalRecord) -> Option<String> {
+    if !state.terminals.uses_tmux() {
+        return None;
+    }
+    if let Some(t) = state.terminals.tmux_target(record.id) {
+        if tmux::target_alive(&t) {
+            return Some(t);
+        }
+    }
+    for target in tmux_target_candidates(record) {
+        if tmux::target_alive(&target) {
+            return Some(target);
+        }
+    }
+    None
+}
+
 /// Resolve tmux attach target; migrates DB when a newer target name is alive.
 fn resolve_tmux_target(
     state: &AppState,
@@ -257,23 +277,38 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
         detach_terminal(state, record.id);
     }
 
-    let secret_env = state.secret_env_for_session(record.session_id);
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    let mut session_env = state
+        .git_identity
+        .terminal_session_env(record.id, &home);
+    session_env.extend(state.secret_env_for_session(record.session_id));
 
     let (tmux_target, fresh_shell) = if state.terminals.uses_tmux() {
         match resolve_tmux_target(state, record)? {
-            Some(t) => (Some(t), false),
+            Some(t) => {
+                tmux::apply_session_env(tmux::session_name_from_target(&t), &session_env);
+                (Some(t), false)
+            }
             None => {
                 tracing::info!(
                     terminal = %record.id,
                     resume_cwd = %resume_cwd.display(),
                     "tmux session gone after agent stop — starting a fresh shell"
                 );
+                let interactive_shell = tmux::interactive_shell_command(
+                    std::path::Path::new(&state.data_dir),
+                    record.id,
+                    &state.config.terminal.shell,
+                    &session_env,
+                )
+                .unwrap_or_else(|_| state.config.terminal.shell.clone());
                 (
                     Some(tmux::ensure_terminal_session(
                         record.id,
                         &resume_cwd,
                         record.init_command.as_deref(),
-                        &secret_env,
+                        &interactive_shell,
+                        &session_env,
                     )?),
                     true,
                 )
@@ -293,7 +328,7 @@ pub fn attach_terminal_record(state: &AppState, record: &TerminalRecord) -> Resu
         record.init_command.as_deref(),
         record.cols,
         record.rows,
-        secret_env,
+        session_env,
         tmux_target.as_deref(),
         initial_scrollback,
     )?;
@@ -628,6 +663,7 @@ pub fn exec_discord_shell_command(
     term_id: Uuid,
     session_id: Uuid,
     command: &str,
+    acting_user_id: Option<Uuid>,
 ) -> Result<(String, i32)> {
     use bunny_pty::locale;
     use std::process::Command;
@@ -664,10 +700,7 @@ pub fn exec_discord_shell_command(
     cmd.env("COLORTERM", "truecolor");
     cmd.env("HOME", &home);
     cmd.env("PWD", cwd.display().to_string());
-    cmd.env(
-        "PATH",
-        format!("{home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
-    );
+    apply_discord_shell_env(&mut cmd, state, term_id, session_id, acting_user_id);
     for (k, v) in state.secret_env_for_session(session_id) {
         cmd.env(k, v);
     }
@@ -694,6 +727,8 @@ pub fn exec_discord_shell_command(
 pub const DISCORD_RUN_QUICK_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 
 const BUNNY_EXIT_MARKER: &str = "__BUNNY_EXIT__";
+pub const BUNNY_BACKGROUND_PID_MARKER: &str = "[bunny] background pid=";
+const DISCORD_BACKGROUND_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const DISCORD_RUN_EXCERPT_MAX_LINES: usize = 24;
 const DISCORD_RUN_EXCERPT_MAX_CHARS: usize = 1400;
 
@@ -735,12 +770,208 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
     Ok(note.to_string())
 }
 
+fn discord_shell_idle_command_name(command: &str) -> bool {
+    let base = command
+        .rsplit('/')
+        .next()
+        .unwrap_or(command)
+        .trim()
+        .to_lowercase();
+    if base.is_empty() {
+        return true;
+    }
+    const IDLE: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "nu", "ksh", "tcsh"];
+    IDLE.iter().any(|shell| base == *shell || base.ends_with(shell))
+}
+
+/// True when the tmux pane is running a foreground process (dev server, etc.), not an idle shell prompt.
+pub fn discord_shell_pane_busy(state: &AppState, term_id: Uuid) -> Result<bool> {
+    if !state.terminals.uses_tmux() {
+        return Ok(false);
+    }
+    ensure_terminal_attached(state, term_id)?;
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+    let Some(target) = resolve_tmux_target(state, &record)? else {
+        return Ok(false);
+    };
+    if tmux::pane_is_dead(&target) {
+        return Ok(false);
+    }
+    if let Some(cmd) = tmux::pane_current_command(&target) {
+        if !discord_shell_idle_command_name(&cmd) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Send SIGINT to the shell (Ctrl+C). Uses tmux send-keys when attached — more reliable than PTY attach.
+pub fn send_terminal_interrupt(state: &AppState, terminal_id: Uuid) -> Result<()> {
+    if let Some(target) = state.terminals.tmux_target(terminal_id) {
+        tmux::send_keys_key(&target, "C-c")?;
+        return Ok(());
+    }
+    state.terminals.write(terminal_id, "\x03")
+}
+
+/// Working directory for Discord commands — tmux pane cwd when available.
+pub fn discord_shell_working_directory(
+    state: &AppState,
+    term_id: Uuid,
+) -> Result<PathBuf> {
+    let row = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+
+    if state.terminals.uses_tmux() {
+        if let Some(target) = resolve_tmux_target(state, &record)? {
+            if let Some(cwd) = tmux::pane_cwd(&target) {
+                return Ok(PathBuf::from(cwd));
+            }
+        }
+    }
+    Ok(PathBuf::from(record.cwd))
+}
+
+/// Best-effort cwd for a shell (live tmux pane → scrollback sidecar → DB).
+pub fn terminal_live_cwd(state: &AppState, term_id: Uuid) -> Option<PathBuf> {
+    let record = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(row_to_record);
+
+    if let Some(record) = record {
+        if let Some(target) = live_tmux_target_readonly(state, &record) {
+            if let Some(cwd) = tmux::pane_cwd(&target) {
+                return Some(PathBuf::from(cwd));
+            }
+        }
+        if let Some(cwd) = scrollback::load_cwd(&scrollback_dir(state), term_id) {
+            return Some(PathBuf::from(cwd));
+        }
+        return Some(PathBuf::from(record.cwd));
+    }
+    if let Some(target) = state.terminals.tmux_target(term_id) {
+        if let Some(cwd) = tmux::pane_cwd(&target) {
+            return Some(PathBuf::from(cwd));
+        }
+    }
+    scrollback::load_cwd(&scrollback_dir(state), term_id).map(PathBuf::from)
+}
+
+#[derive(Debug, Clone)]
+pub struct TerminalWorkContext {
+    pub cwd: Option<String>,
+    pub git_project: Option<String>,
+    pub git_branch: Option<String>,
+}
+
+const TERMINAL_CONTEXT_TTL: Duration = Duration::from_secs(3);
+
+/// Cached cwd/git context for list/poll endpoints (no tmux subprocess on hot path).
+pub fn terminal_work_context_for_list(state: &AppState, term_id: Uuid) -> TerminalWorkContext {
+    let now = Instant::now();
+    if let Some(hit) = state.terminal_context_cache.lock().get(&term_id).cloned() {
+        if hit.expires_at > now {
+            return TerminalWorkContext {
+                cwd: hit.cwd,
+                git_project: hit.git_project,
+                git_branch: hit.git_branch,
+            };
+        }
+    }
+    let ctx = terminal_work_context_light(state, term_id);
+    state.terminal_context_cache.lock().insert(
+        term_id,
+        crate::state::TerminalContextCacheEntry {
+            cwd: ctx.cwd.clone(),
+            git_project: ctx.git_project.clone(),
+            git_branch: ctx.git_branch.clone(),
+            expires_at: now + TERMINAL_CONTEXT_TTL,
+        },
+    );
+    ctx
+}
+
+pub fn update_terminal_context_cache(state: &AppState, term_id: Uuid, ctx: &TerminalWorkContext) {
+    state.terminal_context_cache.lock().insert(
+        term_id,
+        crate::state::TerminalContextCacheEntry {
+            cwd: ctx.cwd.clone(),
+            git_project: ctx.git_project.clone(),
+            git_branch: ctx.git_branch.clone(),
+            expires_at: Instant::now() + TERMINAL_CONTEXT_TTL,
+        },
+    );
+}
+
+pub fn terminal_work_context_light(state: &AppState, term_id: Uuid) -> TerminalWorkContext {
+    let Some(cwd) = terminal_live_cwd_light(state, term_id) else {
+        return TerminalWorkContext {
+            cwd: None,
+            git_project: None,
+            git_branch: None,
+        };
+    };
+    let git = crate::discord_git::terminal_git_context(&cwd);
+    TerminalWorkContext {
+        cwd: Some(cwd.to_string_lossy().into_owned()),
+        git_project: git.project,
+        git_branch: git.branch,
+    }
+}
+
+fn terminal_live_cwd_light(state: &AppState, term_id: Uuid) -> Option<PathBuf> {
+    if let Some(cwd) = scrollback::load_cwd(&scrollback_dir(state), term_id) {
+        return Some(PathBuf::from(cwd));
+    }
+    let record = state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(row_to_record)?;
+    Some(PathBuf::from(record.cwd))
+}
+
+pub fn terminal_work_context(state: &AppState, term_id: Uuid) -> TerminalWorkContext {
+    let Some(cwd) = terminal_live_cwd(state, term_id) else {
+        return TerminalWorkContext {
+            cwd: None,
+            git_project: None,
+            git_branch: None,
+        };
+    };
+    let git = crate::discord_git::terminal_git_context(&cwd);
+    TerminalWorkContext {
+        cwd: Some(cwd.to_string_lossy().into_owned()),
+        git_project: git.project,
+        git_branch: git.branch,
+    }
+}
+
 /// Run a command for Discord via the shell tmux pane (generic: quick finish or persistent process).
 pub fn exec_discord_shell_command_run(
     state: &AppState,
     term_id: Uuid,
     session_id: Uuid,
     command: &str,
+    acting_user_id: Option<Uuid>,
 ) -> Result<DiscordShellRunResult> {
     if bunny_discord::risk::is_interactive_discord_command(command) {
         anyhow::bail!(
@@ -749,12 +980,32 @@ pub fn exec_discord_shell_command_run(
     }
 
     ensure_terminal_attached(state, term_id)?;
+    prepare_discord_tmux_git_actor(state, term_id, session_id, acting_user_id)?;
     let auth_db = state.auth.db();
     let row = auth_db
         .lock()
         .get_terminal(term_id)?
         .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
     let record = row_to_record(row);
+
+    // Non-interactive commands (git log, ls, …) run as a subprocess in the pane cwd so the
+    // live tmux view is not polluted with `bash -lc …; echo __BUNNY_EXIT__` wrappers.
+    if !discord_run_needs_interactive_shell(command) {
+        let (text, code) = exec_discord_shell_command_timed(
+            state,
+            term_id,
+            session_id,
+            command,
+            std::time::Duration::from_secs(40),
+            None,
+            acting_user_id,
+        )?;
+        return Ok(DiscordShellRunResult {
+            output: text,
+            exit_code: code,
+            persistent: false,
+        });
+    }
 
     let target = match resolve_tmux_target(state, &record)? {
         Some(t) => t,
@@ -766,6 +1017,7 @@ pub fn exec_discord_shell_command_run(
                 command,
                 std::time::Duration::from_secs(40),
                 None,
+                acting_user_id,
             )?;
             return Ok(DiscordShellRunResult {
                 output: text,
@@ -858,6 +1110,23 @@ fn discord_run_wrap_command(command: &str) -> String {
 
 fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn wrap_long_running_discord_command(command: &str) -> String {
+    format!(
+        "log=\"/tmp/bunny-discord-bg-$$.log\"; \
+         nohup bash -lc {} >\"$log\" 2>&1 & pid=$!; \
+         sleep 1; \
+         if kill -0 \"$pid\" 2>/dev/null; then \
+           echo \"{BUNNY_BACKGROUND_PID_MARKER}$pid\"; \
+           exit 0; \
+         else \
+           cat \"$log\" 2>/dev/null; \
+           wait \"$pid\"; \
+           exit $?; \
+         fi",
+        shell_single_quote(command)
+    )
 }
 
 fn capture_pane_text(target: &str) -> Result<String> {
@@ -1047,6 +1316,53 @@ mod discord_run_tests {
         assert!(clean.contains("README.md"));
         assert!(clean.contains("ls"));
     }
+
+    #[test]
+    fn transcript_summarizes_claude_json_result() {
+        let raw = r#"{"session_id":"s1","result":"test.md créé et commit effectué.","usage":{"input_tokens":1}}"#;
+        let cmd = "claude -p --output-format json --permission-mode acceptEdits 'fais un commit'";
+        let out = super::sanitize_discord_transcript_output(cmd, raw);
+        assert_eq!(out, "test.md créé et commit effectué.");
+        assert!(!out.contains("input_tokens"));
+    }
+
+    #[test]
+    fn transcript_summarizes_claude_bash_permission() {
+        let raw = r#"{"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"git add test.md"}}]}"#;
+        let cmd = "claude -p --output-format json '…'";
+        let out = super::sanitize_discord_transcript_output(cmd, raw);
+        assert!(out.contains("autorisation shell"));
+        assert!(out.contains("git add test.md"));
+    }
+
+    #[test]
+    fn transcript_leaves_ordinary_command_output() {
+        let out = super::sanitize_discord_transcript_output("git log -1", "abc1234 fix\n");
+        assert_eq!(out, "abc1234 fix\n");
+    }
+
+    #[test]
+    fn non_interactive_commands_use_subprocess_not_tmux_wrap() {
+        assert!(!discord_run_needs_interactive_shell("git log"));
+        assert!(!discord_run_needs_interactive_shell("ls -la"));
+        let wrapped = discord_run_wrap_command("git log");
+        assert!(wrapped.contains(BUNNY_EXIT_MARKER));
+        // Interactive builtins still need the tmux pane.
+        assert!(discord_run_needs_interactive_shell("cd my-app"));
+    }
+
+    #[test]
+    fn subprocess_transcript_injects_full_summarized_output() {
+        let raw = r#"{"result":"line one\nline two"}""#;
+        let cmd = "claude -p --output-format json '…'";
+        let entry = super::discord_transcript_entry_terminal(
+            cmd,
+            &super::DiscordTranscriptBody::Output(raw),
+        );
+        assert!(entry.contains("line one"));
+        assert!(entry.contains("line two"));
+        assert!(!entry.contains("input_tokens"));
+    }
 }
 
 /// Run a Discord shell command with a hard timeout (avoids hanging the API on interactive tools).
@@ -1057,6 +1373,7 @@ pub fn exec_discord_shell_command_timed(
     command: &str,
     timeout: std::time::Duration,
     thread_id: Option<&str>,
+    acting_user_id: Option<Uuid>,
 ) -> Result<(String, i32)> {
     use bunny_pty::locale;
     use std::process::{Command, Stdio};
@@ -1066,6 +1383,18 @@ pub fn exec_discord_shell_command_timed(
             "interactive command not supported from Discord — use the Web UI terminal, or e.g. `head -n 80 landing-page.html` / `cat landing-page.html`"
         );
     }
+
+    let long_running = bunny_discord::risk::is_long_running_discord_shell_command(command);
+    let run_command = if long_running {
+        wrap_long_running_discord_command(command)
+    } else {
+        command.to_string()
+    };
+    let run_timeout = if long_running {
+        DISCORD_BACKGROUND_START_TIMEOUT
+    } else {
+        timeout
+    };
 
     let auth_db = state.auth.db();
     let row = auth_db
@@ -1092,7 +1421,7 @@ pub fn exec_discord_shell_command_timed(
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     let mut cmd = Command::new(&shell);
     cmd.arg("-lc")
-        .arg(command)
+        .arg(&run_command)
         .current_dir(&cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1102,15 +1431,12 @@ pub fn exec_discord_shell_command_timed(
     cmd.env("TERM", "dumb");
     cmd.env("HOME", &home);
     cmd.env("PWD", cwd.display().to_string());
-    cmd.env(
-        "PATH",
-        format!("{home}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
-    );
+    apply_discord_shell_env(&mut cmd, state, term_id, session_id, acting_user_id);
     for (k, v) in state.secret_env_for_session(session_id) {
         cmd.env(k, v);
     }
 
-    let out = run_command_with_timeout(&mut cmd, timeout, thread_id.map(|t| (state, t)))?;
+    let out = run_command_with_timeout(&mut cmd, run_timeout, thread_id.map(|t| (state, t)))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -1137,6 +1463,7 @@ pub fn exec_discord_shell_command_for_thread(
     session_id: Uuid,
     thread_id: &str,
     command: &str,
+    acting_user_id: Option<Uuid>,
 ) -> Result<(String, i32)> {
     exec_discord_shell_command_timed(
         state,
@@ -1145,7 +1472,53 @@ pub fn exec_discord_shell_command_for_thread(
         command,
         THREAD_CLAUDE_TIMEOUT,
         Some(thread_id),
+        acting_user_id,
     )
+}
+
+fn apply_discord_shell_env(
+    cmd: &mut std::process::Command,
+    state: &AppState,
+    term_id: Uuid,
+    _session_id: Uuid,
+    acting_user_id: Option<Uuid>,
+) {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    apply_bunny_path(cmd, state, &home);
+    cmd.env("BUNNY_TERMINAL_ID", term_id.to_string());
+    if let Some(user) = acting_user_id {
+        state.git_identity.set_actor(term_id, user, true);
+        if let Ok(git_env) = git_env_for_user(state, user) {
+            apply_git_env(cmd, &git_env);
+        }
+    }
+}
+
+fn prepare_discord_tmux_git_actor(
+    state: &AppState,
+    term_id: Uuid,
+    session_id: Uuid,
+    acting_user_id: Option<Uuid>,
+) -> Result<()> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    if let Some(user) = acting_user_id {
+        state.git_identity.set_actor(term_id, user, true);
+    }
+    let mut session_env = state
+        .git_identity
+        .terminal_session_env(term_id, &home);
+    session_env.extend(state.secret_env_for_session(session_id));
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+    if let Some(target) = resolve_tmux_target(state, &record)? {
+        let session = tmux::session_name_from_target(&target);
+        tmux::apply_session_env(&session, &session_env);
+    }
+    Ok(())
 }
 
 pub fn cancel_thread_claude_run(state: &AppState, thread_id: &str) -> bool {
@@ -1254,8 +1627,86 @@ pub fn strip_ansi_escapes(text: &str) -> String {
 enum DiscordTranscriptBody<'a> {
     /// Output already visible in the live tmux pane — marker line only.
     CommandOnly,
-    /// Subprocess or no pane capture — include full output text.
+    /// Subprocess (not in tmux) — full summarized output in scrollback and live inject.
     Output(&'a str),
+}
+
+const DISCORD_TRANSCRIPT_OUTPUT_MAX_CHARS: usize = 6_000;
+
+fn is_claude_print_discord_command(command: &str) -> bool {
+    let c = command.trim();
+    c.starts_with("claude -p") || c.starts_with("claude --print")
+}
+
+fn bash_command_from_claude_denial(d: &serde_json::Value) -> Option<String> {
+    d.get("tool_input")
+        .and_then(|i| i.get("command"))
+        .and_then(|c| c.as_str())
+        .map(str::to_string)
+        .or_else(|| d.get("command").and_then(|c| c.as_str()).map(str::to_string))
+}
+
+/// Human-readable shell transcript for `claude -p --output-format json` (not the raw JSON blob).
+fn summarize_claude_print_json_for_transcript(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return trimmed.to_string();
+    };
+    if let Some(denials) = v.get("permission_denials").and_then(|d| d.as_array()) {
+        for d in denials {
+            if d.get("tool_name").and_then(|t| t.as_str()) == Some("Bash") {
+                let cmd = bash_command_from_claude_denial(d).unwrap_or_else(|| "?".into());
+                return format!("[claude] autorisation shell requise:\n{cmd}");
+            }
+        }
+    }
+    if v.get("ask_user_question").is_some() {
+        return "[claude] question en attente (voir Discord)".to_string();
+    }
+    let is_error = v.get("is_error").and_then(|b| b.as_bool()) == Some(true)
+        || v
+            .get("subtype")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s.starts_with("error_"));
+    if is_error {
+        return v
+            .get("result")
+            .and_then(|r| r.as_str())
+            .map(|s| format!("[claude erreur] {s}"))
+            .unwrap_or_else(|| "[claude erreur]".to_string());
+    }
+    match v.get("result") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(other) if other.is_string() => other.as_str().unwrap_or("").to_string(),
+        Some(_) => "[claude] réponse structurée (voir Discord)".to_string(),
+        None => "[claude] (pas de résultat texte)".to_string(),
+    }
+}
+
+fn cap_discord_transcript_output(text: &str) -> String {
+    let n = text.chars().count();
+    if n <= DISCORD_TRANSCRIPT_OUTPUT_MAX_CHARS {
+        return text.to_string();
+    }
+    let truncated: String = text
+        .chars()
+        .take(DISCORD_TRANSCRIPT_OUTPUT_MAX_CHARS)
+        .collect();
+    format!("{truncated}\n… [sortie tronquée]")
+}
+
+fn sanitize_discord_transcript_output(command: &str, output: &str) -> String {
+    let output = strip_ansi_escapes(output);
+    let output = output.replace("\r\n", "\n").replace('\r', "\n");
+    if output.trim().is_empty() {
+        return "(no output)".to_string();
+    }
+    let summarized = if is_claude_print_discord_command(command) {
+        summarize_claude_print_json_for_transcript(&output)
+    } else {
+        output
+    };
+    cap_discord_transcript_output(&summarized)
 }
 
 fn summarize_discord_command(command: &str) -> String {
@@ -1292,12 +1743,7 @@ fn discord_transcript_entry(command: &str, body: &DiscordTranscriptBody<'_>) -> 
     match body {
         DiscordTranscriptBody::CommandOnly => format!("[discord] $ {label}\n"),
         DiscordTranscriptBody::Output(output) => {
-            let output = strip_ansi_escapes(output);
-            let output = if output.trim().is_empty() {
-                "(no output)".to_string()
-            } else {
-                output
-            };
+            let output = sanitize_discord_transcript_output(command, output);
             format!("[discord] $ {label}\n{output}\n")
         }
     }
@@ -1308,12 +1754,7 @@ fn discord_transcript_entry_terminal(command: &str, body: &DiscordTranscriptBody
     match body {
         DiscordTranscriptBody::CommandOnly => format!("\r\n[discord] $ {label}\r\n"),
         DiscordTranscriptBody::Output(output) => {
-            let output = strip_ansi_escapes(output);
-            let output = if output.trim().is_empty() {
-                "(no output)".to_string()
-            } else {
-                output
-            };
+            let output = sanitize_discord_transcript_output(command, output);
             format!("\r\n[discord] $ {label}\r\n{output}\r\n")
         }
     }
@@ -1330,11 +1771,7 @@ fn append_discord_transcript(
     let _ = std::fs::create_dir_all(&dir);
 
     let entry = discord_transcript_entry(command, &body);
-    let mut entry_terminal = discord_transcript_entry_terminal(command, &body);
-    if let Some(prompt) = terminal_prompt_line(state, term_id) {
-        entry_terminal.push_str("\r\n");
-        entry_terminal.push_str(&prompt);
-    }
+    let entry_terminal = discord_transcript_entry_terminal(command, &body);
 
     let path = discord_transcript_path(state, term_id);
     let mut discord_only = std::fs::read_to_string(&path).unwrap_or_default();
@@ -1364,18 +1801,6 @@ fn trim_tail_bytes(text: &mut String, max_bytes: usize) {
     }
     let keep = &text[text.len() - max_bytes..];
     *text = keep[keep.find('\n').map(|i| i + 1).unwrap_or(0)..].to_string();
-}
-
-fn terminal_prompt_line(state: &AppState, term_id: Uuid) -> Option<String> {
-    let target = state.terminals.tmux_target(term_id)?;
-    if !tmux::target_alive(&target) {
-        return None;
-    }
-    let cap = tmux::capture_pane_visible(&target).ok()?;
-    cap.lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .map(|s| s.to_string())
 }
 
 fn discord_transcript_path(state: &AppState, term_id: Uuid) -> PathBuf {

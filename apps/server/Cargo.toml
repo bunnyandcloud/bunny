@@ -21,6 +21,8 @@ bunny-relay = { path = "../../crates/bunny-relay" }
 bunny-secrets = { path = "../../crates/bunny-secrets" }
 bunny-push = { path = "../../crates/bunny-push" }
 bunny-discord = { path = "../../crates/bunny-discord" }
+bunny-policy = { path = "../../crates/bunny-policy" }
+bunny-integrations = { path = "../../crates/bunny-integrations" }
 image = { version = "0.24", default-features = false, features = ["png"] }
 font8x8 = "0.3"
 rand.workspace = true

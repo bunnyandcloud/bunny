@@ -7,7 +7,7 @@ use crate::task_runner::{shell_single_quote, wrap_prompt};
 use crate::terminals;
 use bunny_discord::{
     AgentTaskMode, AskUserQuestionItem, DiscordThreadMessage, DiscordThreadMessageRole,
-    DiscordThreadPendingQuestions,
+    DiscordThreadPendingPermission, DiscordThreadPendingQuestions,
 };
 use std::collections::HashMap;
 use bunny_pty::tmux;
@@ -54,7 +54,14 @@ pub async fn run_discord_claude(
     prompt: &str,
     shell_name: Option<&str>,
 ) -> Result<DiscordClaudeRun, ApiError> {
-    let term_id = resolve_discord_shell(&state, session_id, guild_id, channel_id, shell_name)?;
+    let term_id = resolve_discord_shell(
+        &state,
+        session_id,
+        guild_id,
+        channel_id,
+        None,
+        shell_name,
+    )?;
     terminals::ensure_session_terminals_live(&state, session_id);
 
     let shell_label = state
@@ -136,7 +143,7 @@ fn run_claude_print_session(
     cmd.push_str(&shell_single_quote(&wrapped));
 
     let (raw, exit_code) =
-        terminals::exec_discord_shell_command(state, term_id, session_id, &cmd)?;
+        terminals::exec_discord_shell_command(state, term_id, session_id, &cmd, None)?;
 
     let (output, session_id) = parse_claude_json_output(&raw);
     if let Some(sid) = session_id {
@@ -175,6 +182,14 @@ pub struct ClaudeJsonParse {
     pub display_text: String,
     pub session_id: Option<String>,
     pub ask_user_questions: Option<Vec<AskUserQuestionItem>>,
+    pub bash_permission: Option<BashPermissionRequest>,
+}
+
+/// Bash command blocked by Claude Code in headless mode (`permission_denials`).
+#[derive(Debug, Clone)]
+pub struct BashPermissionRequest {
+    pub command: String,
+    pub allowed_tools: Vec<String>,
 }
 
 pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
@@ -184,6 +199,7 @@ pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
             display_text: trimmed.to_string(),
             session_id: None,
             ask_user_questions: None,
+            bash_permission: None,
         };
     };
     let session_id = v
@@ -197,6 +213,15 @@ pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
             display_text: intro,
             session_id,
             ask_user_questions: Some(questions.clone()),
+            bash_permission: None,
+        };
+    }
+    if let Some(bash) = extract_bash_permission_from_claude_json(&v) {
+        return ClaudeJsonParse {
+            display_text: format_pending_permission_intro(&bash.command),
+            session_id,
+            ask_user_questions: None,
+            bash_permission: Some(bash),
         };
     }
     if claude_json_is_error(&v) {
@@ -204,13 +229,20 @@ pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
             display_text: format_claude_error_message(&v, trimmed),
             session_id,
             ask_user_questions: None,
+            bash_permission: None,
         };
     }
     let result = claude_json_result_text(&v).unwrap_or_else(|| trimmed.to_string());
+    let bash_permission = extract_bash_permission_from_result_text(&result);
     ClaudeJsonParse {
-        display_text: result,
+        display_text: if bash_permission.is_some() {
+            format_pending_permission_intro(&bash_permission.as_ref().unwrap().command)
+        } else {
+            result
+        },
         session_id,
         ask_user_questions: None,
+        bash_permission,
     }
 }
 
@@ -223,6 +255,366 @@ fn format_pending_questions_intro(questions: &[AskUserQuestionItem]) -> String {
     } else {
         "❓ **Claude a besoin de votre choix** — utilisez les boutons ci-dessous.".to_string()
     }
+}
+
+fn format_pending_permission_intro(command: &str) -> String {
+    format!(
+        "🔐 **Claude demande l'autorisation d'exécuter une commande shell** — utilisez les boutons ci-dessous.\n```\n{command}\n```"
+    )
+}
+
+/// Extract blocked Bash tool calls from Claude JSON (`permission_denials`).
+pub fn extract_bash_permission_from_claude_json(
+    v: &serde_json::Value,
+) -> Option<BashPermissionRequest> {
+    extract_bash_from_permission_denials(v)
+}
+
+fn extract_bash_from_permission_denials(v: &serde_json::Value) -> Option<BashPermissionRequest> {
+    let denials = v.get("permission_denials")?.as_array()?;
+    for d in denials {
+        if d.get("tool_name").and_then(|t| t.as_str()) != Some("Bash") {
+            continue;
+        }
+        let cmd = bash_command_from_denial(d)?;
+        let allowed_tools = bash_allowed_tool_specs(&cmd);
+        // One Discord prompt per turn — never join multiple denials (avoids giant `&&` chains).
+        return Some(BashPermissionRequest {
+            command: cmd,
+            allowed_tools,
+        });
+    }
+    None
+}
+
+/// Collapse whitespace for denied-command deduplication.
+pub fn normalize_shell_command_key(cmd: &str) -> String {
+    cmd.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Keys used to remember refused shell commands for a thread.
+pub fn shell_command_denial_keys(command: &str) -> Vec<String> {
+    let mut keys: Vec<String> = split_bash_compound(command)
+        .into_iter()
+        .map(|p| normalize_shell_command_key(&p))
+        .filter(|k| !k.is_empty())
+        .collect();
+    let full = normalize_shell_command_key(command);
+    if !full.is_empty() && !keys.iter().any(|k| k == &full) {
+        keys.push(full);
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+pub fn format_denied_shell_command_message(command: &str) -> String {
+    let preview = truncate_permission_command_display(command, 480);
+    format!(
+        "⛔ **Commande shell déjà refusée** — je ne redemanderai pas l'autorisation.\n\n\
+         ```bash\n{preview}\n```\n\
+         Répondez dans le fil (@bunny) pour indiquer comment continuer."
+    )
+}
+
+pub fn truncate_permission_command_display(command: &str, max_chars: usize) -> String {
+    let cmd = command.trim();
+    let n = cmd.chars().count();
+    if n <= max_chars {
+        return cmd.to_string();
+    }
+    let truncated: String = cmd.chars().take(max_chars).collect();
+    format!("{truncated}\n… ({n} caractères)")
+}
+
+fn bash_command_from_denial(d: &serde_json::Value) -> Option<String> {
+    bash_command_from_tool_input(d.get("tool_input"))
+}
+
+fn bash_command_from_tool_input(input: Option<&serde_json::Value>) -> Option<String> {
+    let input = input?;
+    if let Some(cmd) = input.get("command").and_then(|c| c.as_str()) {
+        let trimmed = cmd.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let Some(s) = input.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Build `--allowedTools` patterns for a compound Bash command.
+pub fn bash_allowed_tool_specs(command: &str) -> Vec<String> {
+    split_bash_compound(command)
+        .into_iter()
+        .map(|part| format!("Bash({part})"))
+        .collect()
+}
+
+/// Fallback when Claude explains a blocked shell command in prose (no `permission_denials`).
+fn extract_bash_permission_from_result_text(text: &str) -> Option<BashPermissionRequest> {
+    let lower = text.to_lowercase();
+    let permission_hint = lower.contains("autorisation")
+        || lower.contains("approbation")
+        || lower.contains("permission")
+        || lower.contains("bloqu");
+    let shell_hint = lower.contains("git add")
+        || lower.contains("git commit")
+        || lower.contains("bash");
+    if !permission_hint || !shell_hint {
+        return None;
+    }
+    let command = extract_bash_codeblock(text)?;
+    let allowed_tools = bash_allowed_tool_specs(&command);
+    if allowed_tools.is_empty() {
+        return None;
+    }
+    Some(BashPermissionRequest {
+        command,
+        allowed_tools,
+    })
+}
+
+fn extract_bash_codeblock(text: &str) -> Option<String> {
+    for fence in ["```bash\n", "```sh\n", "```\n"] {
+        if let Some(start) = text.find(fence) {
+            let rest = &text[start + fence.len()..];
+            if let Some(end) = rest.find("```") {
+                let cmd = rest[..end].trim();
+                if !cmd.is_empty() {
+                    return Some(cmd.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn strip_outer_parens(s: &str) -> Option<&str> {
+    let s = s.trim();
+    if !s.starts_with('(') || !s.ends_with(')') {
+        return None;
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut depth = 0i32;
+    let mut in_single = false;
+    let mut in_double = false;
+    for c in inner.chars() {
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => depth += 1,
+            ')' if !in_single && !in_double => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 || in_single || in_double {
+        return None;
+    }
+    Some(inner)
+}
+
+fn split_bash_top_level<'a>(command: &'a str, sep: &str) -> Vec<&'a str> {
+    if sep.is_empty() {
+        return vec![command];
+    }
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut i = 0usize;
+    while i < command.len() {
+        if !in_single && !in_double && depth == 0 && command[i..].starts_with(sep) {
+            let part = command[start..i].trim();
+            if !part.is_empty() {
+                parts.push(part);
+            }
+            i += sep.len();
+            start = i;
+            continue;
+        }
+        let c = command[i..].chars().next().unwrap();
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => depth += 1,
+            ')' if !in_single && !in_double => depth -= 1,
+            _ => {}
+        }
+        i += c.len_utf8();
+    }
+    let part = command[start..].trim();
+    if !part.is_empty() {
+        parts.push(part);
+    }
+    parts
+}
+
+fn split_bash_compound(command: &str) -> Vec<String> {
+    let mut parts = vec![command.trim().to_string()];
+    for sep in ["&&", "||", ";", "|"] {
+        let mut next = Vec::new();
+        for p in parts {
+            for segment in split_bash_top_level(&p, sep) {
+                let trimmed = segment.trim();
+                if !trimmed.is_empty() {
+                    next.push(trimmed.to_string());
+                }
+            }
+        }
+        parts = next;
+    }
+    parts
+}
+
+const MAX_SHELL_AUTO_CHAIN: u32 = 6;
+
+/// Read-only / diagnostic shell snippets — auto-run without a Discord permission prompt.
+pub fn is_auto_approved_shell_command(command: &str) -> bool {
+    let c = command.trim();
+    if c.is_empty() {
+        return false;
+    }
+    if let Some(inner) = strip_outer_parens(c) {
+        return is_auto_approved_shell_command(inner);
+    }
+    let alts = split_bash_top_level(c, "||");
+    if alts.len() > 1 {
+        return alts.iter().all(|alt| is_auto_approved_shell_command(alt));
+    }
+    let parts = split_bash_top_level(c, "&&");
+    if parts.len() > 1 {
+        return parts.iter().all(|p| is_auto_approved_shell_command(p));
+    }
+    is_shell_probe_part(c)
+}
+
+fn is_shell_probe_part(part: &str) -> bool {
+    let p = part.trim();
+    if p.is_empty() {
+        return false;
+    }
+    if let Some(inner) = strip_outer_parens(p) {
+        return is_auto_approved_shell_command(inner);
+    }
+    if p.starts_with("command -v ")
+        || p.starts_with("which ")
+        || p.starts_with("type ")
+        || p == "pwd"
+        || p == "ls"
+        || p.starts_with("ls ")
+        || p.starts_with("test -f ")
+        || p.starts_with("test -d ")
+        || p.starts_with("test -e ")
+        || p.starts_with("python3 --version")
+        || p.starts_with("node --version")
+        || p.starts_with("git status")
+        || p.starts_with("git log")
+        || p.starts_with("git rev-parse")
+    {
+        return true;
+    }
+    if p.starts_with("echo ") && !p.contains('>') && !p.contains(">>") {
+        return true;
+    }
+    false
+}
+
+fn build_thread_already_executed_resume_prompt(command: &str) -> String {
+    let preview = truncate_permission_command_display(command, 400);
+    format!(
+        "# Rappel : commande déjà exécutée\n\n\
+         ```bash\n{preview}\n```\n\n\
+         Cette commande a **déjà été exécutée** après autorisation Discord. \
+         **Ne la redemande pas.** Passe à l'étape suivante.\n"
+    )
+}
+
+fn resume_claude_with_prompt(
+    state: &AppState,
+    thread_id: &str,
+    term_id: Uuid,
+    session_id: Uuid,
+    prompt: &str,
+    acting_user_id: Option<Uuid>,
+    auto_depth: u32,
+) -> Result<ThreadClaudeResult, ApiError> {
+    if auto_depth >= MAX_SHELL_AUTO_CHAIN {
+        return Ok(ThreadClaudeResult {
+            output: "_(Trop d'étapes shell automatiques — répondez dans le fil pour continuer.)_".into(),
+            exit_code: 0,
+            needs_approval: false,
+            approval_summary: None,
+            pending_question_id: None,
+            pending_questions: None,
+            pending_permission_id: None,
+            permission_command: None,
+        });
+    }
+    let resume = state
+        .discord
+        .lock()
+        .get_thread_claude_session_id(thread_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let max_turns = thread_claude_max_turns(state);
+    let cmd = build_thread_claude_cmd(prompt, resume.as_deref(), max_turns, &[]);
+    let (raw, exit_code) = terminals::exec_discord_shell_command_for_thread(
+        state, term_id, session_id, thread_id, &cmd, acting_user_id,
+    )?;
+    thread_claude_result_from_raw(
+        state,
+        thread_id,
+        term_id,
+        session_id,
+        &raw,
+        exit_code,
+        || build_thread_claude_cmd(prompt, None, max_turns, &[]),
+        auto_depth,
+        acting_user_id,
+    )
+}
+
+fn execute_thread_bash_and_resume(
+    state: &AppState,
+    thread_id: &str,
+    term_id: Uuid,
+    session_id: Uuid,
+    command: &str,
+    acting_user_id: Option<Uuid>,
+    auto_depth: u32,
+) -> Result<ThreadClaudeResult, ApiError> {
+    let (shell_out, shell_code) = terminals::exec_discord_shell_command_for_thread(
+        state, term_id, session_id, thread_id, command, acting_user_id,
+    )
+    .map_err(|e| ApiError::validation(&e.to_string()))?;
+    if shell_code == 0 {
+        let keys = shell_command_denial_keys(command);
+        let _ = state
+            .discord
+            .lock()
+            .record_thread_granted_shell_keys(thread_id, &keys);
+    }
+    let prompt = build_thread_permission_executed_prompt(command, shell_code, &shell_out);
+    resume_claude_with_prompt(
+        state,
+        thread_id,
+        term_id,
+        session_id,
+        &prompt,
+        acting_user_id,
+        auto_depth + 1,
+    )
 }
 
 /// Extract `AskUserQuestion` items from Claude JSON (`permission_denials` or tool blocks).
@@ -390,6 +782,8 @@ pub struct ThreadClaudeResult {
     pub approval_summary: Option<String>,
     pub pending_question_id: Option<Uuid>,
     pub pending_questions: Option<Vec<AskUserQuestionItem>>,
+    pub pending_permission_id: Option<Uuid>,
+    pub permission_command: Option<String>,
 }
 
 pub fn build_thread_claude_prompt(
@@ -463,10 +857,20 @@ fn thread_claude_max_turns(state: &AppState) -> u32 {
     state.config.discord.claude_max_turns.max(1)
 }
 
-fn build_thread_claude_cmd(prompt: &str, resume: Option<&str>, max_turns: u32) -> String {
+fn build_thread_claude_cmd(
+    prompt: &str,
+    resume: Option<&str>,
+    max_turns: u32,
+    allowed_tools: &[String],
+) -> String {
     let mut cmd = format!(
         "claude -p --output-format json --permission-mode acceptEdits --max-turns {max_turns} ",
     );
+    for tool in allowed_tools {
+        cmd.push_str("--allowedTools ");
+        cmd.push_str(&shell_single_quote(tool));
+        cmd.push(' ');
+    }
     if let Some(sid) = resume.filter(|s| !s.is_empty()) {
         cmd.push_str("--resume ");
         cmd.push_str(sid);
@@ -503,6 +907,8 @@ pub fn run_thread_claude(
             approval_summary: Some(cmd_probe.chars().take(200).collect()),
             pending_question_id: None,
             pending_questions: None,
+            pending_permission_id: None,
+            permission_command: None,
         });
     }
 
@@ -513,9 +919,9 @@ pub fn run_thread_claude(
         .map_err(|e| ApiError::validation(&e.to_string()))?;
 
     let max_turns = thread_claude_max_turns(state);
-    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns);
+    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns, &[]);
     let (raw, exit_code) =
-        terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd)?;
+        terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd, None)?;
     thread_claude_result_from_raw(
         state,
         thread_id,
@@ -523,7 +929,9 @@ pub fn run_thread_claude(
         session_id,
         &raw,
         exit_code,
-        || build_thread_claude_cmd(&prompt, None, max_turns),
+        || build_thread_claude_cmd(&prompt, None, max_turns, &[]),
+        0,
+        None,
     )
 }
 
@@ -535,11 +943,14 @@ fn thread_claude_result_from_raw(
     raw: &str,
     exit_code: i32,
     retry_without_resume: impl FnOnce() -> String,
+    auto_depth: u32,
+    acting_user_id: Option<Uuid>,
 ) -> Result<ThreadClaudeResult, ApiError> {
     let mut parsed = parse_claude_json_for_discord(raw);
     let mut effective_exit = exit_code;
 
     if parsed.ask_user_questions.is_none()
+        && parsed.bash_permission.is_none()
         && (exit_code != 0 || parsed.display_text.trim().is_empty())
         && state
             .discord
@@ -554,7 +965,7 @@ fn thread_claude_result_from_raw(
             .set_thread_claude_session_id(thread_id, None);
         let retry_cmd = retry_without_resume();
         let (raw2, exit2) = terminals::exec_discord_shell_command_for_thread(
-            state, term_id, session_id, thread_id, &retry_cmd,
+            state, term_id, session_id, thread_id, &retry_cmd, None,
         )?;
         parsed = parse_claude_json_for_discord(&raw2);
         effective_exit = exit2;
@@ -588,6 +999,80 @@ fn thread_claude_result_from_raw(
             approval_summary: None,
             pending_question_id: Some(pending_id),
             pending_questions: Some(pending.questions),
+            pending_permission_id: None,
+            permission_command: None,
+        });
+    }
+
+    if let Some(bash) = parsed.bash_permission.clone() {
+        let denial_keys = shell_command_denial_keys(&bash.command);
+        let granted = state
+            .discord
+            .lock()
+            .is_thread_shell_command_granted(thread_id, &denial_keys)
+            .unwrap_or(false);
+        if granted {
+            return resume_claude_with_prompt(
+                state,
+                thread_id,
+                term_id,
+                session_id,
+                &build_thread_already_executed_resume_prompt(&bash.command),
+                acting_user_id,
+                auto_depth + 1,
+            );
+        }
+        let denied = state
+            .discord
+            .lock()
+            .is_thread_shell_command_denied(thread_id, &denial_keys)
+            .unwrap_or(false);
+        if denied {
+            return Ok(ThreadClaudeResult {
+                output: format_denied_shell_command_message(&bash.command),
+                exit_code: effective_exit,
+                needs_approval: false,
+                approval_summary: None,
+                pending_question_id: None,
+                pending_questions: None,
+                pending_permission_id: None,
+                permission_command: None,
+            });
+        }
+        if is_auto_approved_shell_command(&bash.command) {
+            return execute_thread_bash_and_resume(
+                state,
+                thread_id,
+                term_id,
+                session_id,
+                &bash.command,
+                acting_user_id,
+                auto_depth,
+            );
+        }
+        let pending_id = Uuid::new_v4();
+        let pending = DiscordThreadPendingPermission {
+            id: pending_id,
+            thread_id: thread_id.to_string(),
+            claude_session_id: parsed.session_id.clone(),
+            command: bash.command.clone(),
+            allowed_tools: bash.allowed_tools,
+            created_at: Utc::now(),
+        };
+        state
+            .discord
+            .lock()
+            .insert_thread_pending_permission(&pending)
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+        return Ok(ThreadClaudeResult {
+            output: parsed.display_text,
+            exit_code: effective_exit,
+            needs_approval: false,
+            approval_summary: None,
+            pending_question_id: None,
+            pending_questions: None,
+            pending_permission_id: Some(pending_id),
+            permission_command: Some(bash.command),
         });
     }
 
@@ -605,7 +1090,105 @@ fn thread_claude_result_from_raw(
         approval_summary: None,
         pending_question_id: None,
         pending_questions: None,
+        pending_permission_id: None,
+        permission_command: None,
     })
+}
+
+pub fn build_thread_permission_approved_prompt(command: &str) -> String {
+    format!(
+        "# Permission shell accordée (Discord)\n\n\
+         L'utilisateur a **autorisé** l'exécution de la commande suivante. \
+         Exécute-la maintenant, puis poursuis la tâche en cours.\n\n\
+         ```bash\n{command}\n```\n"
+    )
+}
+
+pub fn build_thread_permission_executed_prompt(command: &str, exit_code: i32, output: &str) -> String {
+    let preview = truncate_permission_command_display(command, 600);
+    let out = truncate_permission_command_display(output, 3000);
+    if exit_code == 0 && output.contains(terminals::BUNNY_BACKGROUND_PID_MARKER) {
+        format!(
+            "# Serveur / processus lancé en arrière-plan (autorisé via Discord)\n\n\
+             ```bash\n{preview}\n```\n\n\
+             ```\n{out}\n```\n\n\
+             Le processus **tourne en arrière-plan** — ne le relance pas. \
+             Indique à l'utilisateur comment y accéder (URL, port) et confirme que c'est prêt.\n"
+        )
+    } else if exit_code == 0 {
+        format!(
+            "# Commande shell exécutée (autorisée via Discord)\n\n\
+             ```bash\n{preview}\n```\n\n\
+             Sortie (code 0) :\n```\n{out}\n```\n\n\
+             La commande est **terminée** — ne la réexécute pas. Poursuis la tâche et réponds à l'utilisateur.\n"
+        )
+    } else {
+        format!(
+            "# Commande shell échouée (autorisée via Discord)\n\n\
+             ```bash\n{preview}\n```\n\n\
+             Code sortie : {exit_code}\n```\n{out}\n```\n\n\
+             Explique l'erreur à l'utilisateur et propose la suite **sans relancer la même commande**.\n"
+        )
+    }
+}
+
+pub fn format_granted_shell_command_message(command: &str) -> String {
+    let preview = truncate_permission_command_display(command, 480);
+    format!(
+        "✓ **Commande déjà exécutée** après votre autorisation.\n\n\
+         ```bash\n{preview}\n```\n\
+         Répondez dans le fil si vous voulez autre chose."
+    )
+}
+
+pub fn build_thread_permission_denied_prompt(command: &str) -> String {
+    let preview = truncate_permission_command_display(command, 600);
+    format!(
+        "# Permission shell refusée (Discord)\n\n\
+         L'utilisateur a **refusé** l'exécution de :\n\n\
+         ```bash\n{preview}\n```\n\n\
+         **Ne réessaie pas** cette commande ni une variante équivalente (`git add` / `git commit` inclus). \
+         Explique brièvement ce qui bloque et demande à l'utilisateur comment continuer.\n"
+    )
+}
+
+/// Resume a thread Claude session after the user approved/denied a Bash permission on Discord.
+pub fn run_thread_claude_after_permission(
+    state: &AppState,
+    session_id: Uuid,
+    term_id: Uuid,
+    thread_id: &str,
+    approve: bool,
+    command: &str,
+    _allowed_tools: &[String],
+    claude_session_id: Option<&str>,
+    acting_user_id: Option<Uuid>,
+) -> Result<ThreadClaudeResult, ApiError> {
+    let _ = claude_session_id;
+    let _ = _allowed_tools;
+
+    if approve {
+        return execute_thread_bash_and_resume(
+            state,
+            thread_id,
+            term_id,
+            session_id,
+            command,
+            acting_user_id,
+            0,
+        );
+    }
+
+    let prompt = build_thread_permission_denied_prompt(command);
+    resume_claude_with_prompt(
+        state,
+        thread_id,
+        term_id,
+        session_id,
+        &prompt,
+        acting_user_id,
+        0,
+    )
 }
 
 pub fn build_thread_claude_answers_prompt(answers: &HashMap<String, String>) -> String {
@@ -637,9 +1220,9 @@ pub fn run_thread_claude_with_answers(
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     let prompt = build_thread_claude_answers_prompt(answers);
     let max_turns = thread_claude_max_turns(state);
-    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns);
+    let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns, &[]);
     let (raw, exit_code) =
-        terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd)?;
+        terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd, None)?;
     thread_claude_result_from_raw(
         state,
         thread_id,
@@ -647,7 +1230,9 @@ pub fn run_thread_claude_with_answers(
         session_id,
         &raw,
         exit_code,
-        || build_thread_claude_cmd(&prompt, None, max_turns),
+        || build_thread_claude_cmd(&prompt, None, max_turns, &[]),
+        0,
+        None,
     )
 }
 
@@ -1051,12 +1636,87 @@ mod tests {
 
     #[test]
     fn build_thread_claude_cmd_includes_configurable_max_turns() {
-        let cmd = build_thread_claude_cmd("hello", None, 30);
+        let cmd = build_thread_claude_cmd("hello", None, 30, &[]);
         assert!(cmd.contains("--max-turns 30"));
         assert!(cmd.ends_with("'hello'"));
 
-        let resumed = build_thread_claude_cmd("go", Some("sess-1"), 25);
+        let resumed = build_thread_claude_cmd("go", Some("sess-1"), 25, &[]);
         assert!(resumed.contains("--max-turns 25"));
         assert!(resumed.contains("--resume sess-1"));
+
+        let allowed = build_thread_claude_cmd(
+            "go",
+            Some("sess-1"),
+            25,
+            &["Bash(git add *)".into()],
+        );
+        assert!(allowed.contains("--allowedTools 'Bash(git add *)'"));
+    }
+
+    #[test]
+    fn extracts_bash_permission_from_permission_denials() {
+        let raw = r#"{
+            "type": "result",
+            "subtype": "error_during_execution",
+            "session_id": "abc-session",
+            "permission_denials": [{
+                "tool_name": "Bash",
+                "tool_input": { "command": "git add test.md && git commit -m \"essai\"" }
+            }]
+        }"#;
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let bash = extract_bash_permission_from_claude_json(&v).expect("bash");
+        assert!(bash.command.contains("git add test.md"));
+        assert!(bash.allowed_tools.iter().any(|t| t.contains("git add")));
+        assert!(bash.allowed_tools.iter().any(|t| t.contains("git commit")));
+
+        let parsed = parse_claude_json_for_discord(raw);
+        assert!(parsed.bash_permission.is_some());
+        assert!(parsed.display_text.contains("autorisation"));
+    }
+
+    #[test]
+    fn bash_permission_uses_first_denial_only() {
+        let raw = r#"{
+            "permission_denials": [
+                {"tool_name": "Bash", "tool_input": { "command": "git add side.md" }},
+                {"tool_name": "Bash", "tool_input": { "command": "git commit -m \"add\"" }},
+                {"tool_name": "Bash", "tool_input": { "command": "git commit -m \"again\"" }}
+            ]
+        }"#;
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let bash = extract_bash_permission_from_claude_json(&v).expect("bash");
+        assert_eq!(bash.command, "git add side.md");
+        assert!(!bash.command.contains("&&"));
+    }
+
+    #[test]
+    fn shell_command_denial_keys_include_parts_and_full() {
+        let keys = shell_command_denial_keys("git add a.md && git commit -m x");
+        assert!(keys.contains(&"git add a.md".to_string()));
+        assert!(keys.contains(&"git commit -m x".to_string()));
+    }
+
+    #[test]
+    fn auto_approves_shell_probes() {
+        assert!(is_auto_approved_shell_command(
+            r#"(command -v python3 && echo "python3 ok") || echo "no python3""#
+        ));
+        assert!(is_auto_approved_shell_command("git status"));
+        assert!(is_auto_approved_shell_command("ls -la"));
+        assert!(!is_auto_approved_shell_command("python3 -m http.server 3000 --bind 0.0.0.0"));
+        assert!(!is_auto_approved_shell_command("git add test.md"));
+    }
+
+    #[test]
+    fn extracts_bash_permission_from_result_text_fallback() {
+        let raw = r#"{
+            "type": "result",
+            "session_id": "sess-2",
+            "result": "Le fichier est créé mais le commit nécessite une autorisation.\n\n```bash\ngit add test.md && git commit -m \"essai\"\n```"
+        }"#;
+        let parsed = parse_claude_json_for_discord(raw);
+        let bash = parsed.bash_permission.expect("bash from prose");
+        assert!(bash.command.contains("git add test.md"));
     }
 }

@@ -1,6 +1,7 @@
 use crate::types::Role;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Action {
     SessionCreate,
     SessionRead,
@@ -30,6 +31,11 @@ pub enum Action {
     DiscordAgentRun,
     DiscordApprove,
     DiscordWatch,
+    IntegrationConnect,
+    IntegrationManage,
+    ActionApprove,
+    ActionExecute,
+    GitWorktreeManage,
 }
 
 pub fn role_can(role: Role, action: Action) -> bool {
@@ -65,8 +71,13 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | DiscordControl
                 | DiscordAgentRun
                 | DiscordApprove
+                | IntegrationConnect
+                | IntegrationManage
+                | ActionApprove
+                | ActionExecute
+                | GitWorktreeManage
         ),
-        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody | SessionDelete | ClaudeInstall | VaultManage | DiscordLink | DiscordApprove) => false,
+        (Editor, SecretsInject | SessionShare | SessionStop | SessionReset | UsersManage | AuditView | NetworkBody | SessionDelete | ClaudeInstall | VaultManage | DiscordLink | DiscordApprove | IntegrationManage | ActionApprove) => false,
         (Editor, action) => matches!(
             action,
             SessionRead
@@ -83,6 +94,9 @@ pub fn role_can(role: Role, action: Action) -> bool {
                 | VoiceRun
                 | DiscordControl
                 | DiscordAgentRun
+                | IntegrationConnect
+                | ActionExecute
+                | GitWorktreeManage
         ),
         (Viewer, SessionRead | TerminalRead | BrowserView | ConsoleView | NetworkView | PreviewView | DiscordWatch) => true,
         (Viewer, _) => false,

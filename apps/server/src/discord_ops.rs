@@ -18,6 +18,7 @@ use bunny_discord::{AgentTaskMode, DiscordAuditEntry, DiscordSessionLink};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -71,9 +72,11 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/thread/bind", post(internal_thread_bind_route))
         .route("/thread/input", post(internal_thread_input_route))
         .route("/thread/answer", post(internal_thread_answer_route))
+        .route("/thread/permission", post(internal_thread_permission_route))
         .route("/thread/discussion", post(internal_thread_discussion_route))
         .route("/thread/stop", post(internal_thread_stop_route))
         .route("/thread/finalize", post(internal_thread_finalize_route))
+        .route("/thread/merge", post(internal_thread_merge_route))
         .route("/thread/status", post(internal_thread_status_route))
         .route("/thread/attachment", post(internal_thread_attachment_route))
         .route("/project/set", post(internal_project_set_route))
@@ -297,8 +300,26 @@ async fn internal_shell_run(
             "command": body.command,
         })));
     }
-    let term_id = resolve_shell_terminal(&state, link.session_id, body.shell_name.as_deref())?;
+    let resolved_term_id = resolve_discord_shell(
+        &state,
+        link.session_id,
+        &body.ctx.guild_id,
+        &body.ctx.channel_id,
+        body.ctx.thread_id.as_deref(),
+        body.shell_name.as_deref(),
+    )?;
+    let previous_shell_name = terminal_name(&state, resolved_term_id);
+    let mut term_id = resolved_term_id;
+    let mut shell_auto_created = false;
     crate::terminals::ensure_session_terminals_live(&state, link.session_id);
+    if crate::terminals::discord_shell_pane_busy(&state, term_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+    {
+        let cwd = crate::terminals::discord_shell_working_directory(&state, term_id)
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+        term_id = create_discord_shell_at_cwd(&state, link.session_id, &cwd)?;
+        shell_auto_created = true;
+    }
     if bunny_discord::risk::is_interactive_discord_command(&body.command) {
         return Err(ApiError::validation(
             "commande interactive non supportée depuis Discord — utilisez le terminal Web UI, ou par ex. `head -n 80 landing-page.html`",
@@ -309,6 +330,7 @@ async fn internal_shell_run(
         link.session_id,
         term_id,
         &body.command,
+        Some(bunny_user),
     )
     .await?;
     let output = truncate_discord_shell_output(&run.output);
@@ -340,6 +362,12 @@ async fn internal_shell_run(
         "exit_code": exit_code,
         "persistent": run.persistent,
         "shell": shell_name,
+        "shell_auto_created": shell_auto_created,
+        "previous_shell": if shell_auto_created {
+            previous_shell_name
+        } else {
+            None::<String>
+        },
     })))
 }
 
@@ -364,6 +392,7 @@ async fn internal_shell_run_stop(
         link.session_id,
         &body.ctx.guild_id,
         &body.ctx.channel_id,
+        body.ctx.thread_id.as_deref(),
         body.shell_name.as_deref(),
     )?;
     crate::terminals::ensure_session_terminals_live(&state, link.session_id);
@@ -423,6 +452,7 @@ async fn internal_shell_file(
         link.session_id,
         &body.ctx.guild_id,
         &body.ctx.channel_id,
+        body.ctx.thread_id.as_deref(),
         body.shell_name.as_deref(),
     )?;
     crate::terminals::ensure_session_terminals_live(&state, link.session_id);
@@ -593,6 +623,8 @@ async fn internal_shell_close(
         ));
     };
     let term_id = resolve_shell_terminal(&state, session_id, Some(&shell_name))?;
+    let locale = discord_user_locale(&state, &body.ctx);
+    ensure_shell_may_close(&state, session_id, term_id, locale)?;
     let display_name = state
         .auth
         .db()
@@ -637,7 +669,13 @@ async fn internal_shell_list(
         .lock()
         .list_terminals_for_session(link.session_id)
         .unwrap_or_default();
-    let default_name = rows.first().map(|(_, _, name, ..)| name.clone());
+    let default_name = default_discord_shell_name(
+        &state,
+        link.session_id,
+        &ctx.guild_id,
+        &ctx.channel_id,
+        ctx.thread_id.as_deref(),
+    );
     let items: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|row| {
@@ -729,9 +767,15 @@ fn resolve_browser_url(
 fn resolve_shell_label(
     state: &AppState,
     session_id: Uuid,
+    channel_id: &str,
+    thread_id: Option<&str>,
     shell_name: Option<&str>,
 ) -> Result<String, ApiError> {
-    let term_id = resolve_shell_terminal(state, session_id, shell_name)?;
+    let term_id = if shell_name.is_some() {
+        resolve_shell_terminal(state, session_id, shell_name)?
+    } else {
+        resolve_discord_shell(state, session_id, "", channel_id, thread_id, None)?
+    };
     Ok(shell_name
         .map(str::to_string)
         .or_else(|| state.terminals.name(term_id))
@@ -782,7 +826,13 @@ async fn internal_snapshot(
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
 
-    let shell_label = resolve_shell_label(&state, link.session_id, body.shell_name.as_deref())?;
+    let shell_label = resolve_shell_label(
+        &state,
+        link.session_id,
+        &body.ctx.channel_id,
+        body.ctx.thread_id.as_deref(),
+        body.shell_name.as_deref(),
+    )?;
 
     if matches!(target, SnapshotTarget::Shell) {
         let term_id = resolve_discord_shell(
@@ -790,6 +840,7 @@ async fn internal_snapshot(
             link.session_id,
             &body.ctx.guild_id,
             &body.ctx.channel_id,
+            body.ctx.thread_id.as_deref(),
             body.shell_name.as_deref(),
         )?;
         let lines = crate::terminals::DISCORD_SNAPSHOT_MAX_LINES;
@@ -826,6 +877,7 @@ async fn internal_snapshot(
             link.session_id,
             &body.ctx.guild_id,
             &body.ctx.channel_id,
+            body.ctx.thread_id.as_deref(),
             body.shell_name.as_deref(),
         )?;
         let lines = crate::terminals::DISCORD_SNAPSHOT_MAX_LINES;
@@ -1113,6 +1165,15 @@ async fn run_agent(
                 .lock()
                 .create_approval(&req)
                 .map_err(|e| ApiError::validation(&e.to_string()))?;
+            let policy = bunny_policy::ApproverPolicy::default_for_risk(
+                bunny_policy::classify_shell_risk(&summary),
+            );
+            crate::integrations_ops::store_approval_policy(state, approval_id, &policy);
+            crate::approval_service::ApprovalService::notify_session_channels(
+                state,
+                link.session_id,
+                approval_id,
+            );
             state
                 .discord
                 .lock()
@@ -1216,7 +1277,7 @@ async fn internal_approval_resolve(
     let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
     let approval_id =
         Uuid::parse_str(&body.approval_id).map_err(|_| ApiError::validation("approval_id"))?;
-    let outcome = task_runner::resolve_approval(&state, approval_id, body.approve, bunny_user)
+    let outcome = crate::approval_service::ApprovalService::resolve(&state, approval_id, body.approve, bunny_user)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -2023,11 +2084,18 @@ async fn capture_shell_run_output(
     session_id: Uuid,
     term_id: Uuid,
     command: &str,
+    acting_user_id: Option<Uuid>,
 ) -> Result<crate::terminals::DiscordShellRunResult, ApiError> {
     let command = command.to_string();
     tokio::task::spawn_blocking(move || {
-        crate::terminals::exec_discord_shell_command_run(&state, term_id, session_id, &command)
-            .map_err(|e| ApiError::validation(&e.to_string()))
+        crate::terminals::exec_discord_shell_command_run(
+            &state,
+            term_id,
+            session_id,
+            &command,
+            acting_user_id,
+        )
+        .map_err(|e| ApiError::validation(&e.to_string()))
     })
     .await
     .map_err(|e| ApiError::validation(&e.to_string()))?
@@ -2084,22 +2152,216 @@ pub(crate) fn resolve_shell_terminal(
         .ok_or_else(|| ApiError::not_found("no shell — open a shell in the Web UI first"))
 }
 
+fn session_has_active_chat_channel_links(state: &AppState, session_id: Uuid) -> bool {
+    state
+        .discord
+        .lock()
+        .get_link_status_for_session(session_id)
+        .map(|links| links.iter().any(|l| l.status == "active"))
+        .unwrap_or(false)
+}
+
+/// Refuse closing shells tied to active Discord threads or the last channel shell.
+pub(crate) fn ensure_shell_may_close(
+    state: &AppState,
+    session_id: Uuid,
+    term_id: Uuid,
+    locale: Locale,
+) -> Result<(), ApiError> {
+    if let Ok(Some(binding)) = state
+        .discord
+        .lock()
+        .get_active_thread_binding_for_term(term_id)
+    {
+        let mut params = vec![("thread_id", binding.thread_id.as_str())];
+        if let Some(goal) = binding.goal_text.as_deref().filter(|g| !g.is_empty()) {
+            params.push(("goal", goal));
+        }
+        return Err(ApiError::validation(&bunny_i18n::t(
+            locale,
+            "shell.close.blocked_active_thread",
+            &params,
+        )));
+    }
+
+    if session_has_active_chat_channel_links(state, session_id) && !is_thread_bound_shell(state, term_id)
+    {
+        let bound = thread_bound_term_ids(state, session_id);
+        let unbound_count = state
+            .auth
+            .db()
+            .lock()
+            .list_terminals_for_session(session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(tid, ..)| !bound.contains(tid))
+            .count();
+        if unbound_count <= 1 {
+            return Err(ApiError::validation(&bunny_i18n::t(
+                locale,
+                "shell.close.blocked_last_channel_shell",
+                &[],
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_discord_thread_context(channel_id: &str, thread_id: Option<&str>) -> bool {
+    thread_id.is_some_and(|tid| tid != channel_id)
+}
+
+fn thread_bound_term_id(
+    state: &AppState,
+    session_id: Uuid,
+    channel_id: &str,
+    thread_id: Option<&str>,
+) -> Option<Uuid> {
+    if !is_discord_thread_context(channel_id, thread_id) {
+        return None;
+    }
+    let tid = thread_id?;
+    let binding = state.discord.lock().get_thread_binding(tid).ok().flatten()?;
+    if binding.session_id != session_id {
+        return None;
+    }
+    Some(binding.term_id)
+}
+
+fn thread_bound_term_ids(state: &AppState, session_id: Uuid) -> HashSet<Uuid> {
+    state
+        .discord
+        .lock()
+        .list_thread_bound_term_ids_for_session(session_id)
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+fn is_thread_bound_shell(state: &AppState, term_id: Uuid) -> bool {
+    state
+        .discord
+        .lock()
+        .is_term_bound_to_active_thread(term_id)
+        .unwrap_or(false)
+}
+
+fn terminal_name(state: &AppState, term_id: Uuid) -> Option<String> {
+    state
+        .auth
+        .db()
+        .lock()
+        .get_terminal(term_id)
+        .ok()
+        .flatten()
+        .map(|row| row.2)
+}
+
+fn first_unbound_shell(
+    state: &AppState,
+    session_id: Uuid,
+    bound: &HashSet<Uuid>,
+) -> Option<Uuid> {
+    state
+        .auth
+        .db()
+        .lock()
+        .list_terminals_for_session(session_id)
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|(tid, ..)| (!bound.contains(&tid)).then_some(tid))
+}
+
+fn ensure_discord_channel_shell(state: &AppState, session_id: Uuid) -> Result<Uuid, ApiError> {
+    create_discord_shell_at_cwd(state, session_id, &crate::terminals::default_shell_cwd())
+}
+
+pub(crate) fn create_discord_shell_at_cwd(
+    state: &AppState,
+    session_id: Uuid,
+    cwd: &std::path::Path,
+) -> Result<Uuid, ApiError> {
+    let name = crate::terminals::next_shell_name(state, session_id);
+    let secret_env = state.secret_env_for_session(session_id);
+    let (term_id, tmux_target) = state
+        .terminals
+        .create(session_id, &name, cwd, None, 80, 24, secret_env)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    state.terminal_sessions.write().insert(term_id, session_id);
+    crate::terminals::persist_terminal(
+        state,
+        term_id,
+        session_id,
+        &name,
+        &state.config.terminal.shell,
+        None,
+        cwd,
+        80,
+        24,
+        tmux_target.as_deref(),
+    )
+    .map_err(|e| ApiError::validation(&e.to_string()))?;
+    crate::terminals::notify_terminal_created(state, session_id, term_id, &name);
+    Ok(term_id)
+}
+
+fn resolve_channel_default_shell(
+    state: &AppState,
+    session_id: Uuid,
+    guild_id: &str,
+    channel_id: &str,
+    create_if_missing: bool,
+) -> Result<Option<Uuid>, ApiError> {
+    let bound = thread_bound_term_ids(state, session_id);
+    if let Ok(Some(last)) = state.discord.lock().get_last_shell_name(guild_id, channel_id) {
+        if let Ok(id) = resolve_shell_terminal(state, session_id, Some(&last)) {
+            if !bound.contains(&id) {
+                return Ok(Some(id));
+            }
+        }
+    }
+    if let Some(id) = first_unbound_shell(state, session_id, &bound) {
+        return Ok(Some(id));
+    }
+    if create_if_missing {
+        return Ok(Some(ensure_discord_channel_shell(state, session_id)?));
+    }
+    Ok(None)
+}
+
+fn default_discord_shell_name(
+    state: &AppState,
+    session_id: Uuid,
+    guild_id: &str,
+    channel_id: &str,
+    thread_id: Option<&str>,
+) -> Option<String> {
+    if let Some(term_id) = thread_bound_term_id(state, session_id, channel_id, thread_id) {
+        return terminal_name(state, term_id);
+    }
+    resolve_channel_default_shell(state, session_id, guild_id, channel_id, false)
+        .ok()
+        .flatten()
+        .and_then(|id| terminal_name(state, id))
+}
+
 pub(crate) fn resolve_discord_shell(
     state: &AppState,
     session_id: Uuid,
     guild_id: &str,
     channel_id: &str,
+    thread_id: Option<&str>,
     shell_name: Option<&str>,
 ) -> Result<Uuid, ApiError> {
     if let Some(name) = shell_name {
         return resolve_shell_terminal(state, session_id, Some(name));
     }
-    if let Ok(Some(last)) = state.discord.lock().get_last_shell_name(guild_id, channel_id) {
-        if let Ok(id) = resolve_shell_terminal(state, session_id, Some(&last)) {
-            return Ok(id);
-        }
+    if let Some(term_id) = thread_bound_term_id(state, session_id, channel_id, thread_id) {
+        return Ok(term_id);
     }
-    resolve_shell_terminal(state, session_id, None)
+    resolve_channel_default_shell(state, session_id, guild_id, channel_id, true)?
+        .ok_or_else(|| ApiError::not_found("no shell — open a shell in the Web UI first"))
 }
 
 pub(crate) fn remember_discord_shell(
@@ -2108,15 +2370,10 @@ pub(crate) fn remember_discord_shell(
     channel_id: &str,
     term_id: Uuid,
 ) {
-    let name = state
-        .auth
-        .db()
-        .lock()
-        .get_terminal(term_id)
-        .ok()
-        .flatten()
-        .map(|row| row.2);
-    if let Some(name) = name {
+    if is_thread_bound_shell(state, term_id) {
+        return;
+    }
+    if let Some(name) = terminal_name(state, term_id) {
         let _ = state
             .discord
             .lock()
@@ -2186,6 +2443,15 @@ async fn internal_thread_answer_route(
     crate::discord_threads::internal_thread_answer(state, body).await
 }
 
+async fn internal_thread_permission_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadPermissionRequest>,
+) -> Result<Json<crate::discord_threads::ThreadPermissionResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_permission(state, body).await
+}
+
 async fn internal_thread_discussion_route(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -2211,6 +2477,15 @@ async fn internal_thread_finalize_route(
 ) -> Result<Json<crate::discord_threads::ThreadFinalizeResponse>, ApiError> {
     verify_bridge_token(&state, &headers)?;
     crate::discord_threads::internal_thread_finalize(state, body).await
+}
+
+async fn internal_thread_merge_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadIdRequest>,
+) -> Result<Json<crate::discord_threads::ThreadMergeResponse>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_merge(state, body).await
 }
 
 async fn internal_thread_status_route(

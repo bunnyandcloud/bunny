@@ -20,6 +20,7 @@ pub async fn handle_terminal_ws(
     state: Arc<AppState>,
     terminal_id: Uuid,
     can_write: bool,
+    user_id: Uuid,
     _from_offset: Option<u64>,
 ) {
     let (mut sender, mut receiver) = socket.split();
@@ -36,16 +37,21 @@ pub async fn handle_terminal_ws(
         return;
     };
 
+    state
+        .git_identity
+        .on_attach(terminal_id, user_id, can_write);
+
     if let Some(target) = state.terminals.tmux_target(terminal_id) {
         let cwd = terminal_cwd(&state, terminal_id).unwrap_or_else(default_shell_cwd);
-        let shell = &state.config.terminal.shell;
-        let secret_env = secret_env_for_terminal(&state, terminal_id);
-        let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
+        let session_env = tmux_env_for_terminal(&state, terminal_id);
+        let shell_cmd = interactive_shell_cmd(&state, terminal_id, &session_env);
+        let _ = tmux::ensure_shell_running(&target, &cwd, &shell_cmd, &session_env);
         tmux::configure_pane_for_web(&target);
     }
 
     let mut live_fence: u64 = 0;
     let mut pending_refresh_after_resize = false;
+    let mut line_buf = String::new();
 
     loop {
         tokio::select! {
@@ -55,7 +61,19 @@ pub async fn handle_terminal_ws(
                         if let Ok(client_msg) = serde_json::from_str::<TerminalClientMsg>(&text) {
                             match client_msg {
                                 TerminalClientMsg::Input { data } if can_write => {
-                                    let _ = state.terminals.write(terminal_id, &data);
+                                    let refresh = handle_terminal_input(
+                                        &state,
+                                        terminal_id,
+                                        user_id,
+                                        &data,
+                                        &mut line_buf,
+                                    );
+                                    if refresh {
+                                        crate::terminal_context_watch::schedule_context_refresh_after_input(
+                                            state.clone(),
+                                            terminal_id,
+                                        );
+                                    }
                                 }
                                 TerminalClientMsg::Resize { cols, rows } if can_write => {
                                     let _ = state.terminals.resize(terminal_id, cols, rows);
@@ -74,9 +92,15 @@ pub async fn handle_terminal_ws(
                                     if let Some(target) = state.terminals.tmux_target(terminal_id) {
                                         let cwd = terminal_cwd(&state, terminal_id)
                                             .unwrap_or_else(default_shell_cwd);
-                                        let shell = &state.config.terminal.shell;
-                                        let secret_env = secret_env_for_terminal(&state, terminal_id);
-                                        let _ = tmux::ensure_shell_running(&target, &cwd, shell, &secret_env);
+                                        let session_env = tmux_env_for_terminal(&state, terminal_id);
+                                        let shell_cmd =
+                                            interactive_shell_cmd(&state, terminal_id, &session_env);
+                                        let _ = tmux::ensure_shell_running(
+                                            &target,
+                                            &cwd,
+                                            &shell_cmd,
+                                            &session_env,
+                                        );
                                         tmux::configure_pane_for_web(&target);
                                     }
                                     let from = from_offset.unwrap_or(0);
@@ -279,6 +303,90 @@ fn secret_env_for_terminal(state: &AppState, terminal_id: Uuid) -> std::collecti
         .get(&terminal_id)
         .map(|session_id| state.secret_env_for_session(*session_id))
         .unwrap_or_default()
+}
+
+fn tmux_env_for_terminal(
+    state: &AppState,
+    terminal_id: Uuid,
+) -> std::collections::HashMap<String, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    let mut env = state
+        .git_identity
+        .terminal_session_env(terminal_id, &home);
+    env.extend(secret_env_for_terminal(state, terminal_id));
+    env
+}
+
+fn interactive_shell_cmd(
+    state: &AppState,
+    terminal_id: Uuid,
+    session_env: &std::collections::HashMap<String, String>,
+) -> String {
+    tmux::interactive_shell_command(
+        std::path::Path::new(&state.data_dir),
+        terminal_id,
+        &state.config.terminal.shell,
+        session_env,
+    )
+    .unwrap_or_else(|_| state.config.terminal.shell.clone())
+}
+
+fn handle_terminal_input(
+    state: &AppState,
+    terminal_id: Uuid,
+    user_id: Uuid,
+    data: &str,
+    line_buf: &mut String,
+) -> bool {
+    state.git_identity.note_input(terminal_id, user_id);
+
+    let mut forward = String::new();
+    let mut submitted_line: Option<String> = None;
+    for ch in data.chars() {
+        if ch == '\x03' {
+            line_buf.clear();
+            if crate::terminals::send_terminal_interrupt(state, terminal_id).is_ok() {
+                continue;
+            }
+            forward.push(ch);
+        } else if ch == '\r' || ch == '\n' {
+            let line = line_buf.trim().to_string();
+            submitted_line = Some(line.clone());
+            match line.as_str() {
+                "bunny git use-me" => {
+                    state.git_identity.pin_user(terminal_id, user_id);
+                    let _ = state.terminals.write(
+                        terminal_id,
+                        "\r\nbunny git: identity pinned to your account.\r\n",
+                    );
+                }
+                "bunny git whoami" => {
+                    let msg = state
+                        .git_identity
+                        .whoami_message(state, terminal_id, user_id);
+                    let _ = state.terminals.write(terminal_id, &msg);
+                }
+                _ => forward.push(ch),
+            }
+            line_buf.clear();
+        } else if ch == '\u{7f}' || ch == '\u{8}' {
+            line_buf.pop();
+            forward.push(ch);
+        } else if ch.is_control() {
+            forward.push(ch);
+        } else {
+            line_buf.push(ch);
+            forward.push(ch);
+        }
+    }
+
+    if !forward.is_empty() {
+        let _ = state.terminals.write(terminal_id, &forward);
+    }
+
+    submitted_line
+        .as_deref()
+        .is_some_and(crate::terminal_context_watch::input_may_change_context)
 }
 
 pub async fn handle_session_realtime(socket: WebSocket, state: Arc<AppState>, session_id: Uuid) {

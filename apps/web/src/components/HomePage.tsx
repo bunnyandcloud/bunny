@@ -5,6 +5,7 @@ import {
   getClaudeStatus,
   installClaude,
   listSessions,
+  me,
   renameSession,
   startClaudeAuth,
   type ClaudeStatus,
@@ -13,6 +14,7 @@ import { useT } from '../i18n';
 import AppTopBar from './AppTopBar';
 import BunnyLogo from './BunnyLogo';
 import DiscordAccountPanel from './DiscordAccountPanel';
+import GitIdentityPanel from './GitIdentityPanel';
 import InlineRename from './InlineRename';
 
 interface SessionItem {
@@ -37,6 +39,8 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [claude, setClaude] = useState<ClaudeStatus | null>(null);
   const [claudeBusy, setClaudeBusy] = useState(false);
+  const [gitConfigured, setGitConfigured] = useState<boolean | null>(null);
+  const [gitPanelOpen, setGitPanelOpen] = useState(false);
 
   const refreshClaude = useCallback(() => {
     getClaudeStatus()
@@ -56,6 +60,9 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
   useEffect(() => {
     refresh();
     refreshClaude();
+    me()
+      .then((profile) => setGitConfigured(profile.git_configured))
+      .catch(() => setGitConfigured(null));
   }, [refresh, refreshClaude]);
 
   useEffect(() => {
@@ -217,6 +224,30 @@ export default function HomePage({ email, isOwner, canCreateSessions }: Props) {
           {error}
         </p>
       )}
+
+      {gitConfigured === false ? (
+        <GitIdentityPanel
+          onConfiguredChange={(configured) => {
+            setGitConfigured(configured);
+            if (configured) setGitPanelOpen(false);
+          }}
+        />
+      ) : gitConfigured === true && gitPanelOpen ? (
+        <GitIdentityPanel
+          onClose={() => setGitPanelOpen(false)}
+          onConfiguredChange={setGitConfigured}
+        />
+      ) : gitConfigured === true ? (
+        <div className="w-full max-w-lg flex justify-center">
+          <button
+            type="button"
+            onClick={() => setGitPanelOpen(true)}
+            className="px-4 py-2 rounded border border-bunny-border text-gray-200 text-sm hover:bg-bunny-panel"
+          >
+            {tr('web.home.gitSettings')}
+          </button>
+        </div>
+      ) : null}
 
       <DiscordAccountPanel isOwner={isOwner} />
 

@@ -189,7 +189,7 @@ pub fn resolve_approval(
         let wrapped = wrap_prompt(task.mode, &task.prompt);
         let cmd = format!("claude -p --output-format json {}", shell_single_quote(&wrapped));
         let (output, exit_code) =
-            crate::terminals::exec_discord_shell_command(state, term_id, approval.session_id, &cmd)?;
+            crate::terminals::exec_discord_shell_command(state, term_id, approval.session_id, &cmd, None)?;
         state
             .discord
             .lock()

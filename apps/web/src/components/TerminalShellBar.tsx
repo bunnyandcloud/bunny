@@ -4,6 +4,9 @@ export interface ShellTab {
   id: string;
   name: string;
   status: string;
+  cwd?: string;
+  git_project?: string;
+  git_branch?: string;
 }
 
 interface Props {
@@ -14,6 +17,20 @@ interface Props {
   onRename: (id: string, name: string) => Promise<void>;
   onNew: () => void;
   busy?: boolean;
+}
+
+function shellTooltip(shell: ShellTab, ended: boolean): string {
+  const lines = [`${shell.name} (${shell.id})`];
+  if (shell.git_project && shell.git_branch) {
+    lines.push(`${shell.git_project} · ${shell.git_branch}`);
+  }
+  if (shell.cwd) {
+    lines.push(shell.cwd);
+  }
+  if (ended) {
+    lines.push('ended');
+  }
+  return lines.join('\n');
 }
 
 export default function TerminalShellBar({
@@ -33,6 +50,10 @@ export default function TerminalShellBar({
           shell.status.toLowerCase().includes('exited') ||
           shell.status.toLowerCase().includes('crashed') ||
           shell.status.toLowerCase().includes('stopped');
+        const gitLabel =
+          shell.git_project && shell.git_branch
+            ? `${shell.git_project} · ${shell.git_branch}`
+            : null;
         return (
           <div
             key={shell.id}
@@ -43,23 +64,30 @@ export default function TerminalShellBar({
                 ? 'bg-bunny-bg border border-bunny-accent text-gray-100'
                 : 'border border-bunny-border text-bunny-muted hover:bg-bunny-bg'
             } ${ended ? 'opacity-60' : ''}`}
-            title={`${shell.name} (${shell.id})${ended ? ' — ended' : ''}`}
+            title={shellTooltip(shell, ended)}
             onClick={() => onSelect(shell.id)}
           >
-            <span className="px-2 py-1 truncate max-w-[160px]">
-              <InlineRename
-                value={shell.name}
-                className="text-xs"
-                inputClassName="text-xs max-w-[140px]"
-                title="Double-click to rename shell"
-                disabled={busy}
-                onSave={(name) => onRename(shell.id, name)}
-              />
-              {ended ? ' (ended)' : ''}
-            </span>
+            <div className="px-2 py-0.5 truncate max-w-[180px] min-w-0">
+              <div className="truncate">
+                <InlineRename
+                  value={shell.name}
+                  className="text-xs"
+                  inputClassName="text-xs max-w-[160px]"
+                  title="Double-click to rename shell"
+                  disabled={busy}
+                  onSave={(name) => onRename(shell.id, name)}
+                />
+                {ended ? ' (ended)' : ''}
+              </div>
+              {gitLabel ? (
+                <div className="truncate text-[10px] leading-tight text-bunny-muted/90 font-mono">
+                  {gitLabel}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
-              className="px-1.5 py-1 hover:text-red-400"
+              className="px-1.5 py-1 hover:text-red-400 self-start"
               title="Close shell"
               aria-label={`Close ${shell.name}`}
               onClick={(e) => {

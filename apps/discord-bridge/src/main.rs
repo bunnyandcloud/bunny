@@ -17,6 +17,26 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
+fn bunny_api_user_message(status: reqwest::StatusCode, body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(msg) = v.pointer("/error/message").and_then(|m| m.as_str()) {
+            let trimmed = msg.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return format!("Request failed ({status})");
+    }
+    trimmed.to_string()
+}
+
+fn format_discord_error(locale: Locale, err: impl std::fmt::Display) -> String {
+    format!("**{}**\n{}", t(locale, "discord.error.title", &[]), err)
+}
+
 #[derive(Clone, serde::Deserialize)]
 struct BridgeConfig {
     discord: DiscordSection,
@@ -90,7 +110,7 @@ impl BunnyClient {
                     "bunny API 405 Method Not Allowed on {path} — restart `bunny run` in the container after rebuilding (cargo build --release -p bunny-server)"
                 );
             }
-            anyhow::bail!("bunny API {status}: {text}");
+            anyhow::bail!("{}", bunny_api_user_message(status, &text));
         }
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
@@ -106,7 +126,7 @@ impl BunnyClient {
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
-            anyhow::bail!("bunny API {status}: {text}");
+            anyhow::bail!("{}", bunny_api_user_message(status, &text));
         }
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
@@ -122,7 +142,7 @@ impl BunnyClient {
         let status = res.status();
         if !status.is_success() {
             let text = res.text().await?;
-            anyhow::bail!("snapshot failed {status}: {text}");
+            anyhow::bail!("{}", bunny_api_user_message(status, &text));
         }
         let content_type = res
             .headers()
@@ -192,7 +212,7 @@ impl BunnyClient {
         let status = res.status();
         if !status.is_success() {
             let text = res.text().await?;
-            anyhow::bail!("file download failed {status}: {text}");
+            anyhow::bail!("{}", bunny_api_user_message(status, &text));
         }
         let caption = res
             .headers()
@@ -284,14 +304,20 @@ async fn ctx_from_interaction_resolved(
 }
 
 fn query_ctx(ctx: &serde_json::Value) -> Vec<(String, String)> {
-    vec![
+    let mut q = vec![
         ("guild_id".into(), ctx["guild_id"].as_str().unwrap_or("").into()),
         ("channel_id".into(), ctx["channel_id"].as_str().unwrap_or("").into()),
         (
             "discord_user_id".into(),
             ctx["discord_user_id"].as_str().unwrap_or("").into(),
         ),
-    ]
+    ];
+    if let Some(thread_id) = ctx["thread_id"].as_str() {
+        if !thread_id.is_empty() {
+            q.push(("thread_id".into(), thread_id.into()));
+        }
+    }
+    q
 }
 
 #[async_trait::async_trait]
@@ -657,9 +683,10 @@ impl EventHandler for Handler {
                 }
                 tokio::spawn(async move {
                     let bridge_ctx = ctx_from_interaction_resolved(&http, &cmd).await;
+                    let locale = user_locale(&bunny, &bridge_ctx).await;
                     let response = match handle_command(&bunny, &cmd, &bridge_ctx).await {
                         Ok(reply) => reply,
-                        Err(e) => text_reply(format!("Error: {e}")),
+                        Err(e) => text_reply(format_discord_error(locale, &e)),
                     };
                     if let Err(e) = deliver_command_reply(&cmd, &http, response).await {
                         tracing::error!("discord reply failed: {e}");
@@ -667,6 +694,25 @@ impl EventHandler for Handler {
                 });
             }
             Interaction::Component(comp) => {
+                if threads::parse_thread_permission_button(&comp.data.custom_id).is_some() {
+                    let bunny = bunny.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            threads::handle_thread_permission_button(&comp, http.clone(), &bunny)
+                                .await
+                        {
+                            tracing::error!("thread permission button: {e}");
+                            let _ = comp
+                                .create_followup(
+                                    &http,
+                                    CreateInteractionResponseFollowup::new()
+                                        .content(format!("❌ Erreur : {e}")),
+                                )
+                                .await;
+                        }
+                    });
+                    return;
+                }
                 if threads::parse_thread_question_button(&comp.data.custom_id).is_some() {
                     let bunny = bunny.clone();
                     tokio::spawn(async move {
@@ -679,6 +725,24 @@ impl EventHandler for Handler {
                                     &http,
                                     CreateInteractionResponseFollowup::new()
                                         .content(format!("❌ Erreur : {e}")),
+                                )
+                                .await;
+                        }
+                    });
+                    return;
+                }
+                if threads::parse_thread_merge_button(&comp.data.custom_id).is_some() {
+                    let bunny = bunny.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            threads::handle_thread_merge_button(&comp, &http, &bunny).await
+                        {
+                            tracing::error!("thread merge button: {e}");
+                            let _ = comp
+                                .create_followup(
+                                    &http,
+                                    CreateInteractionResponseFollowup::new()
+                                        .content(format!("❌ Merge : {e}")),
                                 )
                                 .await;
                         }
@@ -754,7 +818,7 @@ impl EventHandler for Handler {
                                 text_reply(t(loc, "discord.approval.approved", &[]))
                             }
                         }
-                        Err(e) => text_reply(format!("Error: {e}")),
+                        Err(e) => text_reply(format_discord_error(loc, &e)),
                     };
                     if let Err(e) =
                         deliver_component_followup(&comp, &http, followup, &approval_id).await
@@ -884,7 +948,7 @@ async fn handle_command(
                     {
                         t(locale, "discord.language.not_linked", &[])
                     } else {
-                        format!("Error: {e}")
+                        format_discord_error(locale, &e)
                     };
                     Ok(text_reply(hint))
                 }
@@ -984,15 +1048,37 @@ async fn handle_command(
                     .get("shell")
                     .and_then(|v| v.as_str())
                     .unwrap_or("default");
+                let shell_auto_created = res
+                    .get("shell_auto_created")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let previous_shell = res
+                    .get("previous_shell")
+                    .and_then(|v| v.as_str());
                 let text = if output.trim().is_empty() {
                     t(locale, "discord.run.no_output", &[])
                 } else {
                     output.trim().to_string()
                 };
                 if persistent {
-                    Ok(format_persistent_shell_run_reply(locale, shell, command, &text))
+                    Ok(format_persistent_shell_run_reply(
+                        locale,
+                        shell,
+                        command,
+                        &text,
+                        shell_auto_created,
+                        previous_shell,
+                    ))
                 } else {
-                    Ok(format_shell_run_reply(locale, shell, command, &text, exit_code))
+                    Ok(format_shell_run_reply(
+                        locale,
+                        shell,
+                        command,
+                        &text,
+                        exit_code,
+                        shell_auto_created,
+                        previous_shell,
+                    ))
                 }
             } else {
                 Ok(text_reply(format!(
@@ -1443,12 +1529,24 @@ fn format_persistent_shell_run_reply(
     shell: &str,
     command: &str,
     excerpt: &str,
+    shell_auto_created: bool,
+    previous_shell: Option<&str>,
 ) -> CommandReply {
-    let header = t(
+    let mut header = t(
         locale,
         "discord.run.persistent_header",
         &[("shell", shell), ("command", command)],
     );
+    if shell_auto_created {
+        if let Some(prev) = previous_shell {
+            header.push('\n');
+            header.push_str(&t(
+                locale,
+                "discord.run.shell_auto_created",
+                &[("previous", prev), ("shell", shell)],
+            ));
+        }
+    }
     let no_out = t(locale, "discord.run.no_output", &[]);
     let body = if excerpt.trim().is_empty() || excerpt == no_out.as_str() {
         t(locale, "discord.run.no_output_yet", &[])
@@ -1473,6 +1571,8 @@ fn format_shell_run_reply(
     command: &str,
     text: &str,
     exit_code: i64,
+    shell_auto_created: bool,
+    previous_shell: Option<&str>,
 ) -> CommandReply {
     let suffix = if exit_code == 0 {
         String::new()
@@ -1486,11 +1586,21 @@ fn format_shell_run_reply(
             )
         )
     };
-    let header = t(
+    let mut header = t(
         locale,
         "discord.shell_run.header",
         &[("shell", shell), ("command", command)],
     );
+    if shell_auto_created {
+        if let Some(prev) = previous_shell {
+            header.push('\n');
+            header.push_str(&t(
+                locale,
+                "discord.run.shell_auto_created",
+                &[("previous", prev), ("shell", shell)],
+            ));
+        }
+    }
     // Leave room for header, fences, and "(suite N/M)" on follow-up messages.
     let chunk_budget = 1700usize;
     let chunks = if text.contains("```") {

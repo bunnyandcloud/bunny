@@ -108,7 +108,7 @@ export default function DiscordAccountPanel({ isOwner }: Props) {
           {showSetup ? (
             <button
               type="button"
-              onClick={() => { location.href = '/discord/setup'; }}
+              onClick={() => { location.href = '/discord/setup?wizard=1'; }}
               className="px-4 py-2 rounded bg-[#5865F2] text-white text-sm font-medium hover:opacity-90"
             >
               {tr('web.discord.account.setupButton')}

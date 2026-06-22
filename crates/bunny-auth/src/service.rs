@@ -112,6 +112,21 @@ impl AuthService {
         self.db.lock().get_user_locale(user_id)
     }
 
+    pub fn set_user_git_profile(
+        &self,
+        user_id: Uuid,
+        git_name: Option<&str>,
+        git_email: Option<&str>,
+    ) -> Result<()> {
+        self.db
+            .lock()
+            .set_user_git_profile(user_id, git_name, git_email)
+    }
+
+    pub fn get_user_git_profile(&self, user_id: Uuid) -> Result<crate::db::GitProfileRow> {
+        self.db.lock().get_user_git_profile(user_id)
+    }
+
     pub fn login(&self, email: &str, password: &str, device_id: Option<&str>) -> Result<LoginStep> {
         let db = self.db.lock();
         let (user_id, stored_hash) = db

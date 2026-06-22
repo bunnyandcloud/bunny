@@ -1323,6 +1323,7 @@ async fn serve(
     crate::recovery::restore_sessions(&state);
     crate::recovery::spawn_relay_if_enabled(state.clone());
     crate::recovery::spawn_health_checks(state.clone());
+    crate::terminal_context_watch::spawn_terminal_context_watcher(state.clone());
     crate::discord_follow::spawn_follow_worker(state.clone());
     let prefetch = state.clone();
     tokio::spawn(async move {
@@ -1369,8 +1370,17 @@ async fn serve(
 
 async fn shutdown_signal(state: Arc<AppState>) {
     let _ = signal::ctrl_c().await;
+    eprintln!("\n→ Shutting down bunny (Ctrl+C again to force quit)…");
     state.terminals.flush_all_scrollbacks();
     tracing::info!("terminal scrollback flushed");
+
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            eprintln!("→ Force quit");
+            std::process::exit(130);
+        }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {}
+    }
 }
 
 fn print_banner() {

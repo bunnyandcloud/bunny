@@ -117,6 +117,9 @@ export type MeProfile = {
   default_session_role: string;
   locale: string;
   discord: DiscordAccountStatus;
+  git_name: string | null;
+  git_email: string | null;
+  git_configured: boolean;
 };
 
 export function me() {
@@ -184,6 +187,13 @@ export function updateLocale(locale: 'en' | 'fr') {
   return api<MeProfile>('/auth/me', {
     method: 'PATCH',
     body: JSON.stringify({ locale }),
+  });
+}
+
+export function updateGitProfile(body: { git_name: string; git_email: string }) {
+  return api<MeProfile>('/auth/me', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 
@@ -395,8 +405,17 @@ export function createTerminal(
   });
 }
 
+export type TerminalListItem = {
+  id: string;
+  name: string;
+  status: string;
+  cwd?: string;
+  git_project?: string;
+  git_branch?: string;
+};
+
 export function listSessionTerminals(sessionId: string) {
-  return api<Array<{ id: string; name: string; status: string }>>(
+  return api<TerminalListItem[]>(
     `/terminals?session_id=${encodeURIComponent(sessionId)}`,
   );
 }
@@ -413,7 +432,7 @@ export function sendTerminalInput(terminalId: string, data: string) {
 }
 
 export function renameTerminal(terminalId: string, name: string) {
-  return api<{ id: string; name: string; status: string }>(`/terminals/${terminalId}`, {
+  return api<TerminalListItem>(`/terminals/${terminalId}`, {
     method: 'PATCH',
     body: JSON.stringify({ name }),
   });
@@ -684,4 +703,26 @@ export function watchNovncUrl(token: string, opts?: { interactive?: boolean }) {
     params.set('bunny_lock', 'readonly');
   }
   return `/api/v1/watch/${token}/vnc/vnc.html?${params}`;
+}
+
+export interface PendingApproval {
+  id: string;
+  actionSummary: string;
+  reason: string;
+  status: string;
+}
+
+export async function listSessionApprovals(sessionId: string) {
+  return api<{ approvals: PendingApproval[] }>(`/sessions/${sessionId}/approvals`);
+}
+
+export async function resolveApproval(approvalId: string, approve: boolean) {
+  return api<{ ok: boolean }>(`/approvals/${approvalId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ approve }),
+  });
+}
+
+export async function listSessionActivity(sessionId: string, limit = 50) {
+  return api<{ activity: unknown[] }>(`/sessions/${sessionId}/activity?limit=${limit}`);
 }

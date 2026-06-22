@@ -1,9 +1,15 @@
 //! Discord thread ↔ shell ↔ Claude workflows (headless `claude -p`).
 
 use crate::api::ApiError;
-use crate::discord_claude::{run_thread_claude, run_thread_claude_with_answers};
+use crate::discord_claude::{
+    run_thread_claude, run_thread_claude_after_permission, run_thread_claude_with_answers,
+};
 use bunny_discord::AskUserQuestionItem;
-use crate::discord_git::{init_thread_branch, probe_git_repo, reset_to_commit, run_git, sanitize_branch_token};
+use crate::discord_git::{
+    merge_thread_branch_into_base, probe_git_repo, reset_to_commit, resolve_main_repo_path, run_git,
+    sanitize_branch_token,
+};
+use bunny_integrations::db::AcquireGitLeaseRequest;
 use crate::discord_ops::{audit, resolve_bunny_user, resolve_link, BridgeContext};
 use crate::state::AppState;
 use crate::terminals::{self, default_shell_cwd};
@@ -38,6 +44,10 @@ pub struct ThreadClaudeApiFields {
     pub pending_question_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_questions: Option<Vec<AskUserQuestionItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_permission_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_command: Option<String>,
 }
 
 fn thread_response_from_run(run: &crate::discord_claude::ThreadClaudeResult) -> ThreadClaudeApiFields {
@@ -47,6 +57,8 @@ fn thread_response_from_run(run: &crate::discord_claude::ThreadClaudeResult) -> 
         approval_summary: run.approval_summary.clone(),
         pending_question_id: run.pending_question_id.map(|u| u.to_string()),
         pending_questions: run.pending_questions.clone(),
+        pending_permission_id: run.pending_permission_id.map(|u| u.to_string()),
+        permission_command: run.permission_command.clone(),
     }
 }
 
@@ -113,6 +125,22 @@ pub struct ThreadAnswerResponse {
 }
 
 #[derive(Deserialize)]
+pub struct ThreadPermissionRequest {
+    #[serde(flatten)]
+    pub ctx: BridgeContext,
+    pub thread_id: String,
+    pub pending_id: String,
+    pub approve: bool,
+}
+
+#[derive(Serialize)]
+pub struct ThreadPermissionResponse {
+    pub approved: bool,
+    #[serde(flatten)]
+    pub claude: ThreadClaudeApiFields,
+}
+
+#[derive(Deserialize)]
 pub struct ThreadDiscussionRequest {
     #[serde(flatten)]
     pub ctx: BridgeContext,
@@ -132,7 +160,20 @@ pub struct ThreadFinalizeRequest {
 #[derive(Serialize)]
 pub struct ThreadFinalizeResponse {
     pub status: String,
-    pub git_instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offer_merge: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_thread_branch: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ThreadMergeResponse {
+    pub ok: bool,
+    pub output: String,
+    pub base_branch: String,
+    pub thread_branch: String,
 }
 
 #[derive(Deserialize)]
@@ -209,13 +250,13 @@ pub async fn internal_thread_bind(
         ));
     }
 
-    let project_cwd = resolve_project_cwd(
+    let mut project_cwd = resolve_project_cwd(
         &state,
         &body.ctx.guild_id,
         &body.ctx.channel_id,
         link.session_id,
     )?;
-    let project_cwd_str = project_cwd.to_string_lossy().into_owned();
+    let mut project_cwd_str = project_cwd.to_string_lossy().into_owned();
 
     let git_probe = probe_git_repo(&project_cwd);
     let mut thread_branch = None;
@@ -229,14 +270,38 @@ pub async fn internal_thread_bind(
             sanitize_branch_token(&body.ctx.channel_id),
             sanitize_branch_token(short)
         );
-        match init_thread_branch(&project_cwd, &branch_name) {
-            Ok((base, commit)) => {
-                base_branch = Some(base);
-                start_commit = Some(commit);
-                thread_branch = Some(branch_name);
+        let remote_binding = state
+            .integrations
+            .lock()
+            .get_git_repo_binding_for_session(link.session_id)
+            .ok()
+            .flatten();
+        let (remote_url, use_local) = match remote_binding {
+            Some((_, source, local, remote, _, _)) if source == "remote" => {
+                (remote, None)
+            }
+            Some((_, _, local, _, _, _)) => (None, local.map(PathBuf::from)),
+            None => (None, Some(project_cwd.clone())),
+        };
+        let acquire = AcquireGitLeaseRequest {
+            session_id: link.session_id,
+            context_id: Some(body.thread_id.clone()),
+            branch: branch_name.clone(),
+            base_ref: start_commit.clone(),
+            local_path: use_local.or_else(|| Some(project_cwd.clone())),
+            remote_url,
+            default_branch: base_branch.clone(),
+        };
+        match state.git_workspace.acquire(acquire) {
+            Ok(lease) => {
+                base_branch = git_probe.base_branch.clone();
+                start_commit = Some(lease.base_commit.clone());
+                thread_branch = Some(lease.branch.clone());
+                project_cwd = lease.worktree_path.clone();
+                project_cwd_str = project_cwd.to_string_lossy().into_owned();
             }
             Err(e) => {
-                tracing::warn!("thread branch init failed: {e}");
+                tracing::warn!("git worktree acquire failed: {e}");
             }
         }
     }
@@ -325,7 +390,7 @@ fn record_thread_claude_output(
     thread_id: &str,
     run: &crate::discord_claude::ThreadClaudeResult,
 ) -> Result<(), ApiError> {
-    if run.pending_question_id.is_some() {
+    if run.pending_question_id.is_some() || run.pending_permission_id.is_some() {
         return Ok(());
     }
     if !run.needs_approval && !run.output.trim().is_empty() {
@@ -484,6 +549,10 @@ pub async fn internal_thread_input(
         .discord
         .lock()
         .cancel_thread_pending_questions(&body.thread_id);
+    let _ = state
+        .discord
+        .lock()
+        .cancel_thread_pending_permissions(&body.thread_id);
 
     let mut discussion_msgs = Vec::new();
     if body.include_discussion_context {
@@ -643,6 +712,90 @@ pub async fn internal_thread_answer(
     }))
 }
 
+pub async fn internal_thread_permission(
+    state: Arc<AppState>,
+    body: ThreadPermissionRequest,
+) -> Result<Json<ThreadPermissionResponse>, ApiError> {
+    let binding = require_active_thread(&state, &body.thread_id)?;
+    let link = resolve_link(&state, &body.ctx)?;
+    let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
+    crate::discord_ops::ensure_discord_control(&state, bunny_user, link.session_id)?;
+
+    let pending_id = Uuid::parse_str(&body.pending_id)
+        .map_err(|_| ApiError::validation("invalid pending_id"))?;
+
+    let pending = state
+        .discord
+        .lock()
+        .get_thread_pending_permission(pending_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("pending permission not found"))?;
+
+    if pending.thread_id != body.thread_id {
+        return Err(ApiError::validation("pending_id does not match thread"));
+    }
+
+    let command = pending.command.clone();
+    let allowed_tools = pending.allowed_tools.clone();
+    let claude_session_id = pending.claude_session_id.clone();
+    state
+        .discord
+        .lock()
+        .delete_thread_pending_permission(pending_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+
+    if !body.approve {
+        let keys = crate::discord_claude::shell_command_denial_keys(&command);
+        let _ = state
+            .discord
+            .lock()
+            .record_thread_denied_shell_keys(&body.thread_id, &keys);
+    }
+
+    let note = if body.approve {
+        format!("(permission Discord accordée)\n```bash\n{command}\n```")
+    } else {
+        format!("(permission Discord refusée)\n```bash\n{command}\n```")
+    };
+    insert_thread_message(
+        &state,
+        &body.thread_id,
+        DiscordThreadMessageRole::User,
+        Some(&body.ctx.discord_user_id),
+        None,
+        &note,
+    )?;
+
+    let session_id = binding.session_id;
+    let term_id = binding.term_id;
+    let thread_id = binding.thread_id.clone();
+    let state_bg = state.clone();
+    let approve = body.approve;
+    let acting_user = Some(bunny_user);
+    let run = tokio::task::spawn_blocking(move || {
+        run_thread_claude_after_permission(
+            &state_bg,
+            session_id,
+            term_id,
+            &thread_id,
+            approve,
+            &command,
+            &allowed_tools,
+            claude_session_id.as_deref(),
+            acting_user,
+        )
+    })
+    .await
+    .map_err(|e| ApiError::validation(&e.to_string()))??;
+
+    record_thread_claude_output(&state, &body.thread_id, &run)?;
+
+    Ok(Json(ThreadPermissionResponse {
+        approved: body.approve,
+        claude: thread_response_from_run(&run),
+    }))
+}
+
 pub async fn internal_thread_discussion(
     state: Arc<AppState>,
     body: ThreadDiscussionRequest,
@@ -700,13 +853,35 @@ pub async fn internal_thread_finalize(
     let cwd = PathBuf::from(&binding.project_cwd);
 
     if outcome == "cancel" && binding.git_enabled {
-        if let Some(ref commit) = binding.start_commit {
+        if let Ok(Some(lease)) = state
+            .integrations
+            .lock()
+            .get_active_lease_by_context(&body.thread_id)
+        {
+            let _ = state.git_workspace.reset(lease.id);
+            let _ = state.git_workspace.release(lease.id, true);
+        } else if let Some(ref commit) = binding.start_commit {
             reset_to_commit(&cwd, commit)?;
+        }
+    } else if binding.git_enabled {
+        if let Ok(Some(lease)) = state
+            .integrations
+            .lock()
+            .get_active_lease_by_context(&body.thread_id)
+        {
+            let _ = state.git_workspace.release(lease.id, false);
         }
     }
 
     let _ = terminals::cancel_thread_claude_run(&state, &body.thread_id);
-    close_thread_shell(&state, binding.term_id, link.session_id)?;
+    let _ = state
+        .discord
+        .lock()
+        .cancel_thread_pending_questions(&body.thread_id);
+    let _ = state
+        .discord
+        .lock()
+        .cancel_thread_pending_permissions(&body.thread_id);
 
     let status = if outcome == "goal" {
         DiscordThreadStatus::Goal
@@ -718,28 +893,84 @@ pub async fn internal_thread_finalize(
         .lock()
         .update_thread_status(&body.thread_id, status)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
+    close_thread_shell(&state, binding.term_id, link.session_id)?;
 
-    let git_instructions = if outcome == "goal" && binding.git_enabled {
-        Some(format_goal_git_instructions(&binding))
-    } else {
-        None
-    };
+    let offer_merge = outcome == "goal"
+        && binding.git_enabled
+        && binding.thread_branch.is_some();
 
     Ok(Json(ThreadFinalizeResponse {
         status: status.as_str().into(),
-        git_instructions,
+        offer_merge: offer_merge.then_some(true),
+        merge_base_branch: if offer_merge {
+            binding.base_branch.clone()
+        } else {
+            None
+        },
+        merge_thread_branch: if offer_merge {
+            binding.thread_branch.clone()
+        } else {
+            None
+        },
     }))
 }
 
-fn format_goal_git_instructions(binding: &DiscordThreadBinding) -> String {
-    let base = binding.base_branch.as_deref().unwrap_or("main");
-    let branch = binding
+pub async fn internal_thread_merge(
+    state: Arc<AppState>,
+    body: ThreadIdRequest,
+) -> Result<Json<ThreadMergeResponse>, ApiError> {
+    let binding = state
+        .discord
+        .lock()
+        .get_thread_binding(&body.thread_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("thread not found"))?;
+
+    if binding.status != DiscordThreadStatus::Goal {
+        return Err(ApiError::validation(
+            "merge disponible uniquement après Goal ! sur un thread terminé",
+        ));
+    }
+    if !binding.git_enabled {
+        return Err(ApiError::validation("ce thread n'a pas de branche git"));
+    }
+    let thread_branch = binding
         .thread_branch
         .as_deref()
-        .unwrap_or("bunny/thread");
-    format!(
-        "**Git**\n- Base: `{base}`\n- Branch: `{branch}`\n```bash\ngit push -u origin {branch}\n```\nOuvre une PR de `{branch}` vers `{base}` sur ton forge (GitHub/GitLab)."
-    )
+        .ok_or_else(|| ApiError::validation("branche du thread inconnue"))?;
+    let base_branch = binding.base_branch.as_deref().unwrap_or("main");
+
+    let link = resolve_link(&state, &body.ctx)?;
+    let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
+    crate::discord_ops::ensure_discord_control(&state, bunny_user, link.session_id)?;
+
+    let main_repo = resolve_main_repo_path(&state, binding.session_id)?;
+    let output = merge_thread_branch_into_base(
+        &state,
+        &main_repo,
+        base_branch,
+        thread_branch,
+        bunny_user,
+    )?;
+
+    audit(
+        &state,
+        &body.ctx,
+        binding.session_id,
+        "/discord/thread/merge",
+        &format!("{thread_branch} -> {base_branch}"),
+        "ok",
+        Some(bunny_user),
+        Some(binding.term_id),
+        None,
+    );
+
+    Ok(Json(ThreadMergeResponse {
+        ok: true,
+        output,
+        base_branch: base_branch.to_string(),
+        thread_branch: thread_branch.to_string(),
+    }))
 }
 
 fn close_thread_shell(state: &AppState, term_id: Uuid, session_id: Uuid) -> Result<(), ApiError> {
@@ -864,22 +1095,22 @@ pub async fn internal_git_command(
 
     let sub = body.subcommand.to_lowercase();
     let output = match sub.as_str() {
-        "status" => run_git(&cwd, &["status", "-sb"])?,
+        "status" => run_git(&state, &cwd, &["status", "-sb"], bunny_user)?,
         "diff" => {
             let mut args = vec!["diff"];
             if let Some(ref p) = body.path {
                 args.push(p.as_str());
             }
-            run_git(&cwd, &args)?
+            run_git(&state, &cwd, &args, bunny_user)?
         }
-        "log" => run_git(&cwd, &["log", "--oneline", "-n", "15"])?,
+        "log" => run_git(&state, &cwd, &["log", "--oneline", "-n", "15"], bunny_user)?,
         "branch" => {
             let name = body.branch.as_deref().ok_or_else(|| ApiError::validation("branch required"))?;
-            run_git(&cwd, &["checkout", "-b", name])?
+            run_git(&state, &cwd, &["checkout", "-b", name], bunny_user)?
         }
         "checkout" => {
             let name = body.branch.as_deref().ok_or_else(|| ApiError::validation("branch required"))?;
-            run_git(&cwd, &["checkout", name])?
+            run_git(&state, &cwd, &["checkout", name], bunny_user)?
         }
         "merge" => {
             let name = body.branch.as_deref().ok_or_else(|| ApiError::validation("branch required"))?;
@@ -890,7 +1121,7 @@ pub async fn internal_git_command(
                     "command": cmd,
                 })));
             }
-            run_git(&cwd, &["merge", name])?
+            run_git(&state, &cwd, &["merge", name], bunny_user)?
         }
         "reset_hard" => {
             let cmd = "git reset --hard";
@@ -900,7 +1131,7 @@ pub async fn internal_git_command(
                     "command": cmd,
                 })));
             }
-            run_git(&cwd, &["reset", "--hard"])?
+            run_git(&state, &cwd, &["reset", "--hard"], bunny_user)?
         }
         _ => return Err(ApiError::validation(&format!("unknown git subcommand: {sub}"))),
     };

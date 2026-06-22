@@ -2,7 +2,8 @@ use crate::models::{
     AgentTask, AgentTaskMode, AgentTaskStatus, ApprovalRequest, AskUserQuestionItem,
     DiscordAuditEntry, DiscordFollow, DiscordSessionLink, DiscordUserLink,
     DiscordThreadBinding, DiscordThreadDiscussion, DiscordThreadMessage, DiscordThreadMessageRole,
-    DiscordThreadPendingQuestions, DiscordThreadStatus, WatchSession,
+    DiscordThreadPendingPermission, DiscordThreadPendingQuestions, DiscordThreadStatus,
+    WatchSession,
 };
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
@@ -213,6 +214,27 @@ impl DiscordDb {
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_thread_pending ON discord_thread_pending_questions(thread_id);
+            CREATE TABLE IF NOT EXISTS discord_thread_pending_permissions (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                claude_session_id TEXT,
+                command TEXT NOT NULL,
+                allowed_tools_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_thread_pending_perm ON discord_thread_pending_permissions(thread_id);
+            CREATE TABLE IF NOT EXISTS discord_thread_denied_shell_commands (
+                thread_id TEXT NOT NULL,
+                command_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (thread_id, command_key)
+            );
+            CREATE TABLE IF NOT EXISTS discord_thread_granted_shell_commands (
+                thread_id TEXT NOT NULL,
+                command_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (thread_id, command_key)
+            );
             "#,
         )?;
         let _ = self.conn.execute(
@@ -311,6 +333,35 @@ impl DiscordDb {
             params![name, guild_id, channel_id],
         )?;
         Ok(())
+    }
+
+    /// Active Discord thread bindings for a session (term_id per thread).
+    pub fn list_thread_bound_term_ids_for_session(&self, session_id: Uuid) -> Result<Vec<Uuid>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(term_id, default_shell_id) FROM discord_thread_bindings
+             WHERE session_id = ?1 AND status = 'active'
+             AND COALESCE(term_id, default_shell_id) IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(params![session_id.to_string()], |r| {
+            let raw: String = r.get(0)?;
+            Uuid::parse_str(&raw).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn is_term_bound_to_active_thread(&self, term_id: Uuid) -> Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM discord_thread_bindings
+                 WHERE status = 'active' AND COALESCE(term_id, default_shell_id) = ?1 LIMIT 1",
+                params![term_id.to_string()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|opt| opt.is_some())
+            .map_err(Into::into)
     }
 
     pub fn get_claude_session_id(
@@ -665,6 +716,28 @@ impl DiscordDb {
             .map_err(Into::into)
     }
 
+    /// Active thread still using this terminal (blocks manual shell close).
+    pub fn get_active_thread_binding_for_term(
+        &self,
+        term_id: Uuid,
+    ) -> Result<Option<DiscordThreadBinding>> {
+        self.conn
+            .query_row(
+                r#"SELECT guild_id, channel_id, thread_id, session_id, task_id,
+                    COALESCE(term_id, default_shell_id), project_cwd, status, goal_text,
+                    git_enabled, base_branch, thread_branch, start_commit,
+                    last_pane_marker, last_pane_snapshot, last_input_discord_message_id,
+                    claude_session_id, created_at
+                 FROM discord_thread_bindings
+                 WHERE status = 'active' AND COALESCE(term_id, default_shell_id) = ?1
+                 LIMIT 1"#,
+                params![term_id.to_string()],
+                map_thread_binding_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn update_thread_status(
         &self,
         thread_id: &str,
@@ -813,6 +886,155 @@ impl DiscordDb {
             params![pending_id.to_string()],
         )?;
         Ok(())
+    }
+
+    pub fn cancel_thread_pending_permissions(&self, thread_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM discord_thread_pending_permissions WHERE thread_id = ?1",
+            params![thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_thread_pending_permission(
+        &self,
+        pending: &DiscordThreadPendingPermission,
+    ) -> Result<()> {
+        self.cancel_thread_pending_permissions(&pending.thread_id)?;
+        let allowed_json = serde_json::to_string(&pending.allowed_tools)?;
+        self.conn.execute(
+            r#"INSERT INTO discord_thread_pending_permissions (id, thread_id, claude_session_id, command, allowed_tools_json, created_at)
+               VALUES (?1,?2,?3,?4,?5,?6)"#,
+            params![
+                pending.id.to_string(),
+                pending.thread_id,
+                pending.claude_session_id,
+                pending.command,
+                allowed_json,
+                pending.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_thread_pending_permission(
+        &self,
+        pending_id: Uuid,
+    ) -> Result<Option<DiscordThreadPendingPermission>> {
+        self.conn
+            .query_row(
+                "SELECT id, thread_id, claude_session_id, command, allowed_tools_json, created_at FROM discord_thread_pending_permissions WHERE id = ?1",
+                params![pending_id.to_string()],
+                map_thread_pending_permission_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn delete_thread_pending_permission(&self, pending_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM discord_thread_pending_permissions WHERE id = ?1",
+            params![pending_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_thread_denied_shell_keys(
+        &self,
+        thread_id: &str,
+        command_keys: &[String],
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        for key in command_keys {
+            if key.is_empty() {
+                continue;
+            }
+            let _ = self.conn.execute(
+                r#"INSERT INTO discord_thread_denied_shell_commands (thread_id, command_key, created_at)
+                   VALUES (?1, ?2, ?3)
+                   ON CONFLICT(thread_id, command_key) DO NOTHING"#,
+                params![thread_id, key, now],
+            );
+        }
+        Ok(())
+    }
+
+    pub fn is_thread_shell_command_denied(
+        &self,
+        thread_id: &str,
+        command_keys: &[String],
+    ) -> Result<bool> {
+        for key in command_keys {
+            if key.is_empty() {
+                continue;
+            }
+            let found: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM discord_thread_denied_shell_commands WHERE thread_id = ?1 AND command_key = ?2 LIMIT 1",
+                    params![thread_id, key],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if found {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn clear_thread_denied_shell_commands(&self, thread_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM discord_thread_denied_shell_commands WHERE thread_id = ?1",
+            params![thread_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_thread_granted_shell_keys(
+        &self,
+        thread_id: &str,
+        command_keys: &[String],
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        for key in command_keys {
+            if key.is_empty() {
+                continue;
+            }
+            let _ = self.conn.execute(
+                r#"INSERT INTO discord_thread_granted_shell_commands (thread_id, command_key, created_at)
+                   VALUES (?1, ?2, ?3)
+                   ON CONFLICT(thread_id, command_key) DO NOTHING"#,
+                params![thread_id, key, now],
+            );
+        }
+        Ok(())
+    }
+
+    pub fn is_thread_shell_command_granted(
+        &self,
+        thread_id: &str,
+        command_keys: &[String],
+    ) -> Result<bool> {
+        for key in command_keys {
+            if key.is_empty() {
+                continue;
+            }
+            let found: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM discord_thread_granted_shell_commands WHERE thread_id = ?1 AND command_key = ?2 LIMIT 1",
+                    params![thread_id, key],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if found {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn insert_thread_message(&self, msg: &DiscordThreadMessage) -> Result<()> {
@@ -1216,6 +1438,21 @@ fn map_thread_pending_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DiscordThre
         questions,
         answers,
         created_at: parse_ts(&r.get::<_, String>(4)?),
+    })
+}
+
+fn map_thread_pending_permission_row(
+    r: &rusqlite::Row<'_>,
+) -> rusqlite::Result<DiscordThreadPendingPermission> {
+    let allowed_tools: Vec<String> =
+        serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default();
+    Ok(DiscordThreadPendingPermission {
+        id: Uuid::parse_str(&r.get::<_, String>(0)?).unwrap_or_default(),
+        thread_id: r.get(1)?,
+        claude_session_id: r.get(2)?,
+        command: r.get(3)?,
+        allowed_tools,
+        created_at: parse_ts(&r.get::<_, String>(5)?),
     })
 }
 

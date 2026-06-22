@@ -23,10 +23,22 @@ function setupSectionFromUrl(): 'bot' | 'oauth' | null {
   return null;
 }
 
+function setupWizardFromUrl(): boolean {
+  const wizard = new URLSearchParams(location.search).get('wizard');
+  return wizard === '1' || wizard === 'true';
+}
+
 function clearSetupSectionFromUrl() {
   const url = new URL(location.href);
   if (!url.searchParams.has('section')) return;
   url.searchParams.delete('section');
+  history.replaceState(null, '', url.pathname + url.search);
+}
+
+function clearSetupWizardFromUrl() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('wizard')) return;
+  url.searchParams.delete('wizard');
   history.replaceState(null, '', url.pathname + url.search);
 }
 
@@ -78,12 +90,16 @@ export default function DiscordSetupPage({ email: _email }: Props) {
           setGuildId(s.guild_id);
         }
         const section = setupSectionFromUrl();
+        const wizard = setupWizardFromUrl();
         if (section === 'bot') {
           setStep('bot');
           clearSetupSectionFromUrl();
         } else if (section === 'oauth') {
           setStep('oauth');
           clearSetupSectionFromUrl();
+        } else if (wizard || !s.oauth_configured) {
+          setStep('intro');
+          clearSetupWizardFromUrl();
         } else if (s.bridge_configured || s.oauth_configured) {
           setStep('manage');
         }

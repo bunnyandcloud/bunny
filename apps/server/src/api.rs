@@ -25,6 +25,7 @@ use bunny_auth::{AuthenticatedSession, LoginStep};
 use bunny_core::permissions::{role_can, Action};
 use bunny_core::types::{ApiErrorResponse, Role};
 use bunny_core::API_VERSION;
+use bunny_i18n::Locale;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use axum::http::HeaderValue;
@@ -114,10 +115,14 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/webrtc/config", get(webrtc_config))
         .route("/sessions/:id/webrtc/offer", post(webrtc_offer))
         .route("/sessions/:id/webrtc/candidate", post(webrtc_candidate))
+        .merge(crate::integrations_ops::human_router(state.clone()))
         .merge(crate::discord_ops::human_router(state.clone()))
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     let internal_discord = crate::discord_ops::internal_router(state.clone())
+        .layer(from_fn_with_state(state.clone(), middleware::require_bridge));
+
+    let internal_chat = crate::integrations_ops::internal_chat_router(state.clone())
         .layer(from_fn_with_state(state.clone(), middleware::require_bridge));
 
     let watch_public = crate::discord_ops::public_watch_router(state.clone());
@@ -127,6 +132,7 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .merge(
             Router::new()
                 .nest("/internal/discord", internal_discord)
+                .nest("/internal/chat", internal_chat)
                 .merge(watch_public),
         )
         .with_state(state.clone());
@@ -417,6 +423,15 @@ async fn auth_me(
             (false, false, false, "viewer".to_string())
         };
     let discord = crate::discord_ops::discord_account_status(&state, user);
+    let git_profile = state.auth.get_user_git_profile(user).ok();
+    let (git_name, git_email) = git_profile
+        .as_ref()
+        .map(|p| (p.git_name.clone(), p.git_email.clone()))
+        .unwrap_or((None, None));
+    let git_configured = crate::git_identity::git_profile_configured(
+        git_name.as_deref(),
+        git_email.as_deref(),
+    );
     Ok(Json(MeResponse {
         user_id: user.to_string(),
         email,
@@ -429,12 +444,17 @@ async fn auth_me(
         default_session_role,
         locale,
         discord,
+        git_name,
+        git_email,
+        git_configured,
     }))
 }
 
 #[derive(Deserialize)]
 pub struct PatchMeRequest {
     pub locale: Option<String>,
+    pub git_name: Option<String>,
+    pub git_email: Option<String>,
 }
 
 async fn auth_patch_me(
@@ -452,6 +472,35 @@ async fn auth_patch_me(
             .auth
             .set_user_locale(user, locale)
             .map_err(|e| ApiError::validation(&e.to_string()))?;
+    }
+    if body.git_name.is_some() || body.git_email.is_some() {
+        let current = state
+            .auth
+            .get_user_git_profile(user)
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+        let name = body
+            .git_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or(current.git_name);
+        let email = body
+            .git_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or(current.git_email);
+        state
+            .auth
+            .set_user_git_profile(user, name.as_deref(), email.as_deref())
+            .map_err(|e| ApiError::validation(&e.to_string()))?;
+        if let (Some(n), Some(e)) = (name.as_deref(), email.as_deref()) {
+            let _ = state.git_identity.sync_profile_cache(user, n, e);
+        } else {
+            let _ = state.git_identity.clear_profile_cache(user);
+        }
     }
     auth_me(State(state), Extension(user)).await
 }
@@ -900,41 +949,45 @@ async fn list_terminals(
         vec![]
     };
 
-    let mut items: Vec<TerminalListItem> = db_rows
+    let mut stubs: Vec<(Uuid, String, String)> = db_rows
         .into_iter()
         .map(|row: bunny_auth::db::TerminalRow| {
             let (id, _, name, _, _, _, db_status, _, _, _) = row;
-            TerminalListItem {
-                id: id.to_string(),
-                name,
-                status: state
-                    .terminals
-                    .status(id)
-                    .map(|s| format!("{:?}", s))
-                    .unwrap_or(db_status),
-            }
+            let status = state
+                .terminals
+                .status(id)
+                .map(|s| format!("{:?}", s))
+                .unwrap_or(db_status);
+            (id, name, status)
         })
         .collect();
 
     if filter_session.is_some() {
-        let known: std::collections::HashSet<String> =
-            items.iter().map(|i| i.id.clone()).collect();
+        let known: std::collections::HashSet<Uuid> = stubs.iter().map(|(id, _, _)| *id).collect();
         for (tid, sid) in state.terminal_sessions.read().iter() {
             if filter_session != Some(*sid) {
                 continue;
             }
-            if known.contains(&tid.to_string()) {
+            if known.contains(tid) {
                 continue;
             }
-            if let (Some(name), Some(status)) = (state.terminals.name(*tid), state.terminals.status(*tid)) {
-                items.push(TerminalListItem {
-                    id: tid.to_string(),
-                    name,
-                    status: format!("{:?}", status),
-                });
+            if let (Some(name), Some(status)) =
+                (state.terminals.name(*tid), state.terminals.status(*tid))
+            {
+                stubs.push((*tid, name, format!("{:?}", status)));
             }
         }
     }
+
+    let state_bg = state.clone();
+    let items = tokio::task::spawn_blocking(move || {
+        stubs
+            .into_iter()
+            .map(|(id, name, status)| terminal_list_item(&state_bg, id, name, status))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| ApiError::validation(&e.to_string()))?;
 
     Ok(Json(items))
 }
@@ -989,11 +1042,29 @@ async fn patch_terminal(
         .status(id)
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "unknown".into());
-    Ok(Json(TerminalListItem {
+    Ok(Json(terminal_list_item(
+        &state,
+        id,
+        name,
+        status,
+    )))
+}
+
+fn terminal_list_item(
+    state: &AppState,
+    id: Uuid,
+    name: String,
+    status: String,
+) -> TerminalListItem {
+    let ctx = crate::terminals::terminal_work_context_for_list(state, id);
+    TerminalListItem {
         id: id.to_string(),
         name,
         status,
-    }))
+        cwd: ctx.cwd,
+        git_project: ctx.git_project,
+        git_branch: ctx.git_branch,
+    }
 }
 
 fn terminal_session_id(state: &AppState, terminal_id: Uuid) -> Result<Uuid, ApiError> {
@@ -1015,9 +1086,26 @@ async fn delete_terminal(
     Extension(user): Extension<Uuid>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    if let Some(session_id) = state.terminal_sessions.read().get(&id) {
+    let session_id = if let Some(session_id) = state.terminal_sessions.read().get(&id) {
         ensure_session_access(&state, user, *session_id, Action::TerminalWrite)?;
-    }
+        *session_id
+    } else {
+        let row = state
+            .auth
+            .db()
+            .lock()
+            .get_terminal(id)
+            .map_err(|e| ApiError::validation(&e.to_string()))?
+            .ok_or_else(|| ApiError::not_found("terminal"))?;
+        ensure_session_access(&state, user, row.1, Action::TerminalWrite)?;
+        row.1
+    };
+    let locale = state
+        .auth
+        .get_user_locale(user)
+        .map(|loc| Locale::from_db(&loc))
+        .unwrap_or(Locale::En);
+    crate::discord_ops::ensure_shell_may_close(&state, session_id, id, locale)?;
     state.terminals.remove(id);
     state.terminal_sessions.write().remove(&id);
     let _ = remove_terminal_record(&state, id);
@@ -1105,7 +1193,7 @@ async fn terminal_ws(
         return Err(ApiError::forbidden("terminal read denied"));
     }
     Ok(ws.on_upgrade(move |socket| {
-        ws::handle_terminal_ws(socket, state, id, can_write, q.from_offset)
+        ws::handle_terminal_ws(socket, state, id, can_write, user, q.from_offset)
     }))
 }
 
@@ -1851,6 +1939,9 @@ pub struct MeResponse {
     /// UI locale: `en` or `fr`
     pub locale: String,
     pub discord: crate::discord_ops::DiscordAccountStatus,
+    pub git_name: Option<String>,
+    pub git_email: Option<String>,
+    pub git_configured: bool,
 }
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
@@ -1960,7 +2051,17 @@ pub struct CreateTerminalRequest {
 #[derive(Serialize)]
 pub struct TerminalResponse { pub id: String, pub name: String, pub ws_url: String }
 #[derive(Serialize)]
-pub struct TerminalListItem { pub id: String, pub name: String, pub status: String }
+pub struct TerminalListItem {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+}
 #[derive(Deserialize)]
 pub struct ListTerminalsQuery { pub session_id: Option<String> }
 #[derive(Deserialize)]

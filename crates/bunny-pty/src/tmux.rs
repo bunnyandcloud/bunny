@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Once;
 use uuid::Uuid;
@@ -143,17 +143,61 @@ pub fn ensure_session(session: &str, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Bash init file that re-exports Bunny PATH / terminal id (survives tmux session env drift).
+pub fn write_shell_init_script(
+    data_dir: &Path,
+    terminal_id: Uuid,
+    path_with_bin: &str,
+) -> Result<PathBuf> {
+    let dir = data_dir.join("git-identity");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("shell-init-{terminal_id}.sh"));
+    let content = format!(
+        r#"export PATH="{path_with_bin}"
+export BUNNY_TERMINAL_ID="{terminal_id}"
+if [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
+"#,
+    );
+    std::fs::write(&path, content)?;
+    Ok(path)
+}
+
+pub fn shell_command_with_init(shell: &str, init_path: &Path) -> String {
+    if shell.contains("bash") {
+        format!("{shell} --init-file {}", init_path.display())
+    } else {
+        shell.to_string()
+    }
+}
+
+pub fn interactive_shell_command(
+    data_dir: &Path,
+    terminal_id: Uuid,
+    shell: &str,
+    session_env: &HashMap<String, String>,
+) -> Result<String> {
+    let path = session_env
+        .get("PATH")
+        .map(String::as_str)
+        .unwrap_or("/usr/bin:/bin");
+    let init = write_shell_init_script(data_dir, terminal_id, path)?;
+    Ok(shell_command_with_init(shell, &init))
+}
+
 /// Dedicated tmux session for one web shell (recommended for multi-tab workspaces).
 pub fn ensure_terminal_session(
     terminal_id: Uuid,
     cwd: &Path,
     init_command: Option<&str>,
+    interactive_shell: &str,
     secret_env: &HashMap<String, String>,
 ) -> Result<String> {
     let name = terminal_session_name(terminal_id);
     if has_session(&name) {
         configure_session_for_web(&name);
-        apply_session_secrets(&name, secret_env);
+        apply_session_env(&name, secret_env);
         return Ok(name);
     }
     let cwd = cwd.to_str().context("invalid cwd")?;
@@ -168,6 +212,8 @@ pub fn ensure_terminal_session(
     append_env_flags(&mut args, secret_env);
     if let Some(cmd) = init_command {
         args.push(cmd.to_string());
+    } else {
+        args.push(interactive_shell.to_string());
     }
     run_owned(&args)?;
     configure_session_for_web(&name);
@@ -270,6 +316,33 @@ pub fn pane_cwd(target: &str) -> Option<String> {
     }
 }
 
+/// Name of the program running in the pane (empty when unknown / idle shell).
+pub fn pane_current_command(target: &str) -> Option<String> {
+    if !target_alive(target) {
+        return None;
+    }
+    let out = Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "-F",
+            "#{pane_current_command}",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let cmd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if cmd.is_empty() {
+        None
+    } else {
+        Some(cmd)
+    }
+}
+
 pub fn capture_pane(target: &str) -> Result<String> {
     let out = Command::new("tmux")
         .args(["capture-pane", "-p", "-t", target, "-S", "-10000"])
@@ -311,21 +384,21 @@ pub fn pane_is_dead(target: &str) -> bool {
         .any(|l| l.trim() == "1")
 }
 
-/// Respawn the pane with `BUNNY_SECRET_*` in the process environment (values never echoed).
-pub fn reload_shell_secrets(
+/// Respawn the pane with session env (PATH, BUNNY_TERMINAL_ID, vault secrets).
+pub fn reload_shell_env(
     target: &str,
     cwd: &Path,
     shell: &str,
-    secret_env: &HashMap<String, String>,
+    session_env: &HashMap<String, String>,
 ) -> Result<()> {
-    if !target_alive(target) || secret_env.is_empty() {
+    if !target_alive(target) || session_env.is_empty() {
         return Ok(());
     }
     let session = session_name_from_target(target);
     configure_session_for_web(session);
-    apply_session_secrets(session, secret_env);
+    apply_session_env(session, session_env);
     let cwd = cwd.to_str().context("invalid cwd")?;
-    tracing::info!(%target, "reloading shell with vault secrets");
+    tracing::info!(%target, "reloading shell with Bunny session env");
     let mut args = vec![
         "respawn-pane".to_string(),
         "-k".to_string(),
@@ -334,27 +407,117 @@ pub fn reload_shell_secrets(
         "-c".to_string(),
         cwd.to_string(),
     ];
-    append_env_flags(&mut args, secret_env);
+    append_env_flags(&mut args, session_env);
     args.push(shell.to_string());
     run_owned(&args)?;
     Ok(())
 }
 
-/// Start a fresh shell in the target when the pane died (e.g. after agent stop + SIGHUP).
-pub fn ensure_shell_running(
+/// Legacy alias.
+pub fn reload_shell_secrets(
     target: &str,
     cwd: &Path,
     shell: &str,
     secret_env: &HashMap<String, String>,
 ) -> Result<()> {
+    reload_shell_env(target, cwd, shell, secret_env)
+}
+
+/// Start a fresh shell in the target when the pane died (e.g. after agent stop + SIGHUP),
+/// or respawn when the live pane is missing Bunny git env (PATH wrapper / BUNNY_TERMINAL_ID).
+pub fn ensure_shell_running(
+    target: &str,
+    cwd: &Path,
+    shell_cmd: &str,
+    session_env: &HashMap<String, String>,
+) -> Result<()> {
     if !target_alive(target) {
         return Ok(());
     }
-    if !pane_is_dead(target) {
-        apply_session_secrets(session_name_from_target(target), secret_env);
-        return Ok(());
+    let session = session_name_from_target(target);
+    apply_session_env(session, session_env);
+    if pane_is_dead(target) {
+        return reload_shell_env(target, cwd, shell_cmd, session_env);
     }
-    reload_shell_secrets(target, cwd, shell, secret_env)
+    if pane_needs_env_reload(target, session_env) && shell_pane_is_idle(target, shell_cmd) {
+        return reload_shell_env(target, cwd, shell_cmd, session_env);
+    }
+    Ok(())
+}
+
+fn shell_pane_is_idle(target: &str, shell_cmd: &str) -> bool {
+    let Some(cmd) = pane_current_command(target) else {
+        return true;
+    };
+    let shell_base = std::path::Path::new(
+        shell_cmd
+            .split_whitespace()
+            .next()
+            .unwrap_or(shell_cmd),
+    )
+    .file_name()
+    .and_then(|s| s.to_str())
+    .unwrap_or(shell_cmd);
+    cmd == shell_base
+        || cmd.ends_with("bash")
+        || cmd.ends_with("sh")
+        || cmd == "-sh"
+        || cmd == "bash"
+        || cmd == "sh"
+}
+
+fn pane_needs_env_reload(target: &str, session_env: &HashMap<String, String>) -> bool {
+    let Some(pid) = pane_pid(target) else {
+        return true;
+    };
+    if let Some(expected) = session_env.get("BUNNY_TERMINAL_ID") {
+        match process_env_value(pid, "BUNNY_TERMINAL_ID") {
+            Some(actual) if actual == *expected => {}
+            _ => return true,
+        }
+    }
+    if let Some(path_env) = session_env.get("PATH") {
+        let bunny_bin = path_env.split(':').next().filter(|s| !s.is_empty());
+        if let Some(expected_bin) = bunny_bin {
+            let actual_path = process_env_value(pid, "PATH").unwrap_or_default();
+            if !actual_path
+                .split(':')
+                .any(|segment| segment == expected_bin)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn pane_pid(target: &str) -> Option<u32> {
+    let out = Command::new("tmux")
+        .args(["display-message", "-p", "-t", target, "-F", "#{pane_pid}"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn process_env_value(pid: u32, key: &str) -> Option<String> {
+    let data = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    let prefix = format!("{key}=");
+    for entry in data.split(|&b| b == 0) {
+        if entry.starts_with(prefix.as_bytes()) {
+            let value = entry.get(prefix.len()..)?;
+            if value.is_empty() {
+                return None;
+            }
+            return String::from_utf8(value.to_vec()).ok();
+        }
+    }
+    None
 }
 
 pub fn kill_window(session: &str, window: &str) {
@@ -402,25 +565,36 @@ pub fn target_alive(target: &str) -> bool {
     }
 }
 
-fn append_env_flags(args: &mut Vec<String>, secret_env: &HashMap<String, String>) {
+fn append_env_flags(args: &mut Vec<String>, session_env: &HashMap<String, String>) {
     for (key, value) in crate::locale::utf8_locale_vars() {
         args.push("-e".to_string());
         args.push(format!("{key}={value}"));
     }
-    for (key, value) in secret_env {
-        if key.starts_with("BUNNY_SECRET_") {
+    for (key, value) in session_env {
+        if key.starts_with("BUNNY_SECRET_")
+            || key == "BUNNY_TERMINAL_ID"
+            || key == "PATH"
+        {
             args.push("-e".to_string());
             args.push(format!("{key}={value}"));
         }
     }
 }
 
-fn apply_session_secrets(session: &str, secret_env: &HashMap<String, String>) {
-    for (key, value) in secret_env {
-        if key.starts_with("BUNNY_SECRET_") {
+fn apply_session_secrets(session: &str, session_env: &HashMap<String, String>) {
+    for (key, value) in session_env {
+        if key.starts_with("BUNNY_SECRET_")
+            || key == "BUNNY_TERMINAL_ID"
+            || key == "PATH"
+        {
             let _ = run(&["set-environment", "-t", session, key, value]);
         }
     }
+}
+
+/// Refresh tmux session environment (PATH, BUNNY_TERMINAL_ID, vault secrets).
+pub fn apply_session_env(session: &str, session_env: &HashMap<String, String>) {
+    apply_session_secrets(session, session_env);
 }
 
 fn run_owned(args: &[String]) -> Result<()> {

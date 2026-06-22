@@ -386,6 +386,7 @@ name = "bunny-discord"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bunny-policy",
  "chrono",
  "rand 0.8.6",
  "rusqlite",
@@ -420,6 +421,40 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bunny-integrations"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bunny-core",
+ "bunny-policy",
+ "chrono",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bunny-policy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bunny-core",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]
@@ -492,6 +527,8 @@ dependencies = [
  "bunny-core",
  "bunny-discord",
  "bunny-i18n",
+ "bunny-integrations",
+ "bunny-policy",
  "bunny-pty",
  "bunny-push",
  "bunny-relay",
@@ -525,6 +562,36 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "bunny-slack-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bunny-teams-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

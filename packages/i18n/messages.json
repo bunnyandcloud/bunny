@@ -387,6 +387,18 @@
     "en": "Cancelled — shell closed",
     "fr": "Annulé — shell fermé"
   },
+  "discord.thread.merge_button": {
+    "en": "Merge into {base}",
+    "fr": "Merger dans {base}"
+  },
+  "discord.thread.goal_git_instructions": {
+    "en": "**Git**\n- Branch: `{branch}`\n- Target: `{base}`\n\nUse the **Merge** button below to integrate the branch into `{base}`, or push it and open a PR on your forge.",
+    "fr": "**Git**\n- Branche : `{branch}`\n- Cible : `{base}`\n\nUtilisez le bouton **Merger** ci-dessous pour intégrer la branche dans `{base}`, ou poussez-la et ouvrez une PR sur votre forge."
+  },
+  "discord.thread.merge_success": {
+    "en": "Branch merged into `{base}`.",
+    "fr": "Branche fusionnée dans `{base}`."
+  },
   "discord.link.success": {
     "en": "Linked to Bunny session `{session_id}`",
     "fr": "Lié à la session Bunny `{session_id}`"
@@ -431,6 +443,18 @@
     "en": "Shell **`{name}`** closed.",
     "fr": "Shell **`{name}`** fermé."
   },
+  "shell.close.blocked_active_thread": {
+    "en": "Cannot close this shell: it is used by Discord thread `{thread_id}` (status: active). Mark the thread as **Goal reached** or **Canceled** first.",
+    "fr": "Impossible de fermer ce shell : il est utilisé par le thread Discord `{thread_id}` (statut : actif). Marquez d’abord le thread comme **Goal reached** ou **Canceled**."
+  },
+  "shell.close.blocked_last_channel_shell": {
+    "en": "Cannot close this shell: it is the only channel shell (not tied to a thread) while a Discord channel is linked to this session. Create another shell first (`/bunny shell_new` or Web UI).",
+    "fr": "Impossible de fermer ce shell : c’est le seul shell canal (non lié à un thread) alors qu’un canal Discord est relié à cette session. Créez d’abord un autre shell (`/bunny shell_new` ou Web UI)."
+  },
+  "discord.error.title": {
+    "en": "Error",
+    "fr": "Erreur"
+  },
   "discord.run_stop.body": {
     "en": "**Shell:** `{shell}`\nSignal **Ctrl+C** sent to foreground process.\nIf the server does not stop, run `/bunny run_stop` again or use the Web UI terminal.\n_(`/bunny stop` is for Claude tasks, not `run` commands.)_",
     "fr": "**Shell :** `{shell}`\nSignal **Ctrl+C** envoyé au processus en avant-plan.\nSi le serveur ne s’arrête pas, relancez `/bunny run_stop` ou utilisez le terminal Web UI.\n_(`/bunny stop` concerne les tâches Claude, pas les commandes `run`.)_"
@@ -450,6 +474,10 @@
   "discord.run.persistent_header": {
     "en": "**Shell:** `{shell}`\n**Input command:** `{command}`\n**Long-running / persistent process** — started in the shell.\nOutput continues in the Web UI **Terminal** tab.\nTo stop: `/bunny run_stop` (or `run_stop shell:{shell}`).\n\n**Excerpt:**",
     "fr": "**Shell :** `{shell}`\n**Commande saisie :** `{command}`\n**Processus long / persistant** — lancé dans le shell.\nLa sortie continue dans l’onglet **Terminal** de la Web UI.\nPour arrêter : `/bunny run_stop` (ou `run_stop shell:{shell}`).\n\n**Extrait :**"
+  },
+  "discord.run.shell_auto_created": {
+    "en": "_Shell `{previous}` is busy (foreground process) — created **`{shell}`** and ran the command there._",
+    "fr": "_Le shell `{previous}` est occupé (processus en cours) — création de **`{shell}`** et exécution de la commande dedans._"
   },
   "discord.run.no_output_yet": {
     "en": "_(no output yet)_",

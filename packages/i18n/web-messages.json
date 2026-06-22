@@ -23,6 +23,22 @@
     "en": "← Back",
     "fr": "← Retour"
   },
+  "web.common.refresh": {
+    "en": "Refresh",
+    "fr": "Actualiser"
+  },
+  "web.approvals.pendingTitle": {
+    "en": "Pending approvals",
+    "fr": "Approbations en attente"
+  },
+  "web.approvals.allow": {
+    "en": "Allow",
+    "fr": "Autoriser"
+  },
+  "web.approvals.deny": {
+    "en": "Deny",
+    "fr": "Refuser"
+  },
   "web.common.email": {
     "en": "Email",
     "fr": "E-mail"
@@ -767,6 +783,18 @@
     "en": "Close shell \"{name}\"?",
     "fr": "Fermer le shell « {name} » ?"
   },
+  "web.error.title": {
+    "en": "Something went wrong",
+    "fr": "Une erreur s'est produite"
+  },
+  "web.error.dismiss": {
+    "en": "OK",
+    "fr": "OK"
+  },
+  "web.error.generic": {
+    "en": "The operation failed. Please try again.",
+    "fr": "L'opération a échoué. Veuillez réessayer."
+  },
   "web.claude.setupTitle": {
     "en": "Claude Code setup",
     "fr": "Configuration Claude Code"
@@ -1014,6 +1042,58 @@
   "web.discord.account.unlinkSuccess": {
     "en": "Discord account disconnected.",
     "fr": "Compte Discord déconnecté."
+  },
+  "web.git.account.title": {
+    "en": "Git identity",
+    "fr": "Identité Git"
+  },
+  "web.git.account.description": {
+    "en": "Name and email used for git commits in shared shells and via Discord /bunny run.",
+    "fr": "Nom et e-mail utilisés pour les commits git dans les shells partagés et via Discord /bunny run."
+  },
+  "web.git.account.nameLabel": {
+    "en": "Git name",
+    "fr": "Nom git"
+  },
+  "web.git.account.namePlaceholder": {
+    "en": "Your Name",
+    "fr": "Votre nom"
+  },
+  "web.git.account.emailLabel": {
+    "en": "Git email",
+    "fr": "E-mail git"
+  },
+  "web.git.account.save": {
+    "en": "Save git identity",
+    "fr": "Enregistrer l'identité git"
+  },
+  "web.git.account.saveSuccess": {
+    "en": "Git identity saved.",
+    "fr": "Identité git enregistrée."
+  },
+  "web.git.account.saveFailed": {
+    "en": "Could not save git identity",
+    "fr": "Impossible d'enregistrer l'identité git"
+  },
+  "web.git.account.loadFailed": {
+    "en": "Could not load git identity",
+    "fr": "Impossible de charger l'identité git"
+  },
+  "web.git.account.notConfigured": {
+    "en": "Required before git commit in Bunny terminals.",
+    "fr": "Requis avant un git commit dans les terminaux Bunny."
+  },
+  "web.git.account.configured": {
+    "en": "Your commits will use this identity.",
+    "fr": "Vos commits utiliseront cette identité."
+  },
+  "web.git.account.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
+  "web.home.gitSettings": {
+    "en": "Git",
+    "fr": "Git"
   },
   "web.discord.setup.title": {
     "en": "Discord setup",

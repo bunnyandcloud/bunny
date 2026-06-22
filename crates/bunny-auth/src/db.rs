@@ -41,6 +41,14 @@ pub struct UserProfileRow {
     pub default_session_role: Role,
     /// `en` or `fr`
     pub preferred_locale: String,
+    pub git_name: Option<String>,
+    pub git_email: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitProfileRow {
+    pub git_name: Option<String>,
+    pub git_email: Option<String>,
 }
 
 impl AuthDb {
@@ -216,6 +224,8 @@ impl AuthDb {
             "ALTER TABLE users ADD COLUMN preferred_locale TEXT NOT NULL DEFAULT 'en'",
             [],
         );
+        let _ = self.conn.execute("ALTER TABLE users ADD COLUMN git_name TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE users ADD COLUMN git_email TEXT", []);
         self.conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS mfa_pending_setups (
@@ -388,6 +398,47 @@ impl AuthDb {
         Ok(())
     }
 
+    pub fn get_user_git_profile(&self, user_id: Uuid) -> Result<GitProfileRow> {
+        let mut stmt = self.conn.prepare(
+            "SELECT git_name, git_email FROM users WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![user_id.to_string()])?;
+        if let Some(row) = rows.next()? {
+            Ok(GitProfileRow {
+                git_name: row.get(0)?,
+                git_email: row.get(1)?,
+            })
+        } else {
+            Ok(GitProfileRow {
+                git_name: None,
+                git_email: None,
+            })
+        }
+    }
+
+    pub fn set_user_git_profile(
+        &self,
+        user_id: Uuid,
+        git_name: Option<&str>,
+        git_email: Option<&str>,
+    ) -> Result<()> {
+        if let Some(email) = git_email {
+            if !email.contains('@') || email.trim().is_empty() {
+                anyhow::bail!("invalid git email");
+            }
+        }
+        if let Some(name) = git_name {
+            if name.trim().is_empty() {
+                anyhow::bail!("git name cannot be empty");
+            }
+        }
+        self.conn.execute(
+            "UPDATE users SET git_name = ?1, git_email = ?2 WHERE id = ?3",
+            params![git_name, git_email, user_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn get_user_locale(&self, user_id: Uuid) -> Result<String> {
         let mut stmt = self
             .conn
@@ -437,7 +488,8 @@ impl AuthDb {
     pub fn list_users(&self) -> Result<Vec<UserProfileRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
-                    can_create_sessions, default_session_role, preferred_locale
+                    can_create_sessions, default_session_role, preferred_locale,
+                    git_name, git_email
              FROM users
              ORDER BY created_at ASC",
         )?;
@@ -449,7 +501,8 @@ impl AuthDb {
     pub fn get_user_profile(&self, user_id: Uuid) -> Result<Option<UserProfileRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, email, disabled_at, can_install_claude, can_manage_vault,
-                    can_create_sessions, default_session_role, preferred_locale
+                    can_create_sessions, default_session_role, preferred_locale,
+                    git_name, git_email
              FROM users
              WHERE id = ?1",
         )?;
@@ -1486,6 +1539,8 @@ fn map_user_profile_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserProfile
         can_create_sessions: row.get::<_, i64>(5)? != 0,
         default_session_role,
         preferred_locale: normalize_locale(&preferred_locale),
+        git_name: row.get(8).ok().flatten(),
+        git_email: row.get(9).ok().flatten(),
     })
 }
 

@@ -11,7 +11,11 @@ members = [
     "crates/bunny-secrets",
     "crates/bunny-push",
     "crates/bunny-discord",
+    "crates/bunny-policy",
+    "crates/bunny-integrations",
     "apps/discord-bridge",
+    "apps/slack-bridge",
+    "apps/teams-bridge",
 ]
 
 [workspace.package]

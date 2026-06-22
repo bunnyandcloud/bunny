@@ -5,6 +5,7 @@ use crate::watch_hub::WatchHub;
 use anyhow::Result;
 use bunny_auth::AuthService;
 use bunny_discord::DiscordDb;
+use bunny_integrations::{build_git_manager, build_hub, ChatBridgeHub, GitWorkspaceManager, IntegrationsDb};
 use parking_lot::Mutex as ParkingMutex;
 use bunny_browser::BrowserManager;
 use bunny_core::config::BunnyConfig;
@@ -16,7 +17,16 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
+
+#[derive(Clone)]
+pub(crate) struct TerminalContextCacheEntry {
+    pub cwd: Option<String>,
+    pub git_project: Option<String>,
+    pub git_branch: Option<String>,
+    pub expires_at: Instant,
+}
 
 pub struct AppState {
     pub config: BunnyConfig,
@@ -43,6 +53,11 @@ pub struct AppState {
     pub discord_bridge: tokio::sync::Mutex<Option<crate::discord_bridge::DiscordBridgeSidecar>>,
     /// Active headless Claude subprocess PIDs per Discord thread (for /thread/stop).
     pub thread_claude_pids: Mutex<HashMap<String, u32>>,
+    pub integrations: ParkingMutex<IntegrationsDb>,
+    pub git_workspace: GitWorkspaceManager,
+    pub chat_hub: ChatBridgeHub,
+    pub git_identity: crate::git_identity::GitIdentityService,
+    pub(crate) terminal_context_cache: ParkingMutex<HashMap<Uuid, TerminalContextCacheEntry>>,
 }
 
 pub struct PreviewState {
@@ -58,11 +73,17 @@ impl AppState {
         std::fs::create_dir_all(&data_dir)?;
         let db_path = format!("{data_dir}/bunny.db");
         let discord = DiscordDb::open(&db_path)?;
+        let integrations = IntegrationsDb::open(&db_path)?;
+        let _ = integrations.migrate_from_discord();
+        let chat_hub = build_hub(Arc::new(db_path.clone()));
+        let git_workspace = build_git_manager(&data_dir, db_path.clone());
+        let git_identity = crate::git_identity::GitIdentityService::new(&data_dir)?;
         let auth = AuthService::new(
             &db_path,
             &data_dir,
             config.security.session_ttl_minutes as i64,
         )?;
+        let _ = git_identity.backfill_profile_caches(&auth);
         let secrets_path = std::path::Path::new(&data_dir).join("secrets.enc");
         let secrets = SecretsVault::new(secrets_path);
         let fcm_key = config.push.fcm_server_key.clone().or_else(|| {
@@ -77,10 +98,34 @@ impl AppState {
                     stored_pass = Some(pass);
                 }
             }
-            return Self::from_parts(config, data_dir, auth, discord, vault, fcm, stored_pass);
+            return Self::from_parts(
+                config,
+                data_dir,
+                auth,
+                discord,
+                integrations,
+                chat_hub,
+                git_workspace,
+                git_identity,
+                vault,
+                fcm,
+                stored_pass,
+            );
         }
 
-        Self::from_parts(config, data_dir, auth, discord, secrets, fcm, None)
+        Self::from_parts(
+            config,
+            data_dir,
+            auth,
+            discord,
+            integrations,
+            chat_hub,
+            git_workspace,
+            git_identity,
+            secrets,
+            fcm,
+            None,
+        )
     }
 
     fn from_parts(
@@ -88,6 +133,10 @@ impl AppState {
         data_dir: String,
         auth: AuthService,
         discord: DiscordDb,
+        integrations: IntegrationsDb,
+        chat_hub: ChatBridgeHub,
+        git_workspace: GitWorkspaceManager,
+        git_identity: crate::git_identity::GitIdentityService,
         secrets: SecretsVault,
         fcm: FcmClient,
         secrets_passphrase: Option<String>,
@@ -106,6 +155,7 @@ impl AppState {
                 config.terminal.output_buffer_lines,
                 config.terminal.use_tmux(),
                 Some(std::path::PathBuf::from(&data_dir).join("terminal-scrollback")),
+                std::path::PathBuf::from(&data_dir),
             ),
             browsers: BrowserManager::new(config.browser.width, config.browser.height),
             redactor: RwLock::new(redactor),
@@ -124,6 +174,11 @@ impl AppState {
             cdp_collectors: RwLock::new(HashMap::new()),
             realtime: Arc::new(RealtimeHub::new()),
             watch_hub: Arc::new(WatchHub::new()),
+            integrations: ParkingMutex::new(integrations),
+            git_workspace,
+            chat_hub,
+            git_identity,
+            terminal_context_cache: ParkingMutex::new(HashMap::new()),
             data_dir: data_dir.clone(),
             config,
         })
