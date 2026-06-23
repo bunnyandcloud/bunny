@@ -13,6 +13,7 @@ axum.workspace = true
 axum-extra.workspace = true
 base64.workspace = true
 bunny-auth = { path = "../../crates/bunny-auth" }
+bunny-blocks = { path = "../../crates/bunny-blocks" }
 bunny-i18n = { workspace = true }
 bunny-browser = { path = "../../crates/bunny-browser" }
 bunny-core = { path = "../../crates/bunny-core" }

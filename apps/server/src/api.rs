@@ -78,6 +78,9 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/terminals/:id/resize", post(terminal_resize))
         .route("/terminals/:id/restart", post(terminal_restart))
         .route("/terminals/:id/ws", get(terminal_ws))
+        .route("/terminals/:id/blocks", get(list_terminal_blocks))
+        .route("/terminals/:id/command", post(terminal_command))
+        .route("/terminals/:id/run/stop", post(terminal_run_stop))
         .route("/previews", post(create_preview).get(list_previews))
         .route("/previews/:id", delete(delete_preview))
         .route("/browser-sessions", post(create_browser))
@@ -1159,6 +1162,104 @@ async fn terminal_restart(
     Ok(Json(serde_json::json!({ "restarting": true, "id": id })))
 }
 
+#[derive(Deserialize)]
+struct TerminalCommandRequest {
+    command: String,
+}
+
+async fn terminal_command(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<TerminalCommandRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session_id = terminal_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::TerminalWrite)?;
+    crate::terminals::prepare_terminal_connection(&state, id)
+        .map_err(|_| ApiError::not_found("terminal"))?;
+    if crate::blocks::terminal_input_locked(&state, id) {
+        return Err(ApiError::validation(
+            "A process is running in this shell. Stop it before typing.",
+        ));
+    }
+    let command = body.command.trim();
+    if command.is_empty() {
+        return Err(ApiError::validation("empty command"));
+    }
+    if command == "bunny git use-me" || command == "bunny git whoami" {
+        return Ok(Json(serde_json::json!({ "ok": true })));
+    }
+    let baseline = crate::terminals::capture_pane_for_terminal(&state, id).unwrap_or_default();
+    let interactive = crate::terminals::user_command_expects_interactive(command);
+    crate::blocks::submit_user_command(
+        Arc::clone(&state),
+        id,
+        user,
+        command,
+        baseline,
+    );
+    if interactive {
+        let state_bg = Arc::clone(&state);
+        let cmd = command.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            if state_bg.terminals.write(id, &format!("{cmd}\r")).is_ok() {
+                state_bg.terminals.refresh_display(id);
+                crate::terminal_context_watch::schedule_context_refresh_after_input(
+                    state_bg,
+                    id,
+                );
+            }
+        });
+    } else {
+        let _ = state.terminals.resize(id, 120, 24);
+        state
+            .terminals
+            .write(id, &format!("{command}\r"))
+            .map_err(|_| ApiError::not_found("terminal"))?;
+        crate::terminal_context_watch::schedule_context_refresh_after_input(state.clone(), id);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn terminal_run_stop(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session_id = terminal_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::TerminalWrite)?;
+    crate::terminals::interrupt_terminal_foreground(&state, id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    crate::blocks::stop_running_processes(&state, id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct BlocksQuery {
+    from_seq: Option<i64>,
+    limit: Option<usize>,
+}
+
+async fn list_terminal_blocks(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<BlocksQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session_id = terminal_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::TerminalRead)?;
+    let from_seq = q.from_seq.unwrap_or(0);
+    let limit = q.limit.unwrap_or(500).min(2000);
+    let (blocks, latest_seq) = crate::blocks::list_blocks(&state, id, from_seq, limit)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "blocks": blocks,
+        "latest_seq": latest_seq,
+    })))
+}
+
 async fn terminal_ws(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
@@ -1193,7 +1294,8 @@ async fn terminal_ws(
         return Err(ApiError::forbidden("terminal read denied"));
     }
     Ok(ws.on_upgrade(move |socket| {
-        ws::handle_terminal_ws(socket, state, id, can_write, user, q.from_offset)
+        let notebook = q.notebook.unwrap_or(false);
+        ws::handle_terminal_ws(socket, state, id, can_write, user, q.from_offset, notebook)
     }))
 }
 
@@ -2069,7 +2171,11 @@ pub struct TerminalInputRequest { pub data: String }
 #[derive(Deserialize)]
 pub struct ResizeRequest { pub cols: u16, pub rows: u16 }
 #[derive(Deserialize)]
-pub struct WsQuery { pub from_offset: Option<u64> }
+pub struct WsQuery {
+    pub from_offset: Option<u64>,
+    /// When true, suppress PTY replay/output (notebook UI uses blocks only).
+    pub notebook: Option<bool>,
+}
 #[derive(Deserialize)]
 pub struct CreatePreviewRequest { pub session_id: String, pub local_port: u16 }
 #[derive(Serialize)]

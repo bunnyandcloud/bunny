@@ -438,6 +438,62 @@ export function renameTerminal(terminalId: string, name: string) {
   });
 }
 
+export type AuthorSource = 'web' | 'discord' | 'system';
+
+export type BlockKind =
+  | 'user_command'
+  | 'discord_command'
+  | 'output'
+  | 'process_run'
+  | 'system_event';
+
+export type BlockStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type TerminalBlock = {
+  id: string;
+  terminal_id: string;
+  seq: number;
+  kind: BlockKind;
+  author_user_id: string | null;
+  author_display: string;
+  author_git_name?: string | null;
+  author_git_email?: string | null;
+  author_source: AuthorSource;
+  created_at: string;
+  finished_at: string | null;
+  command: string | null;
+  content: string;
+  exit_code: number | null;
+  status: BlockStatus;
+  parent_block_id: string | null;
+  meta: unknown;
+};
+
+export function listTerminalBlocks(terminalId: string, fromSeq = 0, limit = 500) {
+  return api<{ blocks: TerminalBlock[]; latest_seq: number }>(
+    `/terminals/${terminalId}/blocks?from_seq=${fromSeq}&limit=${limit}`,
+  );
+}
+
+export function stopTerminalRun(terminalId: string) {
+  return api<{ ok: boolean; output: string }>(`/terminals/${terminalId}/run/stop`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function submitTerminalCommand(terminalId: string, command: string) {
+  return api<{ ok: boolean }>(`/terminals/${terminalId}/command`, {
+    method: 'POST',
+    body: JSON.stringify({ command }),
+  });
+}
+
 export function getTimeline(sessionId: string, since = 0) {
   return api<
     Array<{
@@ -451,10 +507,17 @@ export function getTimeline(sessionId: string, since = 0) {
   >(`/timeline?session_id=${sessionId}&since=${since}&limit=200`);
 }
 
-export function terminalWsUrl(terminalId: string, fromOffset?: number) {
+export function terminalWsUrl(terminalId: string, opts?: { fromOffset?: number; notebook?: boolean }) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const q = fromOffset ? `?from_offset=${fromOffset}` : '';
-  return `${proto}://${location.host}/api/v1/terminals/${terminalId}/ws${q}`;
+  const params = new URLSearchParams();
+  if (opts?.fromOffset) {
+    params.set('from_offset', String(opts.fromOffset));
+  }
+  if (opts?.notebook) {
+    params.set('notebook', 'true');
+  }
+  const q = params.toString();
+  return `${proto}://${location.host}/api/v1/terminals/${terminalId}/ws${q ? `?${q}` : ''}`;
 }
 
 export interface VaultStatus {

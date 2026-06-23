@@ -6,6 +6,7 @@ members = [
     "crates/bunny-core",
     "crates/bunny-auth",
     "crates/bunny-pty",
+    "crates/bunny-blocks",
     "crates/bunny-browser",
     "crates/bunny-relay",
     "crates/bunny-secrets",

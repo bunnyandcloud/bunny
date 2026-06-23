@@ -116,6 +116,21 @@ pub fn configure_pane_for_web(target: &str) {
     ]);
 }
 
+/// Per-pane: allow alternate-screen for full-screen TUIs (nvim, htop, installers).
+pub fn configure_pane_for_interactive(target: &str) {
+    if !target_alive(target) {
+        return;
+    }
+    let _ = run(&[
+        "set-option",
+        "-p",
+        "-t",
+        target,
+        "alternate-screen",
+        "on",
+    ]);
+}
+
 pub fn apply_utf8_locale_global() {
     for (key, value) in crate::locale::utf8_locale_vars() {
         let _ = run(&["set-environment", "-g", key, value]);
@@ -397,8 +412,12 @@ pub fn reload_shell_env(
     let session = session_name_from_target(target);
     configure_session_for_web(session);
     apply_session_env(session, session_env);
-    let cwd = cwd.to_str().context("invalid cwd")?;
-    tracing::info!(%target, "reloading shell with Bunny session env");
+    // Keep the pane's live cwd (`cd` in notebook blocks) — do not reset to the DB snapshot.
+    let effective_cwd = pane_cwd(target)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| cwd.to_path_buf());
+    let cwd = effective_cwd.to_str().context("invalid cwd")?;
+    tracing::info!(%target, %cwd, "reloading shell with Bunny session env");
     let mut args = vec![
         "respawn-pane".to_string(),
         "-k".to_string(),
@@ -503,6 +522,46 @@ fn pane_pid(target: &str) -> Option<u32> {
         .trim()
         .parse()
         .ok()
+}
+
+/// True when the shell in this pane has a foreground child (e.g. bash running `htop` or `sleep`).
+pub fn pane_has_non_shell_child(target: &str) -> bool {
+    let Some(pid) = pane_pid(target) else {
+        return false;
+    };
+    let Some(out) = Command::new("ps")
+        .args([
+            "--ppid",
+            &pid.to_string(),
+            "-o",
+            "comm=",
+            "--no-headers",
+        ])
+        .output()
+        .ok()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let comm = line.trim();
+        if comm.is_empty() {
+            continue;
+        }
+        let base = comm
+            .rsplit('/')
+            .next()
+            .unwrap_or(comm)
+            .trim()
+            .to_lowercase();
+        const SHELL: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "nu", "ksh", "tcsh"];
+        if !SHELL.iter().any(|shell| base == *shell || base.ends_with(shell)) {
+            return true;
+        }
+    }
+    false
 }
 
 fn process_env_value(pid: u32, key: &str) -> Option<String> {

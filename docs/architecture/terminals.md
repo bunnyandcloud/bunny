@@ -400,6 +400,27 @@ If `last_client_offset` points outside the ring, old lines are lost on catch-up 
 
 ---
 
+## Notebook shell (structured blocks)
+
+When `terminal.notebook_shells: true` (default), the Web UI shows a **notebook** per shell instead of scrollback-only xterm:
+
+| Layer | Role |
+|-------|------|
+| SQLite `terminal_blocks` | Authoritative ordered history (`seq` per terminal) |
+| `BlockManager` (`apps/server/src/blocks.rs`) | Append/patch blocks, Discord + Web UI instrumentation |
+| WebSocket | `blocks_subscribe`, `block_append`, `block_patch` (+ live PTY for input) |
+| `NotebookPanel` | Timeline rail, author badge, block stack, mini xterm input |
+
+**Block kinds:** `user_command`, `discord_command`, `output`, `process_run`, `system_event`.
+
+Discord commands create blocks via subprocess (no `inject_transcript` into xterm when notebook mode is on). Long-running processes set `process_run` + `running` and lock input until stopped.
+
+**Migration:** on agent boot, `migrate_scrollback_to_blocks` parses legacy `.scrollback` / `[discord] $` lines into blocks once.
+
+**Attach TTY:** optional full-screen `TerminalPanel` drawer for vim/htop.
+
+---
+
 ## See also
 
 - [Architecture overview](./overview.md)

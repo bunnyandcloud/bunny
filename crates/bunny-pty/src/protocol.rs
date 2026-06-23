@@ -8,6 +8,8 @@ pub enum TerminalClientMsg {
     Ping { id: u64 },
     Subscribe { from_offset: Option<u64> },
     Refresh,
+    BlocksSubscribe { from_seq: Option<i64> },
+    CommandSubmit { text: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

@@ -15,6 +15,14 @@ struct ReplayResponse {
     chunks: Vec<ReplayChunk>,
 }
 
+fn configure_pane_for_ws_client(state: &AppState, terminal_id: Uuid, target: &str) {
+    if crate::blocks::terminal_has_interactive_session(state, terminal_id) {
+        tmux::configure_pane_for_interactive(target);
+    } else {
+        tmux::configure_pane_for_web(target);
+    }
+}
+
 pub async fn handle_terminal_ws(
     socket: WebSocket,
     state: Arc<AppState>,
@@ -22,6 +30,7 @@ pub async fn handle_terminal_ws(
     can_write: bool,
     user_id: Uuid,
     _from_offset: Option<u64>,
+    mut notebook_mode: bool,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
@@ -46,15 +55,29 @@ pub async fn handle_terminal_ws(
         let session_env = tmux_env_for_terminal(&state, terminal_id);
         let shell_cmd = interactive_shell_cmd(&state, terminal_id, &session_env);
         let _ = tmux::ensure_shell_running(&target, &cwd, &shell_cmd, &session_env);
-        tmux::configure_pane_for_web(&target);
+        configure_pane_for_ws_client(&state, terminal_id, &target);
     }
 
     let mut live_fence: u64 = 0;
     let mut pending_refresh_after_resize = false;
     let mut line_buf = String::new();
+    let mut block_rx = state.block_hub.subscribe(terminal_id);
 
     loop {
         tokio::select! {
+            block_msg = block_rx.recv() => {
+                match block_msg {
+                    Ok(msg) => {
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if sender.send(Message::Text(json)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(_) => break,
+                }
+            }
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -62,7 +85,7 @@ pub async fn handle_terminal_ws(
                             match client_msg {
                                 TerminalClientMsg::Input { data } if can_write => {
                                     let refresh = handle_terminal_input(
-                                        &state,
+                                        Arc::clone(&state),
                                         terminal_id,
                                         user_id,
                                         &data,
@@ -89,6 +112,15 @@ pub async fn handle_terminal_ws(
                                     }
                                 }
                                 TerminalClientMsg::Subscribe { from_offset } => {
+                                    if notebook_mode {
+                                        // Notebook UI: attach only, no scrollback replay.
+                                        live_fence = state
+                                            .terminals
+                                            .buffer_offset(terminal_id)
+                                            .unwrap_or(0);
+                                        pending_refresh_after_resize = false;
+                                        continue;
+                                    }
                                     if let Some(target) = state.terminals.tmux_target(terminal_id) {
                                         let cwd = terminal_cwd(&state, terminal_id)
                                             .unwrap_or_else(default_shell_cwd);
@@ -101,7 +133,7 @@ pub async fn handle_terminal_ws(
                                             &shell_cmd,
                                             &session_env,
                                         );
-                                        tmux::configure_pane_for_web(&target);
+                                        configure_pane_for_ws_client(&state, terminal_id, &target);
                                     }
                                     let from = from_offset.unwrap_or(0);
                                     let replay = build_replay(&state, terminal_id, from);
@@ -109,6 +141,47 @@ pub async fn handle_terminal_ws(
                                     pending_refresh_after_resize =
                                         replay.replay_mode == ReplayMode::None;
                                     send_replay(&mut sender, replay).await;
+                                }
+                                TerminalClientMsg::BlocksSubscribe { from_seq } => {
+                                    notebook_mode = true;
+                                    let from = from_seq.unwrap_or(0);
+                                    let snapshot = crate::blocks::blocks_snapshot(&state, terminal_id, from);
+                                    if let Ok(json) = serde_json::to_string(&snapshot) {
+                                        let _ = sender.send(Message::Text(json)).await;
+                                    }
+                                    live_fence = state
+                                        .terminals
+                                        .buffer_offset(terminal_id)
+                                        .unwrap_or(0);
+                                }
+                                TerminalClientMsg::CommandSubmit { text } if can_write => {
+                                    if crate::blocks::terminal_input_locked(&state, terminal_id) {
+                                        continue;
+                                    }
+                                    let text = text.trim();
+                                    if text.is_empty() {
+                                        continue;
+                                    }
+                                    if text == "bunny git use-me" || text == "bunny git whoami" {
+                                        continue;
+                                    }
+                                    let baseline = crate::terminals::capture_pane_for_terminal(
+                                        &state,
+                                        terminal_id,
+                                    )
+                                    .unwrap_or_default();
+                                    crate::blocks::submit_user_command(
+                                        Arc::clone(&state),
+                                        terminal_id,
+                                        user_id,
+                                        text,
+                                        baseline,
+                                    );
+                                    let _ = state.terminals.write(terminal_id, &(format!("{text}\r")));
+                                    crate::terminal_context_watch::schedule_context_refresh_after_input(
+                                        state.clone(),
+                                        terminal_id,
+                                    );
                                 }
                                 TerminalClientMsg::Refresh => {
                                     state.terminals.refresh_display(terminal_id);
@@ -124,7 +197,7 @@ pub async fn handle_terminal_ws(
             out = out_rx.recv() => {
                 match out {
                     Ok(chunk) => {
-                        if chunk.offset <= live_fence {
+                        if notebook_mode || chunk.offset <= live_fence {
                             continue;
                         }
                         let msg = TerminalServerMsg::Output {
@@ -286,14 +359,7 @@ fn default_shell_cwd() -> PathBuf {
 }
 
 fn terminal_cwd(state: &AppState, terminal_id: Uuid) -> Option<PathBuf> {
-    state
-        .auth
-        .db()
-        .lock()
-        .get_terminal(terminal_id)
-        .ok()
-        .flatten()
-        .map(|row| PathBuf::from(row.5))
+    crate::terminals::terminal_live_cwd(state, terminal_id)
 }
 
 fn secret_env_for_terminal(state: &AppState, terminal_id: Uuid) -> std::collections::HashMap<String, String> {
@@ -332,7 +398,7 @@ fn interactive_shell_cmd(
 }
 
 fn handle_terminal_input(
-    state: &AppState,
+    state: Arc<AppState>,
     terminal_id: Uuid,
     user_id: Uuid,
     data: &str,
@@ -345,7 +411,7 @@ fn handle_terminal_input(
     for ch in data.chars() {
         if ch == '\x03' {
             line_buf.clear();
-            if crate::terminals::send_terminal_interrupt(state, terminal_id).is_ok() {
+            if crate::terminals::send_terminal_interrupt(&state, terminal_id).is_ok() {
                 continue;
             }
             forward.push(ch);
@@ -363,7 +429,7 @@ fn handle_terminal_input(
                 "bunny git whoami" => {
                     let msg = state
                         .git_identity
-                        .whoami_message(state, terminal_id, user_id);
+                        .whoami_message(&state, terminal_id, user_id);
                     let _ = state.terminals.write(terminal_id, &msg);
                 }
                 _ => forward.push(ch),

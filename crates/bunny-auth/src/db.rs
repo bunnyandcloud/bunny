@@ -272,6 +272,28 @@ impl AuthDb {
                 invited_by TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_team_invitations_hash ON team_invitations(token_hash);
+            CREATE TABLE IF NOT EXISTS terminal_blocks (
+                id TEXT PRIMARY KEY,
+                terminal_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                author_user_id TEXT,
+                author_display TEXT NOT NULL,
+                author_source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                finished_at TEXT,
+                command TEXT,
+                content TEXT NOT NULL DEFAULT '',
+                exit_code INTEGER,
+                status TEXT NOT NULL,
+                parent_block_id TEXT,
+                meta_json TEXT NOT NULL DEFAULT '{}',
+                UNIQUE(terminal_id, seq)
+            );
+            CREATE INDEX IF NOT EXISTS idx_terminal_blocks_term_seq
+                ON terminal_blocks(terminal_id, seq);
+            CREATE INDEX IF NOT EXISTS idx_terminal_blocks_term_created
+                ON terminal_blocks(terminal_id, created_at);
             "#,
         )?;
         self.ensure_system_owner_id()?;
@@ -299,6 +321,14 @@ impl AuthDb {
             }
         }
         Ok(())
+    }
+
+    pub fn app_meta_get(&self, key: &str) -> Result<Option<String>> {
+        self.get_meta(key)
+    }
+
+    pub fn app_meta_set(&self, key: &str, value: &str) -> Result<()> {
+        self.set_meta(key, value)
     }
 
     fn get_meta(&self, key: &str) -> Result<Option<String>> {
@@ -1487,6 +1517,164 @@ impl AuthDb {
         let rows = stmt.query_map(params![status], map_terminal_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    pub fn next_terminal_block_seq(&self, terminal_id: Uuid) -> Result<i64> {
+        let max: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT MAX(seq) FROM terminal_blocks WHERE terminal_id = ?1",
+                params![terminal_id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(max.unwrap_or(0) + 1)
+    }
+
+    pub fn insert_terminal_block(
+        &self,
+        id: Uuid,
+        terminal_id: Uuid,
+        seq: i64,
+        kind: &str,
+        author_user_id: Option<Uuid>,
+        author_display: &str,
+        author_source: &str,
+        created_at: &str,
+        finished_at: Option<&str>,
+        command: Option<&str>,
+        content: &str,
+        exit_code: Option<i32>,
+        status: &str,
+        parent_block_id: Option<Uuid>,
+        meta_json: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO terminal_blocks (
+                id, terminal_id, seq, kind, author_user_id, author_display, author_source,
+                created_at, finished_at, command, content, exit_code, status, parent_block_id, meta_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                id.to_string(),
+                terminal_id.to_string(),
+                seq,
+                kind,
+                author_user_id.map(|u| u.to_string()),
+                author_display,
+                author_source,
+                created_at,
+                finished_at,
+                command,
+                content,
+                exit_code,
+                status,
+                parent_block_id.map(|u| u.to_string()),
+                meta_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_terminal_blocks(
+        &self,
+        terminal_id: Uuid,
+        from_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<TerminalBlockRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, terminal_id, seq, kind, author_user_id, author_display, author_source,
+                    created_at, finished_at, command, content, exit_code, status, parent_block_id, meta_json
+             FROM terminal_blocks
+             WHERE terminal_id = ?1 AND seq >= ?2
+             ORDER BY seq ASC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![terminal_id.to_string(), from_seq, limit as i64],
+            map_terminal_block_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_terminal_block(&self, id: Uuid) -> Result<Option<TerminalBlockRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, terminal_id, seq, kind, author_user_id, author_display, author_source,
+                    created_at, finished_at, command, content, exit_code, status, parent_block_id, meta_json
+             FROM terminal_blocks WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id.to_string()])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(map_terminal_block_row(&row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn append_terminal_block_content(&self, id: Uuid, delta: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE terminal_blocks SET content = content || ?1 WHERE id = ?2",
+            params![delta, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_terminal_block_status(
+        &self,
+        id: Uuid,
+        status: &str,
+        exit_code: Option<i32>,
+        finished_at: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE terminal_blocks SET status = ?1, exit_code = ?2, finished_at = ?3 WHERE id = ?4",
+            params![status, exit_code, finished_at, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn terminal_has_running_process(&self, terminal_id: Uuid) -> Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM terminal_blocks
+             WHERE terminal_id = ?1 AND kind = 'process_run' AND status = 'running'",
+            params![terminal_id.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn update_terminal_block_kind(&self, id: Uuid, kind: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE terminal_blocks SET kind = ?1 WHERE id = ?2",
+            params![kind, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_terminal_block_content(&self, id: Uuid, content: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE terminal_blocks SET content = ?1 WHERE id = ?2",
+            params![content, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_terminal_block_meta(&self, id: Uuid, meta_json: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE terminal_blocks SET meta_json = ?1 WHERE id = ?2",
+            params![meta_json, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_all_terminal_ids(&self) -> Result<Vec<Uuid>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM terminals ORDER BY created_at ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Uuid::parse_str(&row.get::<_, String>(0)?).unwrap())
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 pub struct MfaChallengeRow {
@@ -1509,6 +1697,47 @@ pub type TerminalRow = (
     u16,
     Option<String>,
 );
+
+#[derive(Debug, Clone)]
+pub struct TerminalBlockRow {
+    pub id: Uuid,
+    pub terminal_id: Uuid,
+    pub seq: i64,
+    pub kind: String,
+    pub author_user_id: Option<Uuid>,
+    pub author_display: String,
+    pub author_source: String,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+    pub command: Option<String>,
+    pub content: String,
+    pub exit_code: Option<i32>,
+    pub status: String,
+    pub parent_block_id: Option<Uuid>,
+    pub meta_json: String,
+}
+
+fn map_terminal_block_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TerminalBlockRow> {
+    let author_user_id: Option<String> = row.get(4)?;
+    let parent_block_id: Option<String> = row.get(13)?;
+    Ok(TerminalBlockRow {
+        id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+        terminal_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
+        seq: row.get(2)?,
+        kind: row.get(3)?,
+        author_user_id: author_user_id.map(|s| Uuid::parse_str(&s).unwrap()),
+        author_display: row.get(5)?,
+        author_source: row.get(6)?,
+        created_at: row.get(7)?,
+        finished_at: row.get(8)?,
+        command: row.get(9)?,
+        content: row.get(10)?,
+        exit_code: row.get(11)?,
+        status: row.get(12)?,
+        parent_block_id: parent_block_id.map(|s| Uuid::parse_str(&s).unwrap()),
+        meta_json: row.get(14)?,
+    })
+}
 
 fn map_terminal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TerminalRow> {
     Ok((

@@ -8,10 +8,16 @@ const ALT_SCREEN_CSI =
   /\x1b\[\?(?:1049|1047|47|1004)[hl]/g;
 
 /** Remove device-attribute and window-report CSI from server output. */
-export function filterServerOutput(data: string): string {
+export function filterServerOutput(
+  data: string,
+  opts?: { preserveAltScreen?: boolean },
+): string {
+  let out = data;
+  if (!opts?.preserveAltScreen) {
+    out = out.replace(ALT_SCREEN_CSI, '');
+  }
   return (
-    data
-      .replace(ALT_SCREEN_CSI, '')
+    out
       // Device attributes (primary / secondary)
       .replace(/\x1b\[[\x3f>?]?[0-9;]*c/g, '')
       .replace(/\x1b\][^\x07]*\x07/g, '')

@@ -1,5 +1,6 @@
 mod approval_service;
 mod api;
+mod blocks;
 mod browser_ops;
 mod cdp_collector;
 mod claude;

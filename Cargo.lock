@@ -353,6 +353,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bunny-blocks"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "bunny-browser"
 version = "0.1.0"
 dependencies = [
@@ -523,6 +533,7 @@ dependencies = [
  "axum-extra",
  "base64",
  "bunny-auth",
+ "bunny-blocks",
  "bunny-browser",
  "bunny-core",
  "bunny-discord",

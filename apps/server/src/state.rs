@@ -57,6 +57,8 @@ pub struct AppState {
     pub git_workspace: GitWorkspaceManager,
     pub chat_hub: ChatBridgeHub,
     pub git_identity: crate::git_identity::GitIdentityService,
+    pub block_hub: Arc<crate::blocks::BlockHub>,
+    pub output_collectors: crate::blocks::OutputCollectors,
     pub(crate) terminal_context_cache: ParkingMutex<HashMap<Uuid, TerminalContextCacheEntry>>,
 }
 
@@ -178,6 +180,8 @@ impl AppState {
             git_workspace,
             chat_hub,
             git_identity,
+            block_hub: Arc::new(crate::blocks::BlockHub::new()),
+            output_collectors: crate::blocks::OutputCollectors::new(),
             terminal_context_cache: ParkingMutex::new(HashMap::new()),
             data_dir: data_dir.clone(),
             config,

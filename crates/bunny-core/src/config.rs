@@ -128,6 +128,9 @@ pub struct TerminalConfig {
     /// `tmux` keeps shells alive across agent restarts (recommended on Linux).
     #[serde(default = "default_terminal_backend")]
     pub backend: String,
+    /// Structured notebook shell UI (blocks + timeline) instead of scrollback-only xterm.
+    #[serde(default = "default_true")]
+    pub notebook_shells: bool,
 }
 
 impl TerminalConfig {
@@ -306,6 +309,7 @@ impl Default for BunnyConfig {
                 env_mode: default_env_mode(),
                 output_buffer_lines: default_buffer_lines(),
                 backend: default_terminal_backend(),
+                notebook_shells: true,
             },
             network: NetworkConfig {
                 collect_metadata: true,

@@ -319,6 +319,18 @@ async fn internal_shell_run(
             .map_err(|e| ApiError::validation(&e.to_string()))?;
         term_id = create_discord_shell_at_cwd(&state, link.session_id, &cwd)?;
         shell_auto_created = true;
+        let _ = crate::blocks::append_system_event(
+            &state,
+            resolved_term_id,
+            &format!(
+                "Discord created a new shell at {} because the previous shell was busy.",
+                cwd.display()
+            ),
+            serde_json::json!({
+                "new_terminal_id": term_id.to_string(),
+                "cwd": cwd,
+            }),
+        );
     }
     if bunny_discord::risk::is_interactive_discord_command(&body.command) {
         return Err(ApiError::validation(

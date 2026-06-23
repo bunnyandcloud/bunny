@@ -17,7 +17,7 @@ import {
 import { useAuth } from '../store/auth';
 import InlineRename from './InlineRename';
 import SecretsVaultBanner from './SecretsVaultBanner';
-import TerminalPanel, { type TerminalPanelHandle } from './TerminalPanel';
+import NotebookPanel from './NotebookPanel';
 import TerminalShellBar, { type ShellTab } from './TerminalShellBar';
 import TerminalThemeSelect from './TerminalThemeSelect';
 import VaultInjectPanel from './VaultInjectPanel';
@@ -89,15 +89,15 @@ export default function SessionWorkspace({ sessionId }: Props) {
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [vaultCollapsed, setVaultCollapsed] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('terminal');
-  const [suppressTerminalFocus, setSuppressTerminalFocus] = useState(false);
   const [claudeBrowserId, setClaudeBrowserId] = useState<string | null>(() =>
     sessionStorage.getItem(browserStorageKey(sessionId)),
   );
   const [membersOpen, setMembersOpen] = useState(false);
   const [discordOpen, setDiscordOpen] = useState(false);
   const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [claudeAuthTerminalId, setClaudeAuthTerminalId] = useState<string | null>(null);
   const claudeSetup = isClaudeSetupMode();
-  const terminalRefs = useRef(new Map<string, TerminalPanelHandle>());
+  const terminalRefs = useRef(new Map<string, { inject?: (t: string) => boolean; focus?: () => void }>());
 
   const showError = useCallback(
     (err: unknown, fallback?: string) => {
@@ -339,11 +339,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
     const text = `$${envVar}`;
     const panel = terminalRefs.current.get(activeId);
     try {
-      const sentViaWs = panel?.inject(text) ?? false;
+      const sentViaWs = panel?.inject?.(text) ?? false;
       if (!sentViaWs) {
         await sendTerminalInput(activeId, text);
       }
-      panel?.focus();
+      panel?.focus?.();
     } catch (e) {
       showError(e);
     }
@@ -472,13 +472,16 @@ export default function SessionWorkspace({ sessionId }: Props) {
                   onOpenBrowserTab={() => setWorkspaceTab('browser')}
                   onOpenTerminalTab={(terminalId) => {
                     setWorkspaceTab('terminal');
-                    setSuppressTerminalFocus(true);
                     void refreshShells().then((list) => {
                       if (terminalId && list.some((s) => s.id === terminalId)) {
                         setActiveId(terminalId);
                       }
                     });
-                    window.setTimeout(() => setSuppressTerminalFocus(false), 2500);
+                  }}
+                  onAuthTerminalReady={(terminalId) => {
+                    setClaudeAuthTerminalId(terminalId);
+                    setWorkspaceTab('terminal');
+                    setActiveId(terminalId);
                   }}
                 />
               </div>
@@ -540,17 +543,14 @@ export default function SessionWorkspace({ sessionId }: Props) {
                       }
                       aria-hidden={!visible}
                     >
-                      <TerminalPanel
-                        ref={(handle) => {
-                          if (handle) {
-                            terminalRefs.current.set(shell.id, handle);
-                          } else {
-                            terminalRefs.current.delete(shell.id);
-                          }
-                        }}
+                      <NotebookPanel
                         terminalId={shell.id}
                         active={visible}
-                        autoFocus={!suppressTerminalFocus}
+                        defaultAttachOpen={
+                          claudeSetup &&
+                          claudeAuthTerminalId !== null &&
+                          shell.id === claudeAuthTerminalId
+                        }
                       />
                     </div>
                   );

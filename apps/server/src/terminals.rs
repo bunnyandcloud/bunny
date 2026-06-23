@@ -719,6 +719,7 @@ pub fn exec_discord_shell_command(
         term_id,
         command,
         DiscordTranscriptBody::Output(&text),
+        acting_user_id,
     );
     Ok((text, out.status.code().unwrap_or(1)))
 }
@@ -740,8 +741,8 @@ pub struct DiscordShellRunResult {
     pub persistent: bool,
 }
 
-/// Send Ctrl+C to the shell tmux pane (stops foreground process started via `/bunny run`).
-pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<String> {
+/// Send Ctrl+C to the foreground process in the tmux pane.
+pub fn interrupt_terminal_foreground(state: &AppState, term_id: Uuid) -> Result<()> {
     ensure_terminal_attached(state, term_id)?;
     let auth_db = state.auth.db();
     let row = auth_db
@@ -759,6 +760,12 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
     std::thread::sleep(std::time::Duration::from_millis(400));
+    Ok(())
+}
+
+/// Send Ctrl+C to the shell tmux pane (stops foreground process started via `/bunny run`).
+pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<String> {
+    interrupt_terminal_foreground(state, term_id)?;
 
     let note = "Interruption (Ctrl+C) sent from Discord.";
     append_discord_transcript(
@@ -766,22 +773,95 @@ pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<S
         term_id,
         "run_stop",
         DiscordTranscriptBody::Output(note),
+        None,
     );
     Ok(note.to_string())
 }
 
 fn discord_shell_idle_command_name(command: &str) -> bool {
-    let base = command
-        .rsplit('/')
-        .next()
-        .unwrap_or(command)
-        .trim()
-        .to_lowercase();
+    let base = command_base_name(command);
     if base.is_empty() {
         return true;
     }
     const IDLE: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "nu", "ksh", "tcsh"];
     IDLE.iter().any(|shell| base == *shell || base.ends_with(shell))
+}
+
+fn command_base_name(command: &str) -> String {
+    command
+        .rsplit('/')
+        .next()
+        .unwrap_or(command)
+        .trim()
+        .to_lowercase()
+}
+
+/// Full-screen or alternate-screen programs that need a real TTY (not capture-pane text).
+pub fn is_interactive_tui_command(command: &str) -> bool {
+    let base = command_base_name(command);
+    if base.is_empty() {
+        return false;
+    }
+    const TUI: &[&str] = &[
+        "nvim", "vim", "vi", "view", "nano", "micro", "emacs", "emacsclient",
+        "htop", "top", "btop", "bashtop", "glances",
+        "less", "more", "most", "man",
+        "apt", "apt-get", "dpkg", "dpkg-reconfigure",
+        "dialog", "whiptail", "nmtui", "alsamixer",
+        "mysql", "mariadb", "psql", "sqlite3",
+        "mc", "ranger", "nnn", "lf", "vifm",
+        "tig", "lazygit", "gitui",
+        "claude", "aider",
+        "ipython", "bpython",
+    ];
+    TUI.iter().any(|name| base == *name || base.ends_with(name))
+}
+
+/// True when a user-typed command is likely to need interactive TTY (first token only).
+pub fn user_command_expects_interactive(command: &str) -> bool {
+    let lower = command.to_lowercase();
+    let mut parts = command.split_whitespace();
+    let first = parts.next().unwrap_or("");
+    let base = command_base_name(first);
+
+    if base == "apt" || base == "apt-get" {
+        if lower.contains(" install")
+            || lower.contains(" update")
+            || lower.contains(" upgrade")
+            || lower.contains(" remove")
+            || lower.contains(" purge")
+            || lower.contains(" autoremove")
+            || lower.contains(" -y")
+            || lower.contains(" --yes")
+        {
+            return false;
+        }
+        return true;
+    }
+
+    if !is_interactive_tui_command(first) {
+        if matches!(base.as_str(), "python" | "python3" | "node" | "ruby" | "irb") {
+            return parts.next().is_none();
+        }
+        return false;
+    }
+    true
+}
+
+/// Current foreground command in the tmux pane, if any.
+pub fn terminal_pane_current_command(state: &AppState, term_id: Uuid) -> Option<String> {
+    if !state.terminals.uses_tmux() {
+        return None;
+    }
+    ensure_terminal_attached(state, term_id).ok()?;
+    let auth_db = state.auth.db();
+    let row = auth_db.lock().get_terminal(term_id).ok().flatten()?;
+    let record = row_to_record(row);
+    let target = resolve_tmux_target(state, &record).ok()??;
+    if tmux::pane_is_dead(&target) {
+        return None;
+    }
+    tmux::pane_current_command(&target)
 }
 
 /// True when the tmux pane is running a foreground process (dev server, etc.), not an idle shell prompt.
@@ -806,6 +886,9 @@ pub fn discord_shell_pane_busy(state: &AppState, term_id: Uuid) -> Result<bool> 
         if !discord_shell_idle_command_name(&cmd) {
             return Ok(true);
         }
+    }
+    if tmux::pane_has_non_shell_child(&target) {
+        return Ok(true);
     }
     Ok(false)
 }
@@ -1058,6 +1141,7 @@ pub fn exec_discord_shell_command_run(
                 term_id,
                 command,
                 DiscordTranscriptBody::CommandOnly,
+                acting_user_id,
             );
             return Ok(DiscordShellRunResult {
                 output: text,
@@ -1073,7 +1157,8 @@ pub fn exec_discord_shell_command_run(
         state,
         term_id,
         command,
-        DiscordTranscriptBody::CommandOnly,
+        DiscordTranscriptBody::Output(&excerpt),
+        acting_user_id,
     );
     Ok(DiscordShellRunResult {
         output: excerpt,
@@ -1131,6 +1216,19 @@ fn wrap_long_running_discord_command(command: &str) -> String {
 
 fn capture_pane_text(target: &str) -> Result<String> {
     tmux::capture_pane(target).map(|s| strip_ansi_escapes(&s))
+}
+
+/// Capture tmux pane text for a terminal (used by block output collector).
+pub fn capture_pane_for_terminal(state: &AppState, term_id: Uuid) -> Result<String> {
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+    let target = resolve_tmux_target(state, &record)?
+        .ok_or_else(|| anyhow::anyhow!("no tmux target"))?;
+    capture_pane_text(&target)
 }
 
 fn pane_text_since_baseline(before: &str, after: &str) -> String {
@@ -1450,6 +1548,7 @@ pub fn exec_discord_shell_command_timed(
         term_id,
         command,
         DiscordTranscriptBody::Output(&text),
+        acting_user_id,
     );
     Ok((text, out.status.code().unwrap_or(1)))
 }
@@ -1766,7 +1865,30 @@ fn append_discord_transcript(
     term_id: Uuid,
     command: &str,
     body: DiscordTranscriptBody<'_>,
+    acting_user_id: Option<Uuid>,
 ) {
+    let (output, exit_code, persistent) = match &body {
+        DiscordTranscriptBody::CommandOnly => (None, None, false),
+        DiscordTranscriptBody::Output(text) => {
+            let persistent = bunny_discord::risk::is_long_running_discord_shell_command(command);
+            (Some(text.as_ref()), Some(0), persistent)
+        }
+    };
+
+    let _ = crate::blocks::record_discord_transcript_blocks(
+        state,
+        term_id,
+        command,
+        output,
+        exit_code,
+        acting_user_id,
+        persistent,
+    );
+
+    if state.config.terminal.notebook_shells {
+        return;
+    }
+
     let dir = scrollback_dir(state);
     let _ = std::fs::create_dir_all(&dir);
 

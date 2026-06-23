@@ -15,6 +15,7 @@ interface Props {
   onBrowserId: (id: string) => void;
   onOpenBrowserTab: () => void;
   onOpenTerminalTab: (terminalId?: string) => void;
+  onAuthTerminalReady?: (terminalId: string) => void;
 }
 
 export default function ClaudeSetupPanel({
@@ -23,6 +24,7 @@ export default function ClaudeSetupPanel({
   onBrowserId,
   onOpenBrowserTab,
   onOpenTerminalTab,
+  onAuthTerminalReady,
 }: Props) {
   const [status, setStatus] = useState<ClaudeStatus | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -45,6 +47,13 @@ export default function ClaudeSetupPanel({
     const t = setInterval(refresh, 1500);
     return () => clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    const terminalId = status?.auth.terminal_id;
+    if (terminalId && status && !status.authenticated) {
+      onAuthTerminalReady?.(terminalId);
+    }
+  }, [status?.auth.terminal_id, status?.authenticated, status, onAuthTerminalReady]);
 
   const tryImportFromBrowser = useCallback(
     async (opts?: { quiet?: boolean }) => {

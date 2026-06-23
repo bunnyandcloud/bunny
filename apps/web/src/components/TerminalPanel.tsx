@@ -21,6 +21,12 @@ interface Props {
   /** When false, do not steal focus on activate (avoids host clipboard paste into xterm). */
   autoFocus?: boolean;
   readonly?: boolean;
+  /** Compact embed inside a notebook block (smaller font, no outer flex host). */
+  embedded?: boolean;
+  /** Attach to live pane only — skip scrollback replay, sync with refresh. */
+  liveAttach?: boolean;
+  /** Map mouse wheel to arrow keys for TUIs (htop, less, etc.). */
+  wheelScrollTui?: boolean;
 }
 
 type ReplayMode = 'none' | 'catch_up' | 'recovery';
@@ -49,7 +55,7 @@ function writeStoredOffset(terminalId: string, offset: number) {
 }
 
 const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel(
-  { terminalId, active = true, autoFocus = true, readonly },
+  { terminalId, active = true, autoFocus = true, readonly, embedded = false, liveAttach = false, wheelScrollTui = false },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,10 +108,10 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: embedded ? 13 : 14,
       fontFamily: 'Menlo, Monaco, Consolas, monospace',
       convertEol: true,
-      scrollback: 10000,
+      scrollback: embedded && liveAttach ? 0 : embedded ? 1000 : 10000,
       theme: getTerminalTheme(terminalThemeId),
     });
     const fit = new FitAddon();
@@ -149,11 +155,17 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
         suppressNextClear = false;
         payload = stripLeadingScreenClear(payload);
       }
-      const clean = filterServerOutput(payload);
+      const clean = filterServerOutput(payload, {
+        preserveAltScreen: embedded && liveAttach,
+      });
       if (clean) {
         term.write(clean);
       }
     }
+
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    let lastSizedCols = 0;
+    let lastSizedRows = 0;
 
     function sendResize() {
       try {
@@ -161,14 +173,36 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       } catch {
         /* container may not be laid out yet */
       }
-      const cols = Math.max(term.cols, 80);
-      const rows = Math.max(term.rows, 24);
+      const cols = embedded
+        ? Math.max(term.cols, 20)
+        : Math.max(term.cols, 80);
+      const rows = embedded
+        ? Math.max(term.rows, 6)
+        : Math.max(term.rows, 24);
+      const sizeChanged = cols !== lastSizedCols || rows !== lastSizedRows;
+      if (embedded && !sizeChanged) {
+        return;
+      }
+      lastSizedCols = cols;
+      lastSizedRows = rows;
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
+        if (embedded && liveAttach && sizeChanged) {
+          setTimeout(() => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'refresh' }));
+            }
+          }, 50);
+        }
       }
     }
 
     function sendResizeDeferred() {
+      if (embedded) {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => sendResize(), 120);
+        return;
+      }
       sendResize();
       requestAnimationFrame(() => sendResize());
     }
@@ -230,9 +264,15 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
         opened = true;
         connectedOnceRef.current = true;
         reconnectAttempts = 0;
+        if (liveAttach) {
+          replayPhaseDone = true;
+        }
         sendResize();
-        // F5 recreates an empty xterm — must replay from 0, not last stored offset.
-        const fromOffset = isFirstConnect ? 0 : offsetRef.current;
+        const fromOffset = liveAttach
+          ? Number.MAX_SAFE_INTEGER
+          : isFirstConnect
+            ? 0
+            : offsetRef.current;
         isFirstConnect = false;
         ws.send(
           JSON.stringify({
@@ -240,6 +280,15 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
             from_offset: fromOffset,
           }),
         );
+        if (liveAttach) {
+          ws.send(JSON.stringify({ type: 'refresh' }));
+          setTimeout(() => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'refresh' }));
+              sendResizeDeferred();
+            }
+          }, 300);
+        }
         sendResizeDeferred();
         resizeAfterReplayTimer = setTimeout(sendResizeDeferred, 100);
       };
@@ -313,12 +362,41 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       return false;
     };
 
+    function sendTuiInput(data: string) {
+      const filtered = filterClientInput(data);
+      if (!filtered || readonly) return;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data: filtered }));
+      }
+    }
+
+    function wheelToTuiArrows(e: WheelEvent): boolean {
+      e.preventDefault();
+      e.stopPropagation();
+      let delta = e.deltaY;
+      if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+        delta *= 16;
+      } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+        delta *= 320;
+      }
+      const steps = Math.min(10, Math.max(1, Math.round(Math.abs(delta) / 40)));
+      const seq = delta > 0 ? '\x1b[B' : '\x1b[A';
+      for (let i = 0; i < steps; i++) {
+        sendTuiInput(seq);
+      }
+      return false;
+    }
+
+    if (embedded || wheelScrollTui) {
+      term.attachCustomWheelEventHandler(wheelToTuiArrows);
+    }
+
     const onResize = () => sendResizeDeferred();
     window.addEventListener('resize', onResize);
 
     const resizeObserver = new ResizeObserver(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        sendResize();
+        sendResizeDeferred();
       }
     });
     resizeObserver.observe(containerRef.current);
@@ -327,6 +405,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       disposed = true;
       clearTimeout(reconnectTimer);
       clearTimeout(resizeAfterReplayTimer);
+      clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
       resizeObserver.disconnect();
       wsRef.current?.close();
@@ -335,7 +414,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       injectFnRef.current = () => false;
       term.dispose();
     };
-  }, [terminalId, readonly, active]);
+  }, [terminalId, readonly, active, embedded, liveAttach, wheelScrollTui]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -344,10 +423,14 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   }, [terminalThemeId]);
 
   return (
-    <div className="bunny-terminal-host flex h-full w-full min-h-0">
+    <div className={embedded ? 'h-full w-full min-h-0' : 'bunny-terminal-host flex h-full w-full min-h-0'}>
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 min-w-0 p-1 bg-bunny-bg rounded-l"
+        className={
+          embedded
+            ? 'h-full w-full min-h-0 p-1'
+            : 'flex-1 min-h-0 min-w-0 p-1 bg-bunny-bg rounded-l'
+        }
       />
     </div>
   );

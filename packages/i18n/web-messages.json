@@ -856,8 +856,84 @@
     "fr": "Bunny watch"
   },
   "web.session.tmuxHint": {
-    "en": "Shells run in tmux and survive agent restarts. Closing the browser only disconnects you — stop the agent, restart it, then re-open this session. Use × to close a shell for good.",
-    "fr": "Les shells tournent dans tmux et survivent aux redémarrages de l’agent. Fermer le navigateur vous déconnecte seulement — arrêtez l’agent, redémarrez-le, puis rouvrez cette session. Utilisez × pour fermer un shell définitivement."
+    "en": "Notebook shells: commands and outputs appear as blocks with timeline and author. Shells run in tmux and survive agent restarts.",
+    "fr": "Shells notebook : commandes et sorties en blocs avec timeline et auteur. Les shells tournent dans tmux et survivent aux redémarrages de l’agent."
+  },
+  "web.notebook.empty": {
+    "en": "No blocks yet — type a command below.",
+    "fr": "Aucun bloc — tapez une commande ci-dessous."
+  },
+  "web.notebook.inputLocked": {
+    "en": "A process is running in this shell.",
+    "fr": "Un processus tourne dans ce shell."
+  },
+  "web.notebook.stopShortcut": {
+    "en": "or Ctrl+C",
+    "fr": "ou Ctrl+C"
+  },
+  "web.notebook.attachTty": {
+    "en": "Attach TTY",
+    "fr": "Attach TTY"
+  },
+  "web.notebook.inputPlaceholder": {
+    "en": "Type a command and press Enter",
+    "fr": "Tapez une commande puis Entrée"
+  },
+  "web.notebook.connecting": {
+    "en": "Connecting to shell…",
+    "fr": "Connexion au shell…"
+  },
+  "web.notebook.submitFailed": {
+    "en": "Could not run command",
+    "fr": "Impossible d'exécuter la commande"
+  },
+  "web.notebook.interactiveBadge": {
+    "en": "Interactive",
+    "fr": "Interactif"
+  },
+  "web.notebook.runningBadge": {
+    "en": "Running",
+    "fr": "En cours"
+  },
+  "web.notebook.interactiveHint": {
+    "en": "Use the terminal below to control {app}",
+    "fr": "Utilisez le terminal ci-dessous pour contrôler {app}"
+  },
+  "web.notebook.interactiveLocked": {
+    "en": "Interactive session in progress — use the terminal in the block above.",
+    "fr": "Session interactive en cours — utilisez le terminal dans le bloc ci-dessus."
+  },
+  "web.notebook.stop": {
+    "en": "Stop",
+    "fr": "Arrêter"
+  },
+  "web.notebook.fullscreen": {
+    "en": "Fullscreen",
+    "fr": "Plein écran"
+  },
+  "web.notebook.authorSourceWeb": {
+    "en": "Web",
+    "fr": "Web"
+  },
+  "web.notebook.authorSourceDiscord": {
+    "en": "Discord",
+    "fr": "Discord"
+  },
+  "web.notebook.authorSourceSystem": {
+    "en": "System",
+    "fr": "Système"
+  },
+  "web.notebook.authorGitName": {
+    "en": "Git name",
+    "fr": "Nom Git"
+  },
+  "web.notebook.authorGitEmail": {
+    "en": "Git email",
+    "fr": "E-mail Git"
+  },
+  "web.notebook.authorNotConfigured": {
+    "en": "Not configured",
+    "fr": "Non configuré"
   },
   "web.session.noShellOpen": {
     "en": "No shell open.",

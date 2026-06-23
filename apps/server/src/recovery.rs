@@ -26,6 +26,9 @@ pub fn restore_sessions(state: &Arc<AppState>) {
         }
     }
     restore_all_terminals(state);
+    if let Err(e) = crate::blocks::migrate_scrollback_to_blocks(state) {
+        tracing::warn!(error = %e, "terminal block scrollback migration failed");
+    }
 }
 
 /// Spawn relay reconnect loop when configured.
