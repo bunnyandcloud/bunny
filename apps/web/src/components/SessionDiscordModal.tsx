@@ -17,6 +17,7 @@ export default function SessionDiscordModal(props: {
   const [error, setError] = useState('');
   const [discordCode, setDiscordCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [discordPassword, setDiscordPassword] = useState('');
   const [discordLinks, setDiscordLinks] = useState<
     Array<{ guild_id: string; channel_id: string; status: string }>
@@ -26,6 +27,7 @@ export default function SessionDiscordModal(props: {
     if (!open) return;
     setDiscordCode(null);
     setCodeCopied(false);
+    setCopyFailed(false);
     setDiscordPassword('');
     setError('');
     setLoading(true);
@@ -42,6 +44,7 @@ export default function SessionDiscordModal(props: {
     setError('');
     setDiscordCode(null);
     setCodeCopied(false);
+    setCopyFailed(false);
     try {
       const res = await createDiscordLinkCode(sessionId, discordPassword);
       setDiscordCode(res.code);
@@ -116,21 +119,35 @@ export default function SessionDiscordModal(props: {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={async () => {
-                  const ok = await copyToClipboard(discordCode);
-                  if (ok) {
-                    setCodeCopied(true);
-                    setTimeout(() => setCodeCopied(false), 2000);
-                  }
+                onClick={() => {
+                  setCopyFailed(false);
+                  void copyToClipboard(discordCode).then((ok) => {
+                    if (ok) {
+                      setCodeCopied(true);
+                      setTimeout(() => setCodeCopied(false), 2000);
+                    } else {
+                      setCopyFailed(true);
+                    }
+                  });
                 }}
                 className="w-full rounded-lg border-2 border-bunny-accent/50 bg-bunny-accent/10 px-4 py-4 text-center transition hover:bg-bunny-accent/20 hover:border-bunny-accent cursor-pointer"
                 title="Click to copy"
               >
-                <span className="block text-3xl font-bold font-mono tracking-[0.2em] text-bunny-accent">
+                <span className="block select-all text-3xl font-bold font-mono tracking-[0.2em] text-bunny-accent">
                   {discordCode}
                 </span>
-                <span className="block text-xs mt-2 text-bunny-muted">
-                  {codeCopied ? 'Copied!' : 'Click to copy'}
+                <span
+                  className={
+                    copyFailed
+                      ? 'block text-xs mt-2 text-red-400'
+                      : 'block text-xs mt-2 text-bunny-muted'
+                  }
+                >
+                  {codeCopied
+                    ? 'Copied!'
+                    : copyFailed
+                      ? 'Copy failed — select the code above manually (⌘C / Ctrl+C)'
+                      : 'Click to copy'}
                 </span>
               </button>
               <p className="text-xs text-bunny-muted text-center">
