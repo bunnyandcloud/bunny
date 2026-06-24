@@ -1,40 +1,24 @@
 import { stripAnsi, stripShellPromptLines } from '../../lib/ansi';
-import {
-  interactiveTuiCommand,
-  isInteractiveRunning,
-} from '../../lib/blockMeta';
+import { isInteractiveRunning, isRunningOutput } from '../../lib/blockMeta';
 import type { TerminalBlock } from '../../lib/api';
 import { useT } from '../../i18n';
 import BlockAuthorBadge from './BlockAuthorBadge';
 import BlockTimelineRail from './BlockTimelineRail';
-import InteractiveTtyEmbed from './InteractiveTtyEmbed';
 
 interface Props {
-  terminalId: string;
   block: TerminalBlock;
   outputBlock?: TerminalBlock;
-  interactiveExpanded?: boolean;
-  ttyActive?: boolean;
   onStop?: (blockId: string) => void;
-  onFullscreen?: () => void;
 }
 
 function isCommandKind(kind: TerminalBlock['kind']) {
   return kind === 'user_command' || kind === 'discord_command';
 }
 
-export default function BlockCard({
-  terminalId,
-  block,
-  outputBlock,
-  interactiveExpanded = false,
-  ttyActive = false,
-  onStop,
-  onFullscreen,
-}: Props) {
+export default function BlockCard({ block, outputBlock, onStop }: Props) {
   const tr = useT();
   const interactiveRunning = isInteractiveRunning(outputBlock);
-  const running = outputBlock?.status === 'running';
+  const running = isRunningOutput(outputBlock);
 
   if (block.kind === 'system_event') {
     return (
@@ -49,7 +33,6 @@ export default function BlockCard({
     const outputText = outputBlock
       ? stripShellPromptLines(stripAnsi(outputBlock.content))
       : '';
-    const tuiName = interactiveTuiCommand(outputBlock) ?? block.command ?? 'app';
 
     return (
       <div className="flex gap-2 py-2 border-b border-bunny-border/30">
@@ -76,11 +59,9 @@ export default function BlockCard({
                   : tr('web.notebook.runningBadge')}
               </span>
               {interactiveRunning ? (
-                <span className="text-bunny-muted">
-                  {tr('web.notebook.interactiveHint', { app: tuiName })}
-                </span>
+                <span className="text-bunny-muted">{tr('web.notebook.interactiveHint')}</span>
               ) : null}
-              {onStop && outputBlock ? (
+              {onStop && outputBlock && !interactiveRunning ? (
                 <button
                   type="button"
                   className="rounded border border-bunny-border px-2 py-0.5 hover:bg-bunny-panel"
@@ -89,23 +70,11 @@ export default function BlockCard({
                   {tr('web.notebook.stop')}
                 </button>
               ) : null}
-              {interactiveRunning && onFullscreen ? (
-                <button
-                  type="button"
-                  className="rounded border border-bunny-border px-2 py-0.5 hover:bg-bunny-panel"
-                  onClick={onFullscreen}
-                >
-                  {tr('web.notebook.fullscreen')}
-                </button>
-              ) : null}
             </div>
           ) : null}
-          {interactiveRunning && interactiveExpanded ? (
-            <div className="ml-8 mt-2">
-              <InteractiveTtyEmbed terminalId={terminalId} active={ttyActive} />
-            </div>
-          ) : null}
-          {!interactiveRunning && outputText ? (
+          {interactiveRunning ? (
+            <p className="ml-8 text-xs text-bunny-muted">{tr('web.notebook.interactiveFullscreen')}</p>
+          ) : outputText ? (
             <pre
               className={
                 outputBlock?.status === 'failed'
@@ -115,7 +84,7 @@ export default function BlockCard({
             >
               {outputText}
             </pre>
-          ) : !interactiveRunning && running ? (
+          ) : running ? (
             <pre className="ml-8 font-mono text-xs text-bunny-muted">…</pre>
           ) : null}
         </div>

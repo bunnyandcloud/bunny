@@ -81,6 +81,7 @@ pub fn router(state: Arc<AppState>, web_dist: Option<std::path::PathBuf>) -> Rou
         .route("/terminals/:id/blocks", get(list_terminal_blocks))
         .route("/terminals/:id/command", post(terminal_command))
         .route("/terminals/:id/run/stop", post(terminal_run_stop))
+        .route("/terminals/:id/shell-prompt", get(terminal_shell_prompt))
         .route("/previews", post(create_preview).get(list_previews))
         .route("/previews/:id", delete(delete_preview))
         .route("/browser-sessions", post(create_browser))
@@ -1189,8 +1190,21 @@ async fn terminal_command(
     if command == "bunny git use-me" || command == "bunny git whoami" {
         return Ok(Json(serde_json::json!({ "ok": true })));
     }
+    let notebook_shells = state.config.terminal.notebook_shells;
+    let interactive = if notebook_shells {
+        crate::terminals::notebook_user_command_expects_interactive(command)
+    } else {
+        crate::terminals::user_command_expects_interactive(command)
+    };
+    if !interactive && !notebook_shells {
+        let _ = state.terminals.resize(id, 120, 24);
+        state.terminals.refresh_display(id);
+    }
+    if interactive {
+        crate::terminals::clear_terminal_for_interactive_session(&state, id)
+            .map_err(|_| ApiError::not_found("terminal"))?;
+    }
     let baseline = crate::terminals::capture_pane_for_terminal(&state, id).unwrap_or_default();
-    let interactive = crate::terminals::user_command_expects_interactive(command);
     crate::blocks::submit_user_command(
         Arc::clone(&state),
         id,
@@ -1198,12 +1212,13 @@ async fn terminal_command(
         command,
         baseline,
     );
+    let exec_line =
+        crate::terminals::notebook_shell_exec_line(command, interactive, notebook_shells);
     if interactive {
         let state_bg = Arc::clone(&state);
-        let cmd = command.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-            if state_bg.terminals.write(id, &format!("{cmd}\r")).is_ok() {
+            if state_bg.terminals.write(id, &format!("{exec_line}\r")).is_ok() {
                 state_bg.terminals.refresh_display(id);
                 crate::terminal_context_watch::schedule_context_refresh_after_input(
                     state_bg,
@@ -1212,10 +1227,9 @@ async fn terminal_command(
             }
         });
     } else {
-        let _ = state.terminals.resize(id, 120, 24);
         state
             .terminals
-            .write(id, &format!("{command}\r"))
+            .write(id, &format!("{exec_line}\r"))
             .map_err(|_| ApiError::not_found("terminal"))?;
         crate::terminal_context_watch::schedule_context_refresh_after_input(state.clone(), id);
     }
@@ -1240,6 +1254,17 @@ async fn terminal_run_stop(
 struct BlocksQuery {
     from_seq: Option<i64>,
     limit: Option<usize>,
+}
+
+async fn terminal_shell_prompt(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<Uuid>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session_id = terminal_session_id(&state, id)?;
+    ensure_session_access(&state, user, session_id, Action::TerminalRead)?;
+    let prefix = crate::terminals::terminal_shell_prompt_prefix(&state, id);
+    Ok(Json(serde_json::json!({ "prefix": prefix })))
 }
 
 async fn list_terminal_blocks(

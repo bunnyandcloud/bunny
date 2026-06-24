@@ -494,6 +494,10 @@ export function submitTerminalCommand(terminalId: string, command: string) {
   });
 }
 
+export function fetchTerminalShellPrompt(terminalId: string) {
+  return api<{ prefix: string }>(`/terminals/${terminalId}/shell-prompt`);
+}
+
 export function getTimeline(sessionId: string, since = 0) {
   return api<
     Array<{

@@ -168,6 +168,7 @@ impl TerminalManager {
                         cwd,
                         &interactive_shell,
                         &session_env,
+                        false,
                     )
                         .context("respawn tmux shell")?;
                     target.to_string()
@@ -272,6 +273,16 @@ impl TerminalManager {
         terminals
             .get(&id)
             .map(|s| s.buffer.replay_range(from, to))
+    }
+
+    /// Drop in-memory attach scrollback (e.g. before a notebook interactive session).
+    pub fn clear_live_buffer(&self, id: Uuid) -> bool {
+        if let Some(session) = self.terminals.write().get_mut(&id) {
+            session.buffer.replace("");
+            true
+        } else {
+            false
+        }
     }
 
     pub fn take_recovery_replay(&self, id: Uuid) -> Option<String> {

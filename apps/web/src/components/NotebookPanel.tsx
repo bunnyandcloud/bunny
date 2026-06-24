@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   apiErrorMessage,
+  fetchTerminalShellPrompt,
   listTerminalBlocks,
   stopTerminalRun,
   submitTerminalCommand,
@@ -10,7 +11,14 @@ import {
 import AttachTtyDrawer from './AttachTtyDrawer';
 import BlockCard from './blocks/BlockCard';
 import { useT } from '../i18n';
-import { isInteractiveBlock, isInteractiveRunning, commandExpectsInteractive } from '../lib/blockMeta';
+import { isInteractiveRunning, commandExpectsInteractive } from '../lib/blockMeta';
+import {
+  appendSessionCommand,
+  commandsFromUserBlocks,
+  mergeNotebookCommandHistory,
+  readStoredNotebookHistory,
+  writeStoredNotebookHistory,
+} from '../lib/notebookCommandHistory';
 
 interface Props {
   terminalId: string;
@@ -62,11 +70,34 @@ export default function NotebookPanel({
   const [wsReady, setWsReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [expandedInteractiveId, setExpandedInteractiveId] = useState<string | null>(null);
+  const [shellPrefix, setShellPrefix] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const blockRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** True when attach was opened automatically for an interactive command. */
+  const attachAutoOpenedRef = useRef(false);
+  const wasInteractiveRef = useRef(false);
+  const draftBeforeHistoryRef = useRef('');
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [sessionCommands, setSessionCommands] = useState<string[]>(() =>
+    readStoredNotebookHistory(terminalId),
+  );
+
+  const blockCommands = useMemo(() => commandsFromUserBlocks(blocks), [blocks]);
+  const commandHistory = useMemo(
+    () => mergeNotebookCommandHistory(blockCommands, sessionCommands),
+    [blockCommands, sessionCommands],
+  );
+
+  useEffect(() => {
+    setSessionCommands(readStoredNotebookHistory(terminalId));
+    setHistoryIndex(null);
+    draftBeforeHistoryRef.current = '';
+  }, [terminalId]);
+
+  useEffect(() => {
+    writeStoredNotebookHistory(terminalId, commandHistory);
+  }, [terminalId, commandHistory]);
 
   useEffect(() => {
     if (defaultAttachOpen && active) {
@@ -125,6 +156,13 @@ export default function NotebookPanel({
     }
   }, []);
 
+  const refreshShellPrefix = useCallback(() => {
+    if (!active) return;
+    fetchTerminalShellPrompt(terminalId)
+      .then(({ prefix }) => setShellPrefix(prefix ?? ''))
+      .catch(() => setShellPrefix(''));
+  }, [active, terminalId]);
+
   useEffect(() => {
     let cancelled = false;
     listTerminalBlocks(terminalId, 0)
@@ -139,6 +177,16 @@ export default function NotebookPanel({
       cancelled = true;
     };
   }, [terminalId]);
+
+  useEffect(() => {
+    refreshShellPrefix();
+  }, [refreshShellPrefix, blocks.length]);
+
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => refreshShellPrefix(), 2000);
+    return () => window.clearInterval(timer);
+  }, [active, refreshShellPrefix]);
 
   useEffect(() => {
     if (!active) return;
@@ -174,13 +222,11 @@ export default function NotebookPanel({
           const block = msg.block as TerminalBlock;
           if (isRunningProcessBlock(block)) {
             setInputLocked(true);
-            if (isInteractiveBlock(block) && block.parent_block_id) {
-              setExpandedInteractiveId(block.parent_block_id);
-            }
           }
         } else if (msg.type === 'block_patch') {
           applyPatch(msg as BlockPatchMsg);
           if (msg.status === 'running') setInputLocked(true);
+          refreshShellPrefix();
         } else if (msg.type === 'error' && msg.code === 'input_locked') {
           setInputLocked(true);
         }
@@ -194,7 +240,7 @@ export default function NotebookPanel({
       wsRef.current = null;
       setWsReady(false);
     };
-  }, [terminalId, active, mergeBlock, mergeBlocks, applyPatch]);
+  }, [terminalId, active, mergeBlock, mergeBlocks, applyPatch, refreshShellPrefix]);
 
   useEffect(() => {
     if (active && !inputLocked && !submitting) {
@@ -203,43 +249,32 @@ export default function NotebookPanel({
   }, [active, inputLocked, submitting, blocks.length]);
 
   const interactiveSessionActive = blocks.some((b) => isInteractiveRunning(b));
-  const prevExpandedInteractiveRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (interactiveSessionActive && !wasInteractiveRef.current) {
+      attachAutoOpenedRef.current = true;
+      setAttachOpen(true);
+    } else if (
+      !interactiveSessionActive &&
+      wasInteractiveRef.current &&
+      attachAutoOpenedRef.current
+    ) {
+      attachAutoOpenedRef.current = false;
+      setAttachOpen(false);
+      refreshShellPrefix();
+    }
+    wasInteractiveRef.current = interactiveSessionActive;
+  }, [interactiveSessionActive, refreshShellPrefix]);
 
   useEffect(() => {
     if (interactiveSessionActive) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [blocks, interactiveSessionActive]);
 
-  useEffect(() => {
-    for (const block of blocks) {
-      if (!isInteractiveRunning(block)) continue;
-      const parentId = block.parent_block_id;
-      if (parentId) {
-        setExpandedInteractiveId(parentId);
-        break;
-      }
-    }
-    if (!blocks.some((b) => isInteractiveRunning(b))) {
-      setExpandedInteractiveId(null);
-    }
-  }, [blocks]);
-
-  useEffect(() => {
-    if (!expandedInteractiveId) {
-      prevExpandedInteractiveRef.current = null;
-      return;
-    }
-    if (expandedInteractiveId === prevExpandedInteractiveRef.current) return;
-    prevExpandedInteractiveRef.current = expandedInteractiveId;
-    const el = blockRefs.current.get(expandedInteractiveId);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [expandedInteractiveId]);
-
   const handleStop = useCallback(async () => {
     try {
       await stopTerminalRun(terminalId);
       setInputLocked(false);
-      setExpandedInteractiveId(null);
     } catch {
       /* ignore */
     }
@@ -264,9 +299,17 @@ export default function NotebookPanel({
     setSubmitError(null);
     setSubmitting(true);
     setInputLine('');
+    setHistoryIndex(null);
+    draftBeforeHistoryRef.current = '';
 
     try {
       await submitTerminalCommand(terminalId, cmd);
+      setSessionCommands((prev) => appendSessionCommand(prev, cmd));
+      refreshShellPrefix();
+      if (commandExpectsInteractive(cmd)) {
+        attachAutoOpenedRef.current = true;
+        setAttachOpen(true);
+      }
       if (!wsReady) {
         const { blocks: refreshed } = await listTerminalBlocks(terminalId, 0);
         setBlocks(refreshed.sort((a, b) => a.seq - b.seq));
@@ -279,6 +322,41 @@ export default function NotebookPanel({
       if (!commandExpectsInteractive(cmd)) {
         requestAnimationFrame(() => inputRef.current?.focus());
       }
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (inputLocked || submitting) return;
+
+    if (e.key === 'ArrowUp') {
+      if (commandHistory.length === 0) return;
+      e.preventDefault();
+      if (historyIndex === null) {
+        draftBeforeHistoryRef.current = inputLine;
+        const idx = commandHistory.length - 1;
+        setHistoryIndex(idx);
+        setInputLine(commandHistory[idx]!);
+        return;
+      }
+      if (historyIndex > 0) {
+        const idx = historyIndex - 1;
+        setHistoryIndex(idx);
+        setInputLine(commandHistory[idx]!);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      if (historyIndex === null) return;
+      e.preventDefault();
+      if (historyIndex < commandHistory.length - 1) {
+        const idx = historyIndex + 1;
+        setHistoryIndex(idx);
+        setInputLine(commandHistory[idx]!);
+        return;
+      }
+      setHistoryIndex(null);
+      setInputLine(draftBeforeHistoryRef.current);
     }
   };
 
@@ -299,24 +377,12 @@ export default function NotebookPanel({
                 ? outputForCommand(blocks, block.id)
                 : undefined;
             return (
-              <div
-                key={block.id}
-                ref={(el) => {
-                  if (el) blockRefs.current.set(block.id, el);
-                  else blockRefs.current.delete(block.id);
-                }}
-              >
+              <div key={block.id}>
                 <BlockCard
-                  terminalId={terminalId}
                   block={block}
                   outputBlock={childOutput}
-                  interactiveExpanded={expandedInteractiveId === block.id && !attachOpen}
-                  ttyActive={expandedInteractiveId === block.id && !attachOpen}
                   onStop={
                     childOutput?.status === 'running' ? () => void handleStop() : undefined
-                  }
-                  onFullscreen={
-                    isInteractiveRunning(childOutput) ? () => setAttachOpen(true) : undefined
                   }
                 />
               </div>
@@ -362,12 +428,20 @@ export default function NotebookPanel({
             void submitCommand(inputLine);
           }}
         >
-          <span className="shrink-0 font-mono text-sm text-bunny-accent">$</span>
+          <span className="shrink-0 font-mono text-sm text-bunny-accent">
+            {shellPrefix}$
+          </span>
           <input
             ref={inputRef}
             type="text"
             value={inputLine}
-            onChange={(e) => setInputLine(e.target.value)}
+            onChange={(e) => {
+              if (historyIndex !== null) {
+                setHistoryIndex(null);
+              }
+              setInputLine(e.target.value);
+            }}
+            onKeyDown={handleInputKeyDown}
             disabled={inputLocked}
             autoComplete="off"
             spellCheck={false}
@@ -388,7 +462,13 @@ export default function NotebookPanel({
       <AttachTtyDrawer
         terminalId={terminalId}
         open={attachOpen}
-        onClose={() => setAttachOpen(false)}
+        interactive={interactiveSessionActive}
+        onClose={() => {
+          attachAutoOpenedRef.current = false;
+          setAttachOpen(false);
+          refreshShellPrefix();
+        }}
+        onStop={interactiveSessionActive ? () => void handleStop() : undefined}
         wheelScrollTui={interactiveSessionActive}
       />
     </div>

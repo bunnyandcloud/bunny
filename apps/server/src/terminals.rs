@@ -728,6 +728,7 @@ pub fn exec_discord_shell_command(
 pub const DISCORD_RUN_QUICK_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 
 const BUNNY_EXIT_MARKER: &str = "__BUNNY_EXIT__";
+pub(crate) const NOTEBOOK_EXIT_MARKER: &str = BUNNY_EXIT_MARKER;
 pub const BUNNY_BACKGROUND_PID_MARKER: &str = "[bunny] background pid=";
 const DISCORD_BACKGROUND_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const DISCORD_RUN_EXCERPT_MAX_LINES: usize = 24;
@@ -796,6 +797,106 @@ fn command_base_name(command: &str) -> String {
         .to_lowercase()
 }
 
+/// `less`/`more` started by `tree`, `git log`, etc. — not an intentional interactive session.
+pub fn pane_cmd_is_incidental_pager(pane_cmd: &str, user_command: &str) -> bool {
+    let pane = command_base_name(pane_cmd);
+    if !matches!(pane.as_str(), "less" | "more" | "most") {
+        return false;
+    }
+    let user_first = command_base_name(
+        user_command
+            .split_whitespace()
+            .next()
+            .unwrap_or(user_command),
+    );
+    !matches!(
+        user_first.as_str(),
+        "less" | "more" | "most" | "man" | "view"
+    )
+}
+
+/// Prefix notebook commands so pagers write to the pane instead of spawning `less`.
+pub fn notebook_shell_exec_line(command: &str, interactive: bool, notebook_shells: bool) -> String {
+    if !notebook_shells || interactive {
+        return command.to_string();
+    }
+    // `cd`, `source`, etc. must run in the interactive shell — not `( … )` subshells.
+    if notebook_shell_state_command(command) {
+        return format!("{command}; echo {BUNNY_EXIT_MARKER}$?");
+    }
+    let first = command_base_name(
+        command
+            .split_whitespace()
+            .next()
+            .unwrap_or(command),
+    );
+    let inner = format!("PAGER=cat GIT_PAGER=cat {command}");
+    let body = if matches!(first.as_str(), "tree" | "find") {
+        format!("({inner}) 2>&1 | cat")
+    } else {
+        format!("({inner}) 2>&1")
+    };
+    format!("{body}; echo {BUNNY_EXIT_MARKER}$?")
+}
+
+/// Shell builtins / state commands that must not run in a notebook subshell wrapper.
+pub fn notebook_shell_state_command(command: &str) -> bool {
+    let cmd = command.trim();
+    if cmd.is_empty() || cmd.starts_with('(') || cmd.starts_with('{') {
+        return false;
+    }
+    const BUILTINS: &[&str] = &["cd", "export", "unset", "source", "deactivate", "pushd", "popd"];
+    for b in BUILTINS {
+        if cmd == *b || cmd.starts_with(&format!("{b} ")) || cmd.starts_with(&format!("{b}\t")) {
+            return true;
+        }
+    }
+    if cmd.starts_with(". ") && cmd.contains("activate") {
+        return true;
+    }
+    false
+}
+
+/// Common non-interactive commands — skip interactive promotion waits in the notebook collector.
+pub fn notebook_instant_command(command: &str) -> bool {
+    let cmd = command.trim();
+    if matches!(cmd, "ls" | "pwd" | "ls -la") {
+        return true;
+    }
+    let first = cmd.split_whitespace().next().unwrap_or("");
+    command_base_name(first) == "cd"
+}
+
+/// Whether runtime prompt heuristics may promote this command to interactive mode.
+pub fn runtime_interactive_promotion_allowed(command: &str, pane_cmd: Option<&str>) -> bool {
+    if notebook_instant_command(command) {
+        return false;
+    }
+    if user_command_expects_interactive(command) {
+        return true;
+    }
+    let Some(cmd) = pane_cmd else {
+        return false;
+    };
+    let tui = is_interactive_tui_command(cmd) || pane_process_suggests_interactive(cmd, command);
+    tui && !pane_cmd_is_incidental_pager(cmd, command)
+}
+
+/// Send `q` to dismiss an incidental `less`/`more` pager.
+pub fn dismiss_pager(state: &AppState, terminal_id: Uuid) -> Result<()> {
+    state.terminals.write(terminal_id, "q")
+}
+
+/// Clear tmux scrollback, attach buffer, and visible shell before an interactive notebook command.
+pub fn clear_terminal_for_interactive_session(state: &AppState, term_id: Uuid) -> Result<()> {
+    if let Some(target) = state.terminals.tmux_target(term_id) {
+        bunny_pty::tmux::clear_pane_history(&target);
+    }
+    state.terminals.clear_live_buffer(term_id);
+    state.terminals.write(term_id, "clear\r")?;
+    Ok(())
+}
+
 /// Full-screen or alternate-screen programs that need a real TTY (not capture-pane text).
 pub fn is_interactive_tui_command(command: &str) -> bool {
     let base = command_base_name(command);
@@ -815,6 +916,109 @@ pub fn is_interactive_tui_command(command: &str) -> bool {
         "ipython", "bpython",
     ];
     TUI.iter().any(|name| base == *name || base.ends_with(name))
+}
+
+fn command_has_non_interactive_flags(lower: &str) -> bool {
+    lower.contains(" -y ")
+        || lower.ends_with(" -y")
+        || lower.contains(" --yes")
+        || lower.contains(" --defaults")
+        || lower.contains(" --default")
+        || lower.contains("ci=true")
+        || lower.contains("ci=1")
+}
+
+/// git subcommands that read answers from stdin (patch mode, editor, etc.).
+pub fn git_command_expects_interactive(command: &str) -> bool {
+    let lower = command.trim().to_lowercase();
+    let first = command
+        .split_whitespace()
+        .next()
+        .map(command_base_name)
+        .unwrap_or_default();
+    if first != "git" {
+        return false;
+    }
+    lower.contains(" add -p")
+        || lower.contains(" add --patch")
+        || lower.contains(" add -i")
+        || lower.contains(" add --interactive")
+        || lower.contains(" stash -p")
+        || lower.contains(" stash --patch")
+        || lower.contains(" rebase -i")
+        || lower.contains(" rebase --interactive")
+        || lower.contains(" am -i")
+        || lower.contains(" am --interactive")
+        || (lower.contains(" commit")
+            && !lower.contains(" -m ")
+            && !lower.contains(" --message=")
+            && !lower.contains(" --message "))
+}
+
+/// pip uninstall/remove prompts for confirmation unless -y/--yes is passed.
+pub fn pip_command_expects_interactive(command: &str) -> bool {
+    let lower = command.trim().to_lowercase();
+    let first = command
+        .split_whitespace()
+        .next()
+        .map(command_base_name)
+        .unwrap_or_default();
+    if first != "pip" && first != "pip3" {
+        return false;
+    }
+    if command_has_non_interactive_flags(&lower) {
+        return false;
+    }
+    lower.contains(" uninstall") || lower.contains(" remove")
+}
+
+/// npm/yarn/pnpm/npx/bunx and common scaffolders that prompt on stdin.
+pub fn package_runner_expects_interactive(command: &str) -> bool {
+    let lower = command.to_lowercase();
+    if command_has_non_interactive_flags(&lower) {
+        return false;
+    }
+
+    if lower.contains("create-next-app")
+        || lower.contains("create-react-app")
+        || lower.contains("create-vite")
+        || lower.contains("create-remix")
+        || lower.contains("create-svelte")
+        || lower.contains("create-t3-app")
+        || lower.contains("sv create")
+    {
+        return true;
+    }
+
+    let mut parts = command.split_whitespace();
+    let first = command_base_name(parts.next().unwrap_or(""));
+
+    match first.as_str() {
+        "npx" | "bunx" => true,
+        "npm" | "yarn" | "pnpm" | "bun" => {
+            lower.contains(" init")
+                || lower.contains(" create")
+                || lower.contains("create-")
+                || lower.contains(" exec")
+        }
+        _ => false,
+    }
+}
+
+/// Foreground process name suggests the user's command needs a real TTY.
+pub fn pane_process_suggests_interactive(pane_cmd: &str, user_command: &str) -> bool {
+    let base = command_base_name(pane_cmd);
+    if base == "git" {
+        return git_command_expects_interactive(user_command);
+    }
+    if base == "node" {
+        let lower = user_command.to_lowercase();
+        return lower.contains("npx")
+            || lower.contains("bunx")
+            || lower.contains("create-")
+            || package_runner_expects_interactive(user_command);
+    }
+    false
 }
 
 /// True when a user-typed command is likely to need interactive TTY (first token only).
@@ -839,10 +1043,41 @@ pub fn user_command_expects_interactive(command: &str) -> bool {
         return true;
     }
 
+    if package_runner_expects_interactive(command) {
+        return true;
+    }
+
+    if git_command_expects_interactive(command) {
+        return true;
+    }
+
+    if pip_command_expects_interactive(command) {
+        return true;
+    }
+
     if !is_interactive_tui_command(first) {
         if matches!(base.as_str(), "python" | "python3" | "node" | "ruby" | "irb") {
             return parts.next().is_none();
         }
+        return false;
+    }
+    true
+}
+
+/// Like [`user_command_expects_interactive`] but tuned for notebook shells.
+pub fn notebook_user_command_expects_interactive(command: &str) -> bool {
+    if !user_command_expects_interactive(command) {
+        return false;
+    }
+    let lower = command.trim().to_lowercase();
+    // Bare `git commit` fails immediately when nothing is staged — capture the message
+    // instead of clearing the pane and opening fullscreen.
+    if lower.starts_with("git ")
+        && lower.contains(" commit")
+        && !lower.contains(" -m ")
+        && !lower.contains(" --message=")
+        && !lower.contains(" --message ")
+    {
         return false;
     }
     true
@@ -1218,6 +1453,59 @@ fn capture_pane_text(target: &str) -> Result<String> {
     tmux::capture_pane(target).map(|s| strip_ansi_escapes(&s))
 }
 
+fn capture_pane_visible_text(target: &str) -> Result<String> {
+    tmux::capture_pane_visible(target).map(|s| strip_ansi_escapes(&s))
+}
+
+pub fn capture_interactive_tty_snapshot(state: &AppState, term_id: Uuid) -> String {
+    let visible = capture_pane_visible_for_terminal(state, term_id).unwrap_or_default();
+    if !visible.trim().is_empty() {
+        return visible;
+    }
+    let full = capture_pane_for_terminal(state, term_id).unwrap_or_default();
+    let lines: Vec<&str> = full.lines().collect();
+    let start = lines.len().saturating_sub(48);
+    lines[start..].join("\n")
+}
+
+/// Virtualenv prefix from the live shell, e.g. `(test-venv) `.
+pub fn terminal_shell_prompt_prefix(state: &AppState, term_id: Uuid) -> String {
+    let _ = ensure_terminal_attached(state, term_id);
+    if let Some(target) = state.terminals.tmux_target(term_id) {
+        if let Some(venv) = bunny_pty::tmux::pane_shell_env_var(&target, "VIRTUAL_ENV") {
+            let venv = venv.trim();
+            if !venv.is_empty() {
+                if let Some(name) = std::path::Path::new(venv)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    return format!("({name}) ");
+                }
+            }
+        }
+    }
+    let cap = match capture_pane_visible_for_terminal(state, term_id) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let prompt = cap.lines().rev().find(|line| {
+        let t = line.trim();
+        t.contains('@') && (t.ends_with('#') || t.ends_with('$') || t.ends_with("%"))
+    });
+    let Some(prompt) = prompt else {
+        return String::new();
+    };
+    let t = prompt.trim();
+    let (Some(open), Some(close)) = (t.find('('), t.find(')')) else {
+        return String::new();
+    };
+    if close <= open + 1 {
+        return String::new();
+    }
+    format!("{} ", &t[open..=close])
+}
+
 /// Capture tmux pane text for a terminal (used by block output collector).
 pub fn capture_pane_for_terminal(state: &AppState, term_id: Uuid) -> Result<String> {
     let auth_db = state.auth.db();
@@ -1231,14 +1519,217 @@ pub fn capture_pane_for_terminal(state: &AppState, term_id: Uuid) -> Result<Stri
     capture_pane_text(&target)
 }
 
-fn pane_text_since_baseline(before: &str, after: &str) -> String {
+/// Visible pane only — avoids dumping full tmux scrollback after interactive sessions.
+pub fn capture_pane_visible_for_terminal(state: &AppState, term_id: Uuid) -> Result<String> {
+    let auth_db = state.auth.db();
+    let row = auth_db
+        .lock()
+        .get_terminal(term_id)?
+        .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
+    let record = row_to_record(row);
+    let target = resolve_tmux_target(state, &record)?
+        .ok_or_else(|| anyhow::anyhow!("no tmux target"))?;
+    capture_pane_visible_text(&target)
+}
+
+fn normalize_pane_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Text appended to a tmux pane since `before` was captured.
+/// Falls back to prompt/command anchoring when resize or scroll breaks prefix matching.
+pub fn pane_text_since_baseline(before: &str, after: &str) -> String {
+    pane_text_delta(before, after, None)
+}
+
+/// Like [`pane_text_since_baseline`] but can anchor on a submitted shell command.
+pub fn pane_text_delta(before: &str, after: &str, command: Option<&str>) -> String {
+    let before = normalize_pane_text(before);
+    let after = normalize_pane_text(after);
+
+    if before.is_empty() {
+        return after.trim().to_string();
+    }
+    if after.is_empty() {
+        return String::new();
+    }
+    if after.starts_with(&before) {
+        return after[before.len()..].trim().to_string();
+    }
+
     let b: Vec<char> = before.chars().collect();
     let a: Vec<char> = after.chars().collect();
     let mut i = 0;
     while i < b.len() && i < a.len() && b[i] == a[i] {
         i += 1;
     }
-    a[i..].iter().collect::<String>().trim().to_string()
+
+    let strong = i == b.len() || (i * 100 / b.len().max(1)) >= 80;
+
+    if let Some(cmd) = command {
+        if let Some(delta) = pane_text_after_command_echo(&after, cmd) {
+            return strip_lines_in_baseline(&delta, &before);
+        }
+    }
+
+    if let Some(delta) = pane_text_after_prompt_anchor(&before, &after) {
+        return strip_lines_in_baseline(&delta, &before);
+    }
+
+    if strong {
+        return a[i..].iter().collect::<String>().trim().to_string();
+    }
+
+    String::new()
+}
+
+fn strip_lines_in_baseline(delta: &str, before: &str) -> String {
+    let baseline: std::collections::HashSet<&str> = before.lines().map(str::trim).collect();
+    let is_content_line = |t: &str| {
+        !t.is_empty() && !t.starts_with(BUNNY_EXIT_MARKER) && !is_shell_prompt_line(t)
+    };
+    let has_new_content = delta.lines().any(|l| {
+        let t = l.trim();
+        is_content_line(t) && !baseline.contains(t)
+    });
+    let filtered: String = delta
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            if t.is_empty() {
+                return false;
+            }
+            if t.starts_with(BUNNY_EXIT_MARKER) {
+                return true;
+            }
+            if is_shell_prompt_line(t) {
+                return false;
+            }
+            // Repeated command output (e.g. two `ls` in the same dir) reuses lines
+            // already present in the baseline — keep them unless newer lines exist too.
+            if !has_new_content {
+                return is_content_line(t) || !baseline.contains(t);
+            }
+            !baseline.contains(t)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if filtered.trim().is_empty() && !delta.trim().is_empty() {
+        return delta.trim().to_string();
+    }
+    filtered
+}
+
+fn is_shell_prompt_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let Some(at) = t.find('@') else {
+        return false;
+    };
+    let after_at = &t[at + 1..];
+    if !after_at.contains(':') {
+        return false;
+    }
+    matches!(t.chars().last(), Some('#' | '$' | '%'))
+}
+
+/// Extract output lines following the last echo of `command` until the next shell prompt.
+pub fn extract_command_output_from_pane(cap: &str, command: &str) -> String {
+    let cap = normalize_pane_text(cap);
+    let lines: Vec<&str> = cap.lines().collect();
+    let mut cmd_idx = None;
+    for (idx, line) in lines.iter().enumerate() {
+        if line_echoes_command(line, command) {
+            cmd_idx = Some(idx);
+        }
+    }
+    let Some(start) = cmd_idx else {
+        return String::new();
+    };
+    let mut out: Vec<&str> = Vec::new();
+    for line in &lines[start + 1..] {
+        if is_shell_prompt_line(line) {
+            break;
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
+}
+
+fn pane_text_after_prompt_anchor(before: &str, after: &str) -> Option<String> {
+    let anchor = before.lines().rev().find(|l| !l.trim().is_empty())?;
+    let anchor = anchor.trim_end();
+    if anchor.is_empty() {
+        return None;
+    }
+    let pos = after.rfind(anchor)?;
+    let rest = after[pos + anchor.len()..]
+        .trim_start_matches(['\n', '\r'])
+        .to_string();
+    Some(rest)
+}
+
+fn line_echoes_command(line: &str, command: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() || command.is_empty() {
+        return false;
+    }
+    if t == command {
+        return true;
+    }
+    // Avoid `ls` matching `rails`, `tools`, or directory listings via `ends_with("ls")`.
+    if command.len() > 3 && t.ends_with(command) {
+        return true;
+    }
+    if (t.contains('#') || t.contains('$') || t.contains('@')) && t.contains(command) {
+        if command.len() <= 3 {
+            return t.contains(&format!(" {command} "))
+                || t.contains(&format!(" {command})"))
+                || t.contains(&format!(" {command};"))
+                || t.ends_with(&format!(" {command}"))
+                || t.contains(&format!("#{command}"))
+                || t.contains(&format!("${command}"));
+        }
+        return true;
+    }
+    false
+}
+
+fn pane_text_after_command_echo(after: &str, command: &str) -> Option<String> {
+    let mut last_match: Option<usize> = None;
+    for (idx, line) in after.lines().enumerate() {
+        if line_echoes_command(line, command) {
+            last_match = Some(idx);
+        }
+    }
+    let start = last_match? + 1;
+    let lines: Vec<_> = after.lines().skip(start).collect();
+    Some(lines.join("\n").trim().to_string())
+}
+
+/// Capture output for fast notebook commands using the same pane delta logic as
+/// non-instant commands (prefix match, command echo, baseline line stripping).
+pub fn capture_instant_notebook_output(
+    baseline: &str,
+    cap: &str,
+    command: &str,
+    exec_line: &str,
+) -> (String, Option<i32>) {
+    let mut raw = String::new();
+    for cmd in [exec_line, command] {
+        let delta = pane_text_delta(baseline, cap, Some(cmd));
+        if !delta.trim().is_empty() {
+            raw = delta;
+            break;
+        }
+    }
+    if raw.is_empty() {
+        raw = pane_text_delta(baseline, cap, None);
+    }
+    let (parsed, code) = notebook_parse_captured_output(&raw);
+    (parsed, code)
 }
 
 fn split_on_exit_marker(delta: &str) -> Option<(String, i32)> {
@@ -1250,6 +1741,15 @@ fn split_on_exit_marker(delta: &str) -> Option<(String, i32)> {
         .trim();
     let code: i32 = code_str.parse().ok()?;
     Some((output, code))
+}
+
+/// Parse notebook wrapper output (`__BUNNY_EXIT__` suffix) into text + exit code.
+pub fn notebook_parse_captured_output(raw: &str) -> (String, Option<i32>) {
+    if let Some((output, code)) = split_on_exit_marker(raw) {
+        (output, Some(code))
+    } else {
+        (raw.to_string(), None)
+    }
 }
 
 /// Clean tmux capture for Discord: drop wrapper noise, dev-server boilerplate, cap size.
@@ -1347,6 +1847,170 @@ mod discord_run_tests {
     }
 
     #[test]
+    fn pane_delta_after_resize_mismatch_uses_command_echo() {
+        let baseline = "line one\nline two\nroot@host:~/app# ";
+        let cap = concat!(
+            "wrapped line one\n",
+            "wrapped line two\n",
+            "root@host:~/app# sudo ls\n",
+            "bash: sudo: command not found\n",
+            "root@host:~/app# "
+        );
+        let since = pane_text_delta(baseline, cap, Some("sudo ls"));
+        assert!(since.contains("command not found"));
+        assert!(!since.contains("line one"));
+        assert!(!since.contains("git add"));
+    }
+
+    #[test]
+    fn pane_delta_keeps_repeated_ls_output() {
+        let baseline = concat!(
+            "root@host:~# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# "
+        );
+        let cap = format!(
+            "{baseline}(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n\
+             project\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~# "
+        );
+        let exec = "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?";
+        let (parsed, code) = capture_instant_notebook_output(baseline, &cap, "ls", exec);
+        assert_eq!(code, Some(0));
+        assert!(parsed.contains("project"));
+    }
+
+    #[test]
+    fn pane_delta_keeps_repeated_ls_via_command_echo_path() {
+        let baseline = concat!(
+            "root@host:~# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# "
+        );
+        let cap = concat!(
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# "
+        );
+        let exec = "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?";
+        let delta = pane_text_delta(baseline, cap, Some(exec));
+        let (parsed, code) = notebook_parse_captured_output(&delta);
+        assert_eq!(code, Some(0));
+        assert_eq!(parsed.trim(), "project");
+    }
+
+    #[test]
+    fn pane_delta_visible_capture_strips_baseline_lines() {
+        let baseline = concat!(
+            "root@host:~# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat cd project) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# "
+        );
+        // Visible pane: suffix of history still on screen plus the new command output.
+        let cap = concat!(
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat cd project) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "bin  lib  pyvenv.cfg  tentative.md\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# "
+        );
+        let exec = "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?";
+        let (parsed, code) = capture_instant_notebook_output(baseline, cap, "ls", exec);
+        assert_eq!(code, Some(0));
+        assert!(parsed.contains("bin  lib  pyvenv.cfg  tentative.md"));
+        assert!(!parsed.contains("project"));
+    }
+
+    #[test]
+    fn pane_delta_strips_stale_ls_output_between_successive_runs() {
+        let baseline = concat!(
+            "root@host:~# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# (PAGER=cat GIT_PAGER=cat cd project) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# "
+        );
+        let cap = format!(
+            "{baseline}(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n\
+             bin  lib  pyvenv.cfg  tentative.md\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# "
+        );
+        let exec = "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?";
+        let (parsed, code) = capture_instant_notebook_output(baseline, &cap, "ls", exec);
+        assert_eq!(code, Some(0));
+        assert!(parsed.contains("bin  lib  pyvenv.cfg  tentative.md"));
+        assert!(!parsed.contains("project"));
+    }
+
+    #[test]
+    fn pane_delta_uses_last_command_echo_not_first() {
+        let baseline = "root@host:~/app# ls\nfile.txt\nroot@host:~/app# ";
+        let cap = concat!(
+            "root@host:~/app# ls\n",
+            "file.txt\n",
+            "root@host:~/app# git add -p\n",
+            "No changes.\n",
+            "root@host:~/app# "
+        );
+        let since = pane_text_delta(baseline, cap, Some("git add -p"));
+        assert!(since.contains("No changes."));
+        assert!(!since.contains("file.txt"));
+        assert!(!since.contains("git add -h"));
+    }
+
+    #[test]
+    fn extract_command_output_finds_pip_error_after_prompt_line() {
+        let cap = concat!(
+            "root@host:~/app# pip3 install requests\n",
+            "error: externally-managed-environment\n",
+            "× This environment is externally managed\n",
+            "root@host:~/app# "
+        );
+        let out = extract_command_output_from_pane(cap, "pip3 install requests");
+        assert!(out.contains("externally-managed-environment"));
+        assert!(!out.contains("root@host"));
+    }
+
+    #[test]
+    fn strip_baseline_keeps_output_when_all_lines_would_be_filtered() {
+        let before = "error: externally-managed-environment\n";
+        let delta = "error: externally-managed-environment\n";
+        let out = strip_lines_in_baseline(delta, before);
+        assert!(out.contains("externally-managed-environment"));
+    }
+
+    #[test]
+    fn pane_delta_never_dumps_full_pane_on_weak_prefix() {
+        let baseline = "old history line\nroot@host:~/app# ";
+        let cap = "completely different layout\nroot@host:~/app# ";
+        let since = pane_text_delta(baseline, cap, Some("missing-cmd"));
+        assert!(since.is_empty());
+    }
+
+    #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
     }
@@ -1440,6 +2104,17 @@ mod discord_run_tests {
     }
 
     #[test]
+    fn git_interactive_commands_detected() {
+        assert!(git_command_expects_interactive("git add -p"));
+        assert!(git_command_expects_interactive("git add --patch"));
+        assert!(git_command_expects_interactive("git rebase -i HEAD~2"));
+        assert!(git_command_expects_interactive("git commit"));
+        assert!(!git_command_expects_interactive("git log"));
+        assert!(!git_command_expects_interactive("git commit -m 'fix'"));
+        assert!(user_command_expects_interactive("git add -p"));
+    }
+
+    #[test]
     fn non_interactive_commands_use_subprocess_not_tmux_wrap() {
         assert!(!discord_run_needs_interactive_shell("git log"));
         assert!(!discord_run_needs_interactive_shell("ls -la"));
@@ -1447,6 +2122,120 @@ mod discord_run_tests {
         assert!(wrapped.contains(BUNNY_EXIT_MARKER));
         // Interactive builtins still need the tmux pane.
         assert!(discord_run_needs_interactive_shell("cd my-app"));
+    }
+
+    #[test]
+    fn pip_uninstall_detected_as_interactive() {
+        assert!(pip_command_expects_interactive("pip uninstall requests"));
+        assert!(pip_command_expects_interactive("pip3 uninstall requests"));
+        assert!(!pip_command_expects_interactive("pip uninstall -y requests"));
+        assert!(!pip_command_expects_interactive("pip install requests"));
+        assert!(user_command_expects_interactive("pip uninstall requests"));
+    }
+
+    #[test]
+    fn incidental_pager_not_interactive_for_tree() {
+        assert!(pane_cmd_is_incidental_pager("less", "tree"));
+        assert!(pane_cmd_is_incidental_pager("more", "git log"));
+        assert!(!pane_cmd_is_incidental_pager("less", "less"));
+        assert!(!pane_cmd_is_incidental_pager("less", "man ls"));
+        assert!(!user_command_expects_interactive("tree"));
+    }
+
+    #[test]
+    fn notebook_exec_line_disables_pager() {
+        assert_eq!(
+            notebook_shell_exec_line("tree", false, true),
+            "(PAGER=cat GIT_PAGER=cat tree) 2>&1 | cat; echo __BUNNY_EXIT__$?"
+        );
+        assert_eq!(
+            notebook_shell_exec_line("tree", false, false),
+            "tree"
+        );
+        assert_eq!(
+            notebook_shell_exec_line("ls", false, true),
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?"
+        );
+        assert_eq!(
+            notebook_shell_exec_line("npx create-next-app", true, true),
+            "npx create-next-app"
+        );
+    }
+
+    #[test]
+    fn notebook_state_commands_run_in_current_shell() {
+        assert!(notebook_shell_state_command("cd yo"));
+        assert!(notebook_shell_state_command("source bin/activate"));
+        assert!(notebook_shell_state_command(". venv/bin/activate"));
+        assert!(notebook_shell_state_command("deactivate"));
+        assert!(!notebook_shell_state_command("ls"));
+        assert_eq!(
+            notebook_shell_exec_line("source bin/activate", false, true),
+            "source bin/activate; echo __BUNNY_EXIT__$?"
+        );
+        assert_eq!(
+            notebook_shell_exec_line("cd yo", false, true),
+            "cd yo; echo __BUNNY_EXIT__$?"
+        );
+    }
+
+    #[test]
+    fn notebook_instant_commands_skip_interactive_heuristics() {
+        assert!(notebook_instant_command("ls"));
+        assert!(notebook_instant_command("pwd"));
+        assert!(notebook_instant_command("ls -la"));
+        assert!(notebook_instant_command("cd"));
+        assert!(notebook_instant_command("cd .."));
+        assert!(notebook_instant_command("cd yo"));
+        assert!(notebook_instant_command("cd /tmp"));
+        assert!(!notebook_instant_command("ls -la /tmp"));
+        assert!(!runtime_interactive_promotion_allowed("ls", Some("less")));
+    }
+
+    #[test]
+    fn notebook_parse_exit_marker() {
+        let (out, code) = notebook_parse_captured_output("On branch main\n__BUNNY_EXIT__1");
+        assert_eq!(out, "On branch main");
+        assert_eq!(code, Some(1));
+        let (out, code) = notebook_parse_captured_output("hello");
+        assert_eq!(out, "hello");
+        assert_eq!(code, None);
+    }
+
+    #[test]
+    fn notebook_bare_git_commit_not_interactive() {
+        assert!(!notebook_user_command_expects_interactive("git commit"));
+        assert!(!notebook_user_command_expects_interactive("git commit -m msg"));
+        assert!(user_command_expects_interactive("git commit"));
+    }
+
+    #[test]
+    fn tree_not_runtime_interactive() {
+        assert!(!runtime_interactive_promotion_allowed("tree", Some("less")));
+        assert!(!runtime_interactive_promotion_allowed("tree", Some("tree")));
+        assert!(runtime_interactive_promotion_allowed("less", Some("less")));
+        assert!(runtime_interactive_promotion_allowed(
+            "pip uninstall requests",
+            Some("pip")
+        ));
+    }
+
+    #[test]
+    fn package_runners_detected_as_interactive() {
+        assert!(user_command_expects_interactive("npx create-next-app@latest"));
+        assert!(user_command_expects_interactive("bunx create-vite"));
+        assert!(user_command_expects_interactive("npm init"));
+        assert!(!user_command_expects_interactive("npx --yes create-next-app@latest"));
+        assert!(!user_command_expects_interactive("ls -la"));
+    }
+
+    #[test]
+    fn pane_node_process_suggests_interactive_for_npx() {
+        assert!(pane_process_suggests_interactive(
+            "node",
+            "npx create-next-app@latest"
+        ));
+        assert!(!pane_process_suggests_interactive("node", "node -e 'console.log(1)'"));
     }
 
     #[test]

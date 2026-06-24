@@ -126,6 +126,9 @@ pub fn input_may_change_context(line: &str) -> bool {
     line == "cd"
         || line.starts_with("cd ")
         || line.starts_with("pushd ")
+        || line.starts_with("source ")
+        || line.contains("activate")
+        || line.starts_with("deactivate")
         || line.starts_with("git checkout")
         || line.starts_with("git switch")
         || line.starts_with("git clone")

@@ -896,12 +896,32 @@
     "fr": "En cours"
   },
   "web.notebook.interactiveHint": {
-    "en": "Use the terminal below to control {app}",
-    "fr": "Utilisez le terminal ci-dessous pour contrôler {app}"
+    "en": "Fullscreen terminal — closes when you exit or finish",
+    "fr": "Terminal plein écran — se ferme quand vous quittez la commande"
+  },
+  "web.notebook.interactiveFullscreen": {
+    "en": "Use the fullscreen terminal above",
+    "fr": "Utilisez le terminal plein écran"
+  },
+  "web.notebook.interactiveDrawerTitle": {
+    "en": "Interactive session",
+    "fr": "Session interactive"
+  },
+  "web.notebook.attachDrawerTitle": {
+    "en": "Attach TTY — full terminal",
+    "fr": "Attach TTY — terminal complet"
+  },
+  "web.notebook.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
+  "web.notebook.runningHint": {
+    "en": "Use the terminal below to interact with this command",
+    "fr": "Utilisez le terminal ci-dessous pour interagir avec cette commande"
   },
   "web.notebook.interactiveLocked": {
-    "en": "Interactive session in progress — use the terminal in the block above.",
-    "fr": "Session interactive en cours — utilisez le terminal dans le bloc ci-dessus."
+    "en": "Interactive session — use the fullscreen terminal",
+    "fr": "Session interactive — utilisez le terminal plein écran"
   },
   "web.notebook.stop": {
     "en": "Stop",

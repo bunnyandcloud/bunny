@@ -6,10 +6,20 @@ pub enum TerminalClientMsg {
     Input { data: String },
     Resize { cols: u16, rows: u16 },
     Ping { id: u64 },
-    Subscribe { from_offset: Option<u64> },
+    Subscribe {
+        from_offset: Option<u64>,
+        #[serde(default)]
+        live_attach: bool,
+        /// Notebook attach drawer: record submitted lines as blocks without re-executing.
+        #[serde(default)]
+        notebook_record: bool,
+    },
     Refresh,
+    VisibleSnapshot,
     BlocksSubscribe { from_seq: Option<i64> },
     CommandSubmit { text: String },
+    /// User pressed Enter in the notebook attach TTY (command already sent as `input`).
+    TtyCommandRecord { text: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -36,6 +46,8 @@ pub enum TerminalServerMsg {
     Status { status: String, exit_code: Option<i32> },
     Error { code: String, message: String },
     Pong { id: u64 },
+    /// Current visible tmux pane (notebook interactive embed).
+    PaneSnapshot { data: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

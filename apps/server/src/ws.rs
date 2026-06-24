@@ -54,13 +54,15 @@ pub async fn handle_terminal_ws(
         let cwd = terminal_cwd(&state, terminal_id).unwrap_or_else(default_shell_cwd);
         let session_env = tmux_env_for_terminal(&state, terminal_id);
         let shell_cmd = interactive_shell_cmd(&state, terminal_id, &session_env);
-        let _ = tmux::ensure_shell_running(&target, &cwd, &shell_cmd, &session_env);
+        let preserve = state.config.terminal.notebook_shells;
+        let _ = tmux::ensure_shell_running(&target, &cwd, &shell_cmd, &session_env, preserve);
         configure_pane_for_ws_client(&state, terminal_id, &target);
     }
 
     let mut live_fence: u64 = 0;
     let mut pending_refresh_after_resize = false;
     let mut line_buf = String::new();
+    let mut notebook_record = false;
     let mut block_rx = state.block_hub.subscribe(terminal_id);
 
     loop {
@@ -111,7 +113,12 @@ pub async fn handle_terminal_ws(
                                         let _ = sender.send(Message::Text(json)).await;
                                     }
                                 }
-                                TerminalClientMsg::Subscribe { from_offset } => {
+                                TerminalClientMsg::Subscribe {
+                                    from_offset,
+                                    live_attach,
+                                    notebook_record: record,
+                                } => {
+                                    notebook_record = record;
                                     if notebook_mode {
                                         // Notebook UI: attach only, no scrollback replay.
                                         live_fence = state
@@ -127,13 +134,23 @@ pub async fn handle_terminal_ws(
                                         let session_env = tmux_env_for_terminal(&state, terminal_id);
                                         let shell_cmd =
                                             interactive_shell_cmd(&state, terminal_id, &session_env);
+                                        let preserve = state.config.terminal.notebook_shells;
                                         let _ = tmux::ensure_shell_running(
                                             &target,
                                             &cwd,
                                             &shell_cmd,
                                             &session_env,
+                                            preserve,
                                         );
                                         configure_pane_for_ws_client(&state, terminal_id, &target);
+                                    }
+                                    if live_attach {
+                                        live_fence = state
+                                            .terminals
+                                            .buffer_offset(terminal_id)
+                                            .unwrap_or(0);
+                                        pending_refresh_after_resize = false;
+                                        continue;
                                     }
                                     let from = from_offset.unwrap_or(0);
                                     let replay = build_replay(&state, terminal_id, from);
@@ -165,6 +182,18 @@ pub async fn handle_terminal_ws(
                                     if text == "bunny git use-me" || text == "bunny git whoami" {
                                         continue;
                                     }
+                                    let notebook_shells = state.config.terminal.notebook_shells;
+                                    let interactive = if notebook_shells {
+                                        crate::terminals::notebook_user_command_expects_interactive(text)
+                                    } else {
+                                        crate::terminals::user_command_expects_interactive(text)
+                                    };
+                                    if interactive {
+                                        let _ = crate::terminals::clear_terminal_for_interactive_session(
+                                            &state,
+                                            terminal_id,
+                                        );
+                                    }
                                     let baseline = crate::terminals::capture_pane_for_terminal(
                                         &state,
                                         terminal_id,
@@ -177,14 +206,58 @@ pub async fn handle_terminal_ws(
                                         text,
                                         baseline,
                                     );
-                                    let _ = state.terminals.write(terminal_id, &(format!("{text}\r")));
+                                    let exec_line = crate::terminals::notebook_shell_exec_line(
+                                        text,
+                                        interactive,
+                                        notebook_shells,
+                                    );
+                                    let _ = state
+                                        .terminals
+                                        .write(terminal_id, &(format!("{exec_line}\r")));
                                     crate::terminal_context_watch::schedule_context_refresh_after_input(
                                         state.clone(),
                                         terminal_id,
                                     );
                                 }
+                                TerminalClientMsg::TtyCommandRecord { text } if can_write => {
+                                    if !notebook_record || !state.config.terminal.notebook_shells {
+                                        continue;
+                                    }
+                                    let text = text.trim();
+                                    if text.is_empty()
+                                        || text == "bunny git use-me"
+                                        || text == "bunny git whoami"
+                                    {
+                                        continue;
+                                    }
+                                    if crate::blocks::terminal_input_locked(&state, terminal_id) {
+                                        continue;
+                                    }
+                                    let baseline = crate::terminals::capture_pane_for_terminal(
+                                        &state,
+                                        terminal_id,
+                                    )
+                                    .unwrap_or_default();
+                                    crate::blocks::record_tty_command(
+                                        Arc::clone(&state),
+                                        terminal_id,
+                                        user_id,
+                                        text,
+                                        baseline,
+                                    );
+                                }
                                 TerminalClientMsg::Refresh => {
                                     state.terminals.refresh_display(terminal_id);
+                                }
+                                TerminalClientMsg::VisibleSnapshot => {
+                                    let snap = crate::terminals::capture_interactive_tty_snapshot(
+                                        &state,
+                                        terminal_id,
+                                    );
+                                    let msg = TerminalServerMsg::PaneSnapshot { data: snap };
+                                    if let Ok(json) = serde_json::to_string(&msg) {
+                                        let _ = sender.send(Message::Text(json)).await;
+                                    }
                                 }
                                 _ => {}
                             }

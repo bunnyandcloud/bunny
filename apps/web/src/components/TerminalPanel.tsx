@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { terminalWsUrl } from '../lib/api';
 import { filterClientInput, filterServerOutput } from '../lib/terminalSanitize';
+import { extractSubmittedCommandFromTerminal } from '../lib/terminalInputLine';
 import { getTerminalTheme } from '../lib/terminalThemes';
 import { useTerminalTheme } from '../store/terminalTheme';
 import '@xterm/xterm/css/xterm.css';
@@ -25,8 +26,12 @@ interface Props {
   embedded?: boolean;
   /** Attach to live pane only — skip scrollback replay, sync with refresh. */
   liveAttach?: boolean;
+  /** Pre-seed xterm with pane text captured at interactive promotion. */
+  initialSnapshot?: string;
   /** Map mouse wheel to arrow keys for TUIs (htop, less, etc.). */
   wheelScrollTui?: boolean;
+  /** Notebook attach drawer: persist submitted lines as terminal blocks. */
+  notebookRecordCommands?: boolean;
 }
 
 type ReplayMode = 'none' | 'catch_up' | 'recovery';
@@ -55,7 +60,17 @@ function writeStoredOffset(terminalId: string, offset: number) {
 }
 
 const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel(
-  { terminalId, active = true, autoFocus = true, readonly, embedded = false, liveAttach = false, wheelScrollTui = false },
+  {
+    terminalId,
+    active = true,
+    autoFocus = true,
+    readonly,
+    embedded = false,
+    liveAttach = false,
+    initialSnapshot,
+    wheelScrollTui = false,
+    notebookRecordCommands = false,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +81,8 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const notebookRecordRef = useRef(notebookRecordCommands);
+  notebookRecordRef.current = notebookRecordCommands;
   const connectedOnceRef = useRef(false);
   const terminalThemeId = useTerminalTheme((s) => s.themeId);
 
@@ -163,6 +180,12 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       }
     }
 
+    const seedSnapshot = initialSnapshot?.trim();
+    if (seedSnapshot) {
+      writeOutput(seedSnapshot, true);
+      replayPhaseDone = true;
+    }
+
     let resizeTimer: ReturnType<typeof setTimeout>;
     let lastSizedCols = 0;
     let lastSizedRows = 0;
@@ -190,7 +213,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
         if (embedded && liveAttach && sizeChanged) {
           setTimeout(() => {
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({ type: 'refresh' }));
+              wsRef.current.send(JSON.stringify({ type: 'visible_snapshot' }));
             }
           }, 50);
         }
@@ -267,7 +290,14 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
         if (liveAttach) {
           replayPhaseDone = true;
         }
-        sendResize();
+        const requestVisibleSnapshot = () => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'visible_snapshot' }));
+          }
+        };
+        if (!liveAttach) {
+          sendResize();
+        }
         const fromOffset = liveAttach
           ? Number.MAX_SAFE_INTEGER
           : isFirstConnect
@@ -278,19 +308,19 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
           JSON.stringify({
             type: 'subscribe',
             from_offset: fromOffset,
+            live_attach: liveAttach,
+            notebook_record: notebookRecordCommands,
           }),
         );
         if (liveAttach) {
-          ws.send(JSON.stringify({ type: 'refresh' }));
-          setTimeout(() => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({ type: 'refresh' }));
-              sendResizeDeferred();
-            }
-          }, 300);
+          requestVisibleSnapshot();
+          setTimeout(requestVisibleSnapshot, 80);
+          setTimeout(requestVisibleSnapshot, 200);
+          setTimeout(sendResizeDeferred, 220);
+        } else {
+          sendResizeDeferred();
+          resizeAfterReplayTimer = setTimeout(sendResizeDeferred, 100);
         }
-        sendResizeDeferred();
-        resizeAfterReplayTimer = setTimeout(sendResizeDeferred, 100);
       };
 
       ws.onmessage = (ev) => {
@@ -304,6 +334,16 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
             ws.close();
           } else if (msg.type === 'replay') {
             handleReplay(msg);
+          } else if (msg.type === 'pane_snapshot') {
+            if (!replayPhaseDone) {
+              replayPhaseDone = true;
+            }
+            const data = typeof msg.data === 'string' ? msg.data : '';
+            if (!data.trim()) {
+              return;
+            }
+            term.reset();
+            writeOutput(data, true);
           } else if (msg.type === 'output') {
             if (!replayPhaseDone) return;
             const offset = typeof msg.offset === 'number' ? msg.offset : 0;
@@ -340,7 +380,26 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
     if (!readonly) {
       term.onData((data) => {
         const filtered = filterClientInput(data);
-        if (filtered && wsRef.current?.readyState === WebSocket.OPEN) {
+        if (!filtered) return;
+
+        if (
+          notebookRecordRef.current &&
+          (filtered.includes('\r') || filtered.includes('\n'))
+        ) {
+          const cmd = extractSubmittedCommandFromTerminal(term);
+          if (
+            cmd &&
+            cmd !== 'bunny git use-me' &&
+            cmd !== 'bunny git whoami' &&
+            wsRef.current?.readyState === WebSocket.OPEN
+          ) {
+            wsRef.current.send(
+              JSON.stringify({ type: 'tty_command_record', text: cmd }),
+            );
+          }
+        }
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'input', data: filtered }));
         }
       });
@@ -414,7 +473,7 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPa
       injectFnRef.current = () => false;
       term.dispose();
     };
-  }, [terminalId, readonly, active, embedded, liveAttach, wheelScrollTui]);
+  }, [terminalId, readonly, active, embedded, liveAttach, initialSnapshot, wheelScrollTui, notebookRecordCommands]);
 
   useEffect(() => {
     const term = termRef.current;

@@ -383,6 +383,14 @@ pub fn capture_pane_visible(target: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// Wipe tmux scrollback for a pane (visible screen is cleared separately via the shell).
+pub fn clear_pane_history(target: &str) {
+    if !target_alive(target) {
+        return;
+    }
+    let _ = run(&["clear-history", "-t", target]);
+}
+
 /// True when the pane process has exited (scrollback may still show `logout`, etc.).
 pub fn pane_is_dead(target: &str) -> bool {
     let Ok(out) = Command::new("tmux")
@@ -449,6 +457,7 @@ pub fn ensure_shell_running(
     cwd: &Path,
     shell_cmd: &str,
     session_env: &HashMap<String, String>,
+    preserve_user_session: bool,
 ) -> Result<()> {
     if !target_alive(target) {
         return Ok(());
@@ -457,6 +466,9 @@ pub fn ensure_shell_running(
     apply_session_env(session, session_env);
     if pane_is_dead(target) {
         return reload_shell_env(target, cwd, shell_cmd, session_env);
+    }
+    if preserve_user_session {
+        return Ok(());
     }
     if pane_needs_env_reload(target, session_env) && shell_pane_is_idle(target, shell_cmd) {
         return reload_shell_env(target, cwd, shell_cmd, session_env);
@@ -487,18 +499,22 @@ fn shell_pane_is_idle(target: &str, shell_cmd: &str) -> bool {
 
 fn pane_needs_env_reload(target: &str, session_env: &HashMap<String, String>) -> bool {
     let Some(pid) = pane_pid(target) else {
-        return true;
+        return false;
     };
     if let Some(expected) = session_env.get("BUNNY_TERMINAL_ID") {
         match process_env_value(pid, "BUNNY_TERMINAL_ID") {
             Some(actual) if actual == *expected => {}
-            _ => return true,
+            Some(_) => return true,
+            None => return false,
         }
     }
     if let Some(path_env) = session_env.get("PATH") {
         let bunny_bin = path_env.split(':').next().filter(|s| !s.is_empty());
         if let Some(expected_bin) = bunny_bin {
-            let actual_path = process_env_value(pid, "PATH").unwrap_or_default();
+            let actual_path = match process_env_value(pid, "PATH") {
+                Some(p) => p,
+                None => return false,
+            };
             if !actual_path
                 .split(':')
                 .any(|segment| segment == expected_bin)
@@ -577,6 +593,12 @@ fn process_env_value(pid: u32, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Read an environment variable from the live shell process in a tmux pane.
+pub fn pane_shell_env_var(target: &str, key: &str) -> Option<String> {
+    let pid = pane_pid(target)?;
+    process_env_value(pid, key)
 }
 
 pub fn kill_window(session: &str, window: &str) {
