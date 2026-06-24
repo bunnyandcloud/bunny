@@ -1352,30 +1352,33 @@ pub fn exec_discord_shell_command_run(
 
     let started = std::time::Instant::now();
     let mut last_delta = String::new();
+    let mut last_cap = String::new();
     while started.elapsed() < DISCORD_RUN_QUICK_WAIT {
         let Ok(cap) = capture_pane_text(&target) else {
             std::thread::sleep(std::time::Duration::from_millis(200));
             continue;
         };
+        last_cap = cap.clone();
         // Compare against pre-command baseline (not post-send snapshot): fast commands
         // like `ls` often finish before the first poll, so the exit marker is already
         // in the pane while the delta vs after_send would stay empty.
-        let since = pane_text_since_baseline(&baseline, &cap);
+        let since = pane_text_delta_for_discord_run(&baseline, &cap, command, &wrapped);
         if !since.is_empty() {
             last_delta = since.clone();
         }
         if let Some((output, code)) = split_on_exit_marker(&since) {
-            let text = sanitize_discord_terminal_excerpt(&output);
-            let text = if text.trim().is_empty() {
-                "(no output)".to_string()
-            } else {
-                text
-            };
+            let text = discord_output_or_shell_state_message(
+                state,
+                term_id,
+                command,
+                &cap,
+                sanitize_discord_terminal_excerpt(&output),
+            );
             append_discord_transcript(
                 state,
                 term_id,
                 command,
-                DiscordTranscriptBody::CommandOnly,
+                discord_transcript_body_for_run_output(&text),
                 acting_user_id,
             );
             return Ok(DiscordShellRunResult {
@@ -1385,6 +1388,23 @@ pub fn exec_discord_shell_command_run(
             });
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    if let Some(text) =
+        crate::blocks::shell_state_success_message(state, term_id, command, &last_cap)
+    {
+        append_discord_transcript(
+            state,
+            term_id,
+            command,
+            DiscordTranscriptBody::Output(&text),
+            acting_user_id,
+        );
+        return Ok(DiscordShellRunResult {
+            output: text,
+            exit_code: 0,
+            persistent: false,
+        });
     }
 
     let excerpt = sanitize_discord_terminal_excerpt(&last_delta);
@@ -1408,13 +1428,73 @@ fn discord_run_needs_interactive_shell(command: &str) -> bool {
     if cmd.is_empty() || cmd.starts_with('(') || cmd.starts_with('{') {
         return false;
     }
-    const BUILTINS: &[&str] = &["cd", "export", "unset", "source", "pushd", "popd"];
+    const BUILTINS: &[&str] = &["cd", "export", "unset", "source", "deactivate", "pushd", "popd"];
     for b in BUILTINS {
         if cmd == *b || cmd.starts_with(&format!("{b} ")) || cmd.starts_with(&format!("{b}\t")) {
             return true;
         }
     }
     cmd == "." || cmd.starts_with(". ") || cmd.starts_with(".\t")
+}
+
+fn discord_output_or_shell_state_message(
+    state: &AppState,
+    term_id: Uuid,
+    command: &str,
+    cap: &str,
+    sanitized: String,
+) -> String {
+    if !sanitized.trim().is_empty() {
+        return sanitized;
+    }
+    crate::blocks::shell_state_success_message(state, term_id, command, cap)
+        .unwrap_or_else(|| "(no output)".to_string())
+}
+
+fn discord_transcript_body_for_run_output(text: &str) -> DiscordTranscriptBody<'_> {
+    if text.trim().is_empty() || text == "(no output)" {
+        DiscordTranscriptBody::CommandOnly
+    } else {
+        DiscordTranscriptBody::Output(text)
+    }
+}
+
+/// Delta since baseline for Discord `/bunny run`, with fallbacks when prompt changes break prefix matching.
+fn pane_text_delta_for_discord_run(
+    before: &str,
+    after: &str,
+    command: &str,
+    wrapped: &str,
+) -> String {
+    for cmd in [command, wrapped] {
+        let delta = pane_text_delta(before, after, Some(cmd));
+        if split_on_exit_marker(&delta).is_some() {
+            return delta;
+        }
+    }
+    let since = pane_text_since_baseline(before, after);
+    if split_on_exit_marker(&since).is_some() {
+        return since;
+    }
+    let after_norm = normalize_pane_text(after);
+    let before_norm = normalize_pane_text(before);
+    if let Some(marker_idx) = after_norm.rfind(BUNNY_EXIT_MARKER) {
+        let marker_tail = &after_norm[marker_idx..];
+        if !before_norm.contains(marker_tail) {
+            let start = after_norm[..marker_idx]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            return after_norm[start..].trim_end().to_string();
+        }
+    }
+    for cmd in [command, wrapped] {
+        let delta = pane_text_delta(before, after, Some(cmd));
+        if !delta.is_empty() {
+            return delta;
+        }
+    }
+    since
 }
 
 fn discord_run_wrap_command(command: &str) -> String {
@@ -1824,6 +1904,21 @@ fn is_mostly_box_drawing(s: &str) -> bool {
 #[cfg(test)]
 mod discord_run_tests {
     use super::*;
+
+    #[test]
+    fn activate_after_prompt_change_still_finds_exit_marker() {
+        let baseline = "root@host:~/project# ";
+        let cap = concat!(
+            "root@host:~/project# source bin/activate; echo __BUNNY_EXIT__$?\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let wrapped = "source bin/activate; echo __BUNNY_EXIT__$?";
+        let since = pane_text_delta_for_discord_run(baseline, cap, "source bin/activate", wrapped);
+        let (_, code) = split_on_exit_marker(&since).unwrap();
+        assert_eq!(code, 0);
+        assert!(!since.is_empty());
+    }
 
     #[test]
     fn exit_marker_parses_code() {

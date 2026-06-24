@@ -1355,7 +1355,7 @@ fn capture_non_interactive_output(
             return (out, exit_code.or(Some(1)));
         }
     }
-    let silent = infer_silent_success_message(command, &cap_vis, baseline);
+    let silent = infer_silent_success_message(state, terminal_id, command, &cap_vis);
     (silent, exit_code)
 }
 
@@ -1473,7 +1473,81 @@ fn infer_failure_message_from_pane(command: &str, cap: &str, exec_line: &str) ->
     String::new()
 }
 
-fn infer_silent_success_message(command: &str, cap: &str, baseline: &str) -> String {
+fn is_activate_command(lower: &str) -> bool {
+    (lower.starts_with("source ") || lower.starts_with(". "))
+        && lower.contains("activate")
+}
+
+fn venv_name_from_activate_command(command: &str) -> Option<String> {
+    let cmd = command.trim();
+    let path = cmd
+        .strip_prefix("source ")
+        .or_else(|| cmd.strip_prefix(". "))
+        .unwrap_or(cmd)
+        .split_whitespace()
+        .next()?
+        .trim_matches('"')
+        .trim_matches('\'');
+    let p = std::path::Path::new(path);
+    if p.file_name().and_then(|s| s.to_str()) != Some("activate") {
+        return None;
+    }
+    let bin_dir = p.parent()?;
+    if bin_dir.file_name().and_then(|s| s.to_str()) != Some("bin") {
+        return None;
+    }
+    let venv_dir = bin_dir.parent()?;
+    let name = venv_dir.file_name()?.to_str()?;
+    if name.is_empty() || name == "." {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn activate_success_message(command: &str, cap: &str, venv_prefix: Option<&str>) -> String {
+    let cmd = command.trim();
+    for line in cap.lines().rev().take(8) {
+        let t = line.trim();
+        if let (Some(a), Some(b)) = (t.find('('), t.find(')')) {
+            if b > a + 1 && (t.contains('#') || t.contains('$') || t.contains('%')) {
+                return format!("Activated {}", &t[a..=b]);
+            }
+        }
+    }
+    if let Some(prefix) = venv_prefix.filter(|p| !p.is_empty()) {
+        return format!("Activated {}", prefix.trim());
+    }
+    if let Some(name) = venv_name_from_activate_command(cmd) {
+        return format!("Activated ({name})");
+    }
+    "Virtual environment activated.".to_string()
+}
+
+/// User-facing success text for shell-state commands with no stdout (activate / deactivate).
+pub(crate) fn shell_state_success_message(
+    state: &AppState,
+    terminal_id: Uuid,
+    command: &str,
+    cap: &str,
+) -> Option<String> {
+    let cmd = command.trim();
+    let lower = cmd.to_lowercase();
+    if is_activate_command(&lower) {
+        let prefix = crate::terminals::terminal_shell_prompt_prefix(state, terminal_id);
+        return Some(activate_success_message(cmd, cap, Some(&prefix)));
+    }
+    if lower.starts_with("deactivate") || lower.contains("/deactivate") {
+        return Some("Virtual environment deactivated.".to_string());
+    }
+    None
+}
+
+fn infer_silent_success_message(
+    state: &AppState,
+    terminal_id: Uuid,
+    command: &str,
+    cap: &str,
+) -> String {
     let cmd = command.trim();
     let lower = cmd.to_lowercase();
 
@@ -1489,15 +1563,9 @@ fn infer_silent_success_message(command: &str, cap: &str, baseline: &str) -> Str
         }
     }
 
-    if lower.starts_with("source ") && lower.contains("activate") {
-        for line in cap.lines().rev().take(8) {
-            let t = line.trim();
-            if let (Some(a), Some(b)) = (t.find('('), t.find(')')) {
-                if b > a + 1 && (t.contains('#') || t.contains('$')) {
-                    return format!("Activated {}", &t[a..=b]);
-                }
-            }
-        }
+    if is_activate_command(&lower) {
+        return shell_state_success_message(state, terminal_id, cmd, cap)
+            .unwrap_or_else(|| "Virtual environment activated.".to_string());
     }
 
     if lower.starts_with("deactivate") || lower.contains("/deactivate") {
@@ -1801,5 +1869,34 @@ mod capture_noise_tests {
         assert!(!git_commit_nothing_staged_in_cap(cap, cmd, exec));
         let inferred = infer_failure_message_from_pane(cmd, cap, exec);
         assert!(inferred.is_empty());
+    }
+
+    #[test]
+    fn activate_command_without_prompt_still_reports_success() {
+        let msg = activate_success_message("source bin/activate", "", None);
+        assert_eq!(msg, "Virtual environment activated.");
+    }
+
+    #[test]
+    fn activate_command_infers_venv_name_from_path() {
+        let msg = activate_success_message("source myenv/bin/activate", "", None);
+        assert_eq!(msg, "Activated (myenv)");
+    }
+
+    #[test]
+    fn activate_command_uses_live_venv_prefix() {
+        let msg = activate_success_message("source bin/activate", "", Some("(myenv) "));
+        assert_eq!(msg, "Activated (myenv)");
+    }
+
+    #[test]
+    fn deactivate_command_reports_success() {
+        let lower = "deactivate";
+        let msg = if lower.starts_with("deactivate") || lower.contains("/deactivate") {
+            "Virtual environment deactivated.".to_string()
+        } else {
+            String::new()
+        };
+        assert_eq!(msg, "Virtual environment deactivated.");
     }
 }
