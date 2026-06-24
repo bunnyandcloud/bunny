@@ -23,7 +23,7 @@ export default function BlockCard({ block, outputBlock, onStop }: Props) {
   if (block.kind === 'system_event') {
     return (
       <div className="flex gap-2 py-2 text-xs text-bunny-muted italic">
-        <BlockTimelineRail timestamp={block.created_at} />
+        <BlockTimelineRail timestamp={block.created_at} authorSource={block.author_source} />
         <p className="flex-1">{stripAnsi(block.content)}</p>
       </div>
     );
@@ -36,7 +36,7 @@ export default function BlockCard({ block, outputBlock, onStop }: Props) {
 
     return (
       <div className="flex gap-2 py-2 border-b border-bunny-border/30">
-        <BlockTimelineRail timestamp={block.created_at} />
+        <BlockTimelineRail timestamp={block.created_at} authorSource={block.author_source} />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start gap-2">
             <BlockAuthorBadge block={block} />
@@ -94,7 +94,7 @@ export default function BlockCard({ block, outputBlock, onStop }: Props) {
 
   return (
     <div className="flex gap-2 py-1">
-      <BlockTimelineRail timestamp={block.created_at} />
+      <BlockTimelineRail timestamp={block.created_at} authorSource={block.author_source} />
       <div className="min-w-0 flex-1">
         <pre className="whitespace-pre-wrap break-words font-mono text-xs text-bunny-fg/90">
           {stripAnsi(block.content)}
