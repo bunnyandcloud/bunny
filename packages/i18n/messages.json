@@ -487,6 +487,30 @@
     "en": "(no output)",
     "fr": "(aucune sortie)"
   },
+  "discord.run.approval_required": {
+    "en": "**Approval required** for `{command}` — this command is not wired for one-click approval via `/bunny run` yet. Use the Web UI terminal, or ask a session admin.",
+    "fr": "**Approbation requise** pour `{command}` — cette commande n’est pas encore gérée via `/bunny run`. Utilisez le terminal Web UI, ou demandez à un admin de session."
+  },
+  "discord.run.interactive_pip_uninstall": {
+    "en": "This command needs interactive confirmation — from Discord use `{suggested}`, or answer y/n in the Web UI terminal (Terminal tab).",
+    "fr": "Cette commande demande une confirmation interactive — depuis Discord utilisez `{suggested}`, ou répondez y/n dans le terminal Web UI (onglet Terminal)."
+  },
+  "discord.run.interactive_git": {
+    "en": "Interactive git command — use the Web UI terminal, or non-interactive flags (e.g. `git commit -m \"…\"`) from Discord.",
+    "fr": "Commande git interactive — utilisez le terminal Web UI, ou des flags non-interactifs (ex. `git commit -m \"…\"`) depuis Discord."
+  },
+  "discord.run.interactive_generic": {
+    "en": "Interactive command — use the Web UI terminal to answer prompts (y/n, editor, etc.).",
+    "fr": "Commande interactive — utilisez le terminal Web UI pour répondre aux invites (y/n, éditeur, etc.)."
+  },
+  "discord.run.interactive_tui_blocked": {
+    "en": "Interactive command not supported from Discord — use the Web UI terminal.",
+    "fr": "Commande interactive non supportée depuis Discord — utilisez le terminal Web UI."
+  },
+  "discord.run.critical_blocked": {
+    "en": "This command is blocked from Discord for safety — use the Web UI terminal.",
+    "fr": "Cette commande est bloquée depuis Discord pour des raisons de sécurité — utilisez le terminal Web UI."
+  },
   "discord.shell_run.header": {
     "en": "**Shell:** `{shell}`\n**Input command:** `{command}`",
     "fr": "**Shell :** `{shell}`\n**Commande saisie :** `{command}`"

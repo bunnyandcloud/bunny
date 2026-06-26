@@ -17,8 +17,29 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
-fn bunny_api_user_message(status: reqwest::StatusCode, body: &str) -> String {
+fn bunny_api_user_message(
+    status: reqwest::StatusCode,
+    body: &str,
+    locale: Option<Locale>,
+) -> String {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(loc) = locale {
+            if let Some(key) = v
+                .pointer("/error/details/i18n_key")
+                .and_then(|x| x.as_str())
+            {
+                let args: Vec<(&str, &str)> = v
+                    .pointer("/error/details/i18n_args")
+                    .and_then(|a| a.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                return t(loc, key, &args);
+            }
+        }
         if let Some(msg) = v.pointer("/error/message").and_then(|m| m.as_str()) {
             let trimmed = msg.trim();
             if !trimmed.is_empty() {
@@ -83,8 +104,9 @@ impl BunnyClient {
         &self,
         path: &str,
         body: &T,
+        locale: Option<Locale>,
     ) -> Result<serde_json::Value> {
-        self.post_json_timeout(path, body, Duration::from_secs(30))
+        self.post_json_timeout(path, body, Duration::from_secs(30), locale)
             .await
     }
 
@@ -93,6 +115,7 @@ impl BunnyClient {
         path: &str,
         body: &T,
         timeout: Duration,
+        locale: Option<Locale>,
     ) -> Result<serde_json::Value> {
         let res = self
             .http
@@ -110,7 +133,7 @@ impl BunnyClient {
                     "bunny API 405 Method Not Allowed on {path} — restart `bunny run` in the container after rebuilding (cargo build --release -p bunny-server)"
                 );
             }
-            anyhow::bail!("{}", bunny_api_user_message(status, &text));
+            anyhow::bail!("{}", bunny_api_user_message(status, &text, locale));
         }
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
@@ -126,7 +149,7 @@ impl BunnyClient {
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
-            anyhow::bail!("{}", bunny_api_user_message(status, &text));
+            anyhow::bail!("{}", bunny_api_user_message(status, &text, None));
         }
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
@@ -142,7 +165,7 @@ impl BunnyClient {
         let status = res.status();
         if !status.is_success() {
             let text = res.text().await?;
-            anyhow::bail!("{}", bunny_api_user_message(status, &text));
+            anyhow::bail!("{}", bunny_api_user_message(status, &text, None));
         }
         let content_type = res
             .headers()
@@ -212,7 +235,7 @@ impl BunnyClient {
         let status = res.status();
         if !status.is_success() {
             let text = res.text().await?;
-            anyhow::bail!("{}", bunny_api_user_message(status, &text));
+            anyhow::bail!("{}", bunny_api_user_message(status, &text, None));
         }
         let caption = res
             .headers()
@@ -793,7 +816,7 @@ impl EventHandler for Handler {
                     body["approval_id"] = serde_json::json!(approval_id);
                     body["approve"] = serde_json::json!(approve);
                     let result = bunny
-                        .post_json_timeout("/approval/resolve", &body, Duration::from_secs(180))
+                        .post_json_timeout("/approval/resolve", &body, Duration::from_secs(180), Some(loc))
                         .await;
                     let followup = match result {
                         Ok(res) => {
@@ -905,7 +928,7 @@ async fn handle_command(
             let code = opt_str(&sub_opts, "code").ok_or_else(|| anyhow::anyhow!("code required"))?;
             let mut body = bridge_ctx.clone();
             body["code"] = serde_json::json!(code);
-            let res = bunny.post_json("/link", &body).await?;
+            let res = bunny.post_json("/link", &body, None).await?;
             Ok(text_reply(t(
                 locale,
                 "discord.link.success",
@@ -916,7 +939,7 @@ async fn handle_command(
             )))
         }
         "unlink" => {
-            bunny.post_json("/unlink", bridge_ctx).await?;
+            bunny.post_json("/unlink", bridge_ctx, None).await?;
             Ok(text_reply(t(locale, "discord.unlink.success", &[])))
         }
         "language" => {
@@ -926,7 +949,7 @@ async fn handle_command(
             }
             let mut body = bridge_ctx.clone();
             body["locale"] = serde_json::json!(loc_str);
-            let res = bunny.post_json("/locale", &body).await;
+            let res = bunny.post_json("/locale", &body, None).await;
             match res {
                 Ok(v) => {
                     let msg = v
@@ -995,7 +1018,7 @@ async fn handle_command(
             if let Some(name) = opt_str(&sub_opts, "name") {
                 body["name"] = serde_json::json!(name);
             }
-            let res = bunny.post_json("/shell/new", &body).await?;
+            let res = bunny.post_json("/shell/new", &body, None).await?;
             let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let id = res
                 .get("terminal_id")
@@ -1012,7 +1035,7 @@ async fn handle_command(
             if let Some(shell) = opt_str(&sub_opts, "shell") {
                 body["shell_name"] = serde_json::json!(shell);
             }
-            let res = bunny.post_json("/shell/close", &body).await?;
+            let res = bunny.post_json("/shell/close", &body, None).await?;
             let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             Ok(text_reply(t(locale, "discord.shell_close.closed", &[("name", name)])))
         }
@@ -1021,7 +1044,7 @@ async fn handle_command(
             if let Some(shell) = opt_str(&sub_opts, "shell") {
                 body["shell_name"] = serde_json::json!(shell);
             }
-            let res = bunny.post_json("/shell/run/stop", &body).await?;
+            let res = bunny.post_json("/shell/run/stop", &body, None).await?;
             let shell = res
                 .get("shell")
                 .and_then(|v| v.as_str())
@@ -1032,12 +1055,27 @@ async fn handle_command(
             let command = opt_str(&sub_opts, "command").unwrap_or("");
             let mut body = bridge_ctx.clone();
             body["command"] = serde_json::json!(command);
+            body["locale"] = serde_json::json!(locale.as_str());
             if let Some(shell) = opt_str(&sub_opts, "shell") {
                 body["shell_name"] = serde_json::json!(shell);
             }
             let res = bunny
-                .post_json_timeout("/shell/run", &body, Duration::from_secs(55))
+                .post_json_timeout("/shell/run", &body, Duration::from_secs(55), Some(locale))
                 .await?;
+            if res.get("needs_approval").and_then(|v| v.as_bool()) == Some(true) {
+                if res.get("approval_id").and_then(|v| v.as_str()).is_some() {
+                    return Ok(format_approval_reply(locale, &res));
+                }
+                let cmd = res
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(command);
+                return Ok(text_reply(t(
+                    locale,
+                    "discord.run.approval_required",
+                    &[("command", cmd)],
+                )));
+            }
             if let Some(output) = res.get("output").and_then(|v| v.as_str()) {
                 let exit_code = res.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0);
                 let persistent = res
@@ -1115,7 +1153,7 @@ async fn handle_command(
             if let Some(interactive) = opt_bool(&sub_opts, "interactive") {
                 body["interactive"] = serde_json::json!(interactive);
             }
-            let res = bunny.post_json("/stream/start", &body).await?;
+            let res = bunny.post_json("/stream/start", &body, None).await?;
             let url = res.get("watch_url").and_then(|v| v.as_str()).unwrap_or("?");
             let mode = res.get("mode").and_then(|v| v.as_str()).unwrap_or("read_only");
             let label = if mode == "interactive" {
@@ -1131,7 +1169,7 @@ async fn handle_command(
             if let Some(url) = watch_url {
                 body["url"] = serde_json::json!(url);
             }
-            let res = bunny.post_json("/stream/stop", &body).await?;
+            let res = bunny.post_json("/stream/stop", &body, None).await?;
             let stopped = res.get("stopped").and_then(|v| v.as_u64()).unwrap_or(0);
             if watch_url.is_some() {
                 Ok(text_reply(if stopped > 0 {
@@ -1166,7 +1204,7 @@ async fn handle_command(
                 body["shell_name"] = serde_json::json!(shell);
             }
             let res = bunny
-                .post_json_timeout(&path, &body, Duration::from_secs(180))
+                .post_json_timeout(&path, &body, Duration::from_secs(180), Some(locale))
                 .await?;
             if res.get("needs_approval").and_then(|v| v.as_bool()) == Some(true) {
                 return Ok(format_approval_reply(locale, &res));
@@ -1174,7 +1212,7 @@ async fn handle_command(
             Ok(CommandReply::Text(format_agent_reply_pages(&res)))
         }
         "claude_reset" => {
-            bunny.post_json("/claude/reset", bridge_ctx).await?;
+            bunny.post_json("/claude/reset", bridge_ctx, None).await?;
             Ok(text_reply(t(locale, "discord.claude_reset.done", &[])))
         }
         "project" => {
@@ -1191,7 +1229,7 @@ async fn handle_command(
             let task_id = opt_str(&sub_opts, "task_id").unwrap_or("");
             let mut body = bridge_ctx.clone();
             body["task_id"] = serde_json::json!(task_id);
-            bunny.post_json("/task/stop", &body).await?;
+            bunny.post_json("/task/stop", &body, None).await?;
             Ok(text_reply("Task stop requested."))
         }
         _ => Ok(text_reply(t(

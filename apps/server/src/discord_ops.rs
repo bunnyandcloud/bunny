@@ -283,6 +283,8 @@ pub struct ShellRunRequest {
     pub ctx: BridgeContext,
     pub command: String,
     pub shell_name: Option<String>,
+    /// UI locale from the Discord bridge (`en` / `fr`).
+    pub locale: Option<String>,
 }
 
 async fn internal_shell_run(
@@ -294,11 +296,16 @@ async fn internal_shell_run(
     let link = resolve_link(&state, &body.ctx)?;
     let bunny_user = resolve_bunny_user(&state, &body.ctx)?;
     ensure_discord_control(&state, bunny_user, link.session_id)?;
-    if bunny_discord::risk::requires_approval(&body.command) {
-        return Ok(Json(serde_json::json!({
-            "needs_approval": true,
-            "command": body.command,
-        })));
+    let locale = body
+        .locale
+        .as_deref()
+        .and_then(bunny_i18n::parse_locale)
+        .unwrap_or_else(|| discord_user_locale(&state, &body.ctx));
+    if bunny_discord::risk::classify_shell_risk(&body.command) == bunny_policy::RiskLevel::Critical {
+        return Err(ApiError::validation_i18n("discord.run.critical_blocked", &[]));
+    }
+    if let Err(preflight) = crate::terminals::discord_shell_run_preflight(&body.command) {
+        return Err(preflight.to_api_error());
     }
     let resolved_term_id = resolve_discord_shell(
         &state,
@@ -332,17 +339,13 @@ async fn internal_shell_run(
             }),
         );
     }
-    if bunny_discord::risk::is_interactive_discord_command(&body.command) {
-        return Err(ApiError::validation(
-            "commande interactive non supportée depuis Discord — utilisez le terminal Web UI, ou par ex. `head -n 80 landing-page.html`",
-        ));
-    }
     let run = capture_shell_run_output(
         Arc::clone(&state),
         link.session_id,
         term_id,
         &body.command,
         Some(bunny_user),
+        locale,
     )
     .await?;
     let output = truncate_discord_shell_output(&run.output);
@@ -2097,6 +2100,7 @@ async fn capture_shell_run_output(
     term_id: Uuid,
     command: &str,
     acting_user_id: Option<Uuid>,
+    locale: Locale,
 ) -> Result<crate::terminals::DiscordShellRunResult, ApiError> {
     let command = command.to_string();
     tokio::task::spawn_blocking(move || {
@@ -2106,6 +2110,7 @@ async fn capture_shell_run_output(
             session_id,
             &command,
             acting_user_id,
+            locale,
         )
         .map_err(|e| ApiError::validation(&e.to_string()))
     })

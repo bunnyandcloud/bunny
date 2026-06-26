@@ -5,6 +5,7 @@ use crate::state::AppState;
 use anyhow::Result;
 use bunny_auth::db::TerminalRow;
 use bunny_core::types::TerminalStatus;
+use bunny_i18n::Locale;
 use bunny_pty::{scrollback, tmux};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -692,7 +693,11 @@ pub fn exec_discord_shell_command(
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     let mut cmd = Command::new(&shell);
-    cmd.arg("-lc").arg(command).current_dir(&cwd);
+    cmd.arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
+        .arg(discord_subprocess_command(state, term_id, command))
+        .current_dir(&cwd);
     for (k, v) in locale::utf8_locale_vars() {
         cmd.env(k, v);
     }
@@ -727,6 +732,24 @@ pub fn exec_discord_shell_command(
 /// How long `/bunny run` waits for a command to finish before treating it as persistent.
 pub const DISCORD_RUN_QUICK_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 
+/// Install/network-heavy commands need longer than the default quick-wait window.
+pub fn discord_run_quick_wait(command: &str) -> std::time::Duration {
+    let lower = command.trim().to_lowercase();
+    if lower.contains("pip install")
+        || lower.contains("pip3 install")
+        || lower.contains("npm install")
+        || lower.contains("npm ci")
+        || lower.contains("yarn add")
+        || lower.contains("pnpm add")
+        || lower.contains("cargo install")
+        || lower.contains("apt install")
+        || lower.contains("apt-get install")
+    {
+        return std::time::Duration::from_secs(45);
+    }
+    DISCORD_RUN_QUICK_WAIT
+}
+
 const BUNNY_EXIT_MARKER: &str = "__BUNNY_EXIT__";
 pub(crate) const NOTEBOOK_EXIT_MARKER: &str = BUNNY_EXIT_MARKER;
 pub const BUNNY_BACKGROUND_PID_MARKER: &str = "[bunny] background pid=";
@@ -756,17 +779,15 @@ pub fn interrupt_terminal_foreground(state: &AppState, term_id: Uuid) -> Result<
         anyhow::anyhow!("interrupt requires tmux — use the Web UI terminal (Ctrl+C)")
     })?;
 
-    for _ in 0..2 {
-        tmux::send_keys_key(&target, "C-c")?;
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    Ok(())
+    tmux::interrupt_pane_foreground(&target)
 }
 
 /// Send Ctrl+C to the shell tmux pane (stops foreground process started via `/bunny run`).
 pub fn exec_discord_shell_interrupt(state: &AppState, term_id: Uuid) -> Result<String> {
     interrupt_terminal_foreground(state, term_id)?;
+    // Match Web UI `/terminals/:id/run/stop`: clear notebook collectors and cancel
+    // running blocks so the shell unlocks and the Running badge disappears.
+    crate::blocks::stop_running_processes(state, term_id)?;
 
     let note = "Interruption (Ctrl+C) sent from Discord.";
     append_discord_transcript(
@@ -816,7 +837,12 @@ pub fn pane_cmd_is_incidental_pager(pane_cmd: &str, user_command: &str) -> bool 
 }
 
 /// Prefix notebook commands so pagers write to the pane instead of spawning `less`.
-pub fn notebook_shell_exec_line(command: &str, interactive: bool, notebook_shells: bool) -> String {
+pub fn notebook_shell_exec_line(
+    command: &str,
+    interactive: bool,
+    notebook_shells: bool,
+    virtual_env: Option<&str>,
+) -> String {
     if !notebook_shells || interactive {
         return command.to_string();
     }
@@ -824,11 +850,20 @@ pub fn notebook_shell_exec_line(command: &str, interactive: bool, notebook_shell
     if notebook_shell_state_command(command) {
         return format!("{command}; echo {BUNNY_EXIT_MARKER}$?");
     }
+    let command = virtual_env
+        .and_then(|venv| wrap_command_with_virtualenv(venv, command))
+        .unwrap_or_else(|| command.to_string());
+    tmux_pager_wrap(&command)
+}
+
+/// Wrap a command for tmux/notebook subshell capture (disable pagers, collect stderr).
+pub fn tmux_pager_wrap(command: &str) -> String {
+    let command = pager_safe_command(command);
     let first = command_base_name(
         command
             .split_whitespace()
             .next()
-            .unwrap_or(command),
+            .unwrap_or(&command),
     );
     let inner = format!("PAGER=cat GIT_PAGER=cat {command}");
     let body = if matches!(first.as_str(), "tree" | "find") {
@@ -837,6 +872,22 @@ pub fn notebook_shell_exec_line(command: &str, interactive: bool, notebook_shell
         format!("({inner}) 2>&1")
     };
     format!("{body}; echo {BUNNY_EXIT_MARKER}$?")
+}
+
+/// Prevent `git log` and similar from blocking on `less` inside capture wrappers.
+fn pager_safe_command(command: &str) -> String {
+    let cmd = command.trim();
+    let first = command_base_name(cmd.split_whitespace().next().unwrap_or(cmd));
+    if first != "git" || cmd.contains("--no-pager") {
+        return cmd.to_string();
+    }
+    if let Some(rest) = cmd.strip_prefix("git ") {
+        format!("git --no-pager {rest}")
+    } else if cmd == "git" {
+        "git --no-pager".to_string()
+    } else {
+        cmd.to_string()
+    }
 }
 
 /// Shell builtins / state commands that must not run in a notebook subshell wrapper.
@@ -864,7 +915,12 @@ pub fn notebook_instant_command(command: &str) -> bool {
         return true;
     }
     let first = cmd.split_whitespace().next().unwrap_or("");
-    command_base_name(first) == "cd"
+    let base = command_base_name(first);
+    if base == "cd" {
+        return true;
+    }
+    // Wrapped git runs finish quickly; rely on `__BUNNY_EXIT__` instead of echo matching.
+    base == "git" && !git_command_expects_interactive(cmd)
 }
 
 /// Whether runtime prompt heuristics may promote this command to interactive mode.
@@ -970,6 +1026,102 @@ pub fn pip_command_expects_interactive(command: &str) -> bool {
         return false;
     }
     lower.contains(" uninstall") || lower.contains(" remove")
+}
+
+/// Suggest a non-interactive pip uninstall/remove for Discord (`-y`).
+pub fn suggest_noninteractive_pip_uninstall(command: &str) -> Option<String> {
+    if !pip_command_expects_interactive(command) {
+        return None;
+    }
+    let lower = command.to_lowercase();
+    for kw in [" uninstall ", " remove "] {
+        if let Some(pos) = lower.find(kw) {
+            let insert_at = pos + kw.len();
+            let mut out = String::new();
+            out.push_str(&command[..insert_at]);
+            out.push_str("-y ");
+            out.push_str(command[insert_at..].trim_start());
+            return Some(out);
+        }
+    }
+    None
+}
+
+/// Structured i18n error for Discord `/bunny run` preflight (localized on the bridge).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordShellPreflightError {
+    pub key: &'static str,
+    pub args: Vec<(String, String)>,
+}
+
+impl DiscordShellPreflightError {
+    pub fn to_api_error(&self) -> crate::api::ApiError {
+        let args: Vec<(&str, &str)> = self
+            .args
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        crate::api::ApiError::validation_i18n(self.key, &args)
+    }
+
+    pub fn localized_message(&self, locale: Locale) -> String {
+        let args: Vec<(&str, &str)> = self
+            .args
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        bunny_i18n::t(locale, self.key, &args)
+    }
+}
+
+/// User-facing hint when a Discord shell run is waiting for stdin (y/n, editor, etc.).
+pub fn discord_shell_interactive_hint(locale: Locale, command: &str) -> String {
+    if let Err(err) = discord_shell_run_preflight(command) {
+        return err.localized_message(locale);
+    }
+    bunny_i18n::t(locale, "discord.run.interactive_generic", &[])
+}
+
+/// Reject Discord shell runs that cannot complete without a TTY or stdin.
+pub fn discord_shell_run_preflight(command: &str) -> Result<(), DiscordShellPreflightError> {
+    if bunny_discord::risk::is_interactive_discord_command(command) {
+        return Err(DiscordShellPreflightError {
+            key: "discord.run.interactive_tui_blocked",
+            args: vec![],
+        });
+    }
+    if user_command_expects_interactive(command) {
+        if let Some(suggested) = suggest_noninteractive_pip_uninstall(command) {
+            return Err(DiscordShellPreflightError {
+                key: "discord.run.interactive_pip_uninstall",
+                args: vec![("suggested".into(), suggested)],
+            });
+        }
+        if git_command_expects_interactive(command) {
+            return Err(DiscordShellPreflightError {
+                key: "discord.run.interactive_git",
+                args: vec![],
+            });
+        }
+        return Err(DiscordShellPreflightError {
+            key: "discord.run.interactive_generic",
+            args: vec![],
+        });
+    }
+    Ok(())
+}
+
+/// True when tmux capture shows a shell prompt waiting for y/n (or similar) on stdin.
+pub fn pane_text_awaits_user_input(text: &str) -> bool {
+    text.lines().rev().take(10).any(|line| {
+        let t = line.trim().to_lowercase();
+        t.contains("(y/n)")
+            || t.contains("[y/n]")
+            || t.contains("yes/no")
+            || t.contains("proceed (y/n)")
+            || (t.ends_with('?')
+                && (t.contains("proceed") || t.contains("continue") || t.contains("confirm")))
+    })
 }
 
 /// npm/yarn/pnpm/npx/bunx and common scaffolders that prompt on stdin.
@@ -1290,13 +1442,8 @@ pub fn exec_discord_shell_command_run(
     session_id: Uuid,
     command: &str,
     acting_user_id: Option<Uuid>,
+    locale: Locale,
 ) -> Result<DiscordShellRunResult> {
-    if bunny_discord::risk::is_interactive_discord_command(command) {
-        anyhow::bail!(
-            "interactive command not supported from Discord — use the Web UI terminal, or e.g. `head -n 80 landing-page.html` / `cat landing-page.html`"
-        );
-    }
-
     ensure_terminal_attached(state, term_id)?;
     prepare_discord_tmux_git_actor(state, term_id, session_id, acting_user_id)?;
     let auth_db = state.auth.db();
@@ -1306,25 +1453,8 @@ pub fn exec_discord_shell_command_run(
         .ok_or_else(|| anyhow::anyhow!("terminal not found"))?;
     let record = row_to_record(row);
 
-    // Non-interactive commands (git log, ls, …) run as a subprocess in the pane cwd so the
-    // live tmux view is not polluted with `bash -lc …; echo __BUNNY_EXIT__` wrappers.
-    if !discord_run_needs_interactive_shell(command) {
-        let (text, code) = exec_discord_shell_command_timed(
-            state,
-            term_id,
-            session_id,
-            command,
-            std::time::Duration::from_secs(40),
-            None,
-            acting_user_id,
-        )?;
-        return Ok(DiscordShellRunResult {
-            output: text,
-            exit_code: code,
-            persistent: false,
-        });
-    }
-
+    // Run in the live tmux shell so Discord commands inherit cwd, exports, venv, etc.
+    // Subprocess fallback only when no tmux target is available.
     let target = match resolve_tmux_target(state, &record)? {
         Some(t) => t,
         None => {
@@ -1345,16 +1475,17 @@ pub fn exec_discord_shell_command_run(
         }
     };
 
-    let baseline = capture_pane_text(&target).unwrap_or_default();
-    let wrapped = discord_run_wrap_command(command);
+    // Visible pane only — full scrollback breaks prefix deltas after prior runs.
+    let baseline = capture_pane_visible_text(&target).unwrap_or_default();
+    let wrapped = discord_run_wrap_command(command, true);
     tmux::send_keys_literal(&target, &wrapped, true)?;
     std::thread::sleep(std::time::Duration::from_millis(350));
 
     let started = std::time::Instant::now();
     let mut last_delta = String::new();
     let mut last_cap = String::new();
-    while started.elapsed() < DISCORD_RUN_QUICK_WAIT {
-        let Ok(cap) = capture_pane_text(&target) else {
+    while started.elapsed() < discord_run_quick_wait(command) {
+        let Ok(cap) = capture_pane_visible_text(&target) else {
             std::thread::sleep(std::time::Duration::from_millis(200));
             continue;
         };
@@ -1366,13 +1497,15 @@ pub fn exec_discord_shell_command_run(
         if !since.is_empty() {
             last_delta = since.clone();
         }
-        if let Some((output, code)) = split_on_exit_marker(&since) {
+        if let Some((output, code)) =
+            discord_try_parse_finished_command(&baseline, &cap, command, &wrapped, &since)
+        {
             let text = discord_output_or_shell_state_message(
                 state,
                 term_id,
                 command,
                 &cap,
-                sanitize_discord_terminal_excerpt(&output),
+                finalize_discord_run_excerpt(command, &output),
             );
             append_discord_transcript(
                 state,
@@ -1388,6 +1521,63 @@ pub fn exec_discord_shell_command_run(
             });
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // One last capture — fast commands can finish right as the quick-wait window closes.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    if let Ok(cap) = capture_pane_visible_text(&target) {
+        last_cap = cap.clone();
+        let since = pane_text_delta_for_discord_run(&baseline, &cap, command, &wrapped);
+        if !since.is_empty() {
+            last_delta = since.clone();
+        }
+        if let Some((output, code)) =
+            discord_try_parse_finished_command(&baseline, &cap, command, &wrapped, &since)
+        {
+            let text = discord_output_or_shell_state_message(
+                state,
+                term_id,
+                command,
+                &cap,
+                finalize_discord_run_excerpt(command, &output),
+            );
+            append_discord_transcript(
+                state,
+                term_id,
+                command,
+                discord_transcript_body_for_run_output(&text),
+                acting_user_id,
+            );
+            return Ok(DiscordShellRunResult {
+                output: text,
+                exit_code: code,
+                persistent: false,
+            });
+        }
+    }
+
+    if let Some((output, code)) =
+        discord_try_parse_finished_command(&baseline, &last_cap, command, &wrapped, &last_delta)
+    {
+        let text = discord_output_or_shell_state_message(
+            state,
+            term_id,
+            command,
+            &last_cap,
+            finalize_discord_run_excerpt(command, &output),
+        );
+        append_discord_transcript(
+            state,
+            term_id,
+            command,
+            discord_transcript_body_for_run_output(&text),
+            acting_user_id,
+        );
+        return Ok(DiscordShellRunResult {
+            output: text,
+            exit_code: code,
+            persistent: false,
+        });
     }
 
     if let Some(text) =
@@ -1407,7 +1597,22 @@ pub fn exec_discord_shell_command_run(
         });
     }
 
-    let excerpt = sanitize_discord_terminal_excerpt(&last_delta);
+    let excerpt = finalize_discord_run_excerpt(command, &last_delta);
+    if pane_text_awaits_user_input(&last_cap) || pane_text_awaits_user_input(&excerpt) {
+        let hint = discord_shell_interactive_hint(locale, command);
+        append_discord_transcript(
+            state,
+            term_id,
+            command,
+            DiscordTranscriptBody::Output(&hint),
+            acting_user_id,
+        );
+        return Ok(DiscordShellRunResult {
+            output: hint,
+            exit_code: 1,
+            persistent: false,
+        });
+    }
     append_discord_transcript(
         state,
         term_id,
@@ -1444,11 +1649,15 @@ fn discord_output_or_shell_state_message(
     cap: &str,
     sanitized: String,
 ) -> String {
-    if !sanitized.trim().is_empty() {
+    if !discord_display_output_is_empty(&sanitized) {
         return sanitized;
     }
     crate::blocks::shell_state_success_message(state, term_id, command, cap)
         .unwrap_or_else(|| "(no output)".to_string())
+}
+
+pub(crate) fn discord_display_output_is_empty(output: &str) -> bool {
+    output.trim().is_empty() || output.trim() == "(no output)"
 }
 
 fn discord_transcript_body_for_run_output(text: &str) -> DiscordTranscriptBody<'_> {
@@ -1477,15 +1686,16 @@ fn pane_text_delta_for_discord_run(
         return since;
     }
     let after_norm = normalize_pane_text(after);
-    let before_norm = normalize_pane_text(before);
     if let Some(marker_idx) = after_norm.rfind(BUNNY_EXIT_MARKER) {
-        let marker_tail = &after_norm[marker_idx..];
-        if !before_norm.contains(marker_tail) {
-            let start = after_norm[..marker_idx]
-                .rfind('\n')
-                .map(|i| i + 1)
-                .unwrap_or(0);
-            return after_norm[start..].trim_end().to_string();
+        if exit_marker_is_new(before, after, marker_idx) {
+            let new_suffix = pane_text_new_suffix(before, after);
+            if let Some(rel) = new_suffix.rfind(BUNNY_EXIT_MARKER) {
+                let marker_line = new_suffix[rel..].lines().next().unwrap_or("");
+                let rest = marker_line.trim().strip_prefix(BUNNY_EXIT_MARKER);
+                if rest.is_some_and(|r| r.trim().parse::<i32>().is_ok()) {
+                    return new_suffix[..rel + marker_line.len()].trim_end().to_string();
+                }
+            }
         }
     }
     for cmd in [command, wrapped] {
@@ -1497,15 +1707,17 @@ fn pane_text_delta_for_discord_run(
     since
 }
 
-fn discord_run_wrap_command(command: &str) -> String {
+fn discord_run_wrap_command(command: &str, in_tmux_shell: bool) -> String {
     if discord_run_needs_interactive_shell(command) {
-        format!("{}; echo {BUNNY_EXIT_MARKER}$?", command.trim())
-    } else {
-        format!(
-            "bash -lc {}; echo {BUNNY_EXIT_MARKER}$?",
-            shell_single_quote(command)
-        )
+        return format!("{}; echo {BUNNY_EXIT_MARKER}$?", command.trim());
     }
+    if in_tmux_shell {
+        return tmux_pager_wrap(command);
+    }
+    format!(
+        "bash --noprofile --norc -c {}; echo {BUNNY_EXIT_MARKER}$?",
+        shell_single_quote(command)
+    )
 }
 
 fn shell_single_quote(s: &str) -> String {
@@ -1546,6 +1758,131 @@ pub fn capture_interactive_tty_snapshot(state: &AppState, term_id: Uuid) -> Stri
     let lines: Vec<&str> = full.lines().collect();
     let start = lines.len().saturating_sub(48);
     lines[start..].join("\n")
+}
+
+/// Active `VIRTUAL_ENV` from the live tmux shell, if any.
+pub fn terminal_active_virtual_env(state: &AppState, term_id: Uuid) -> Option<String> {
+    if !state.terminals.uses_tmux() {
+        return None;
+    }
+    let _ = ensure_terminal_attached(state, term_id).ok()?;
+    let target = terminal_tmux_target(state, term_id)?;
+
+    if let Some(venv) = read_pane_env_var(&target, "VIRTUAL_ENV") {
+        if virtual_env_has_activate(&venv) {
+            return Some(venv);
+        }
+    }
+
+    if let Some(venv) = virtual_env_from_pane_path(&target) {
+        return Some(venv);
+    }
+
+    if pane_shows_virtualenv_prompt(state, term_id) {
+        if let Some(cwd) = bunny_pty::tmux::pane_cwd(&target) {
+            let cwd = std::path::PathBuf::from(cwd);
+            if virtual_env_has_activate(&cwd.to_string_lossy()) {
+                return Some(cwd.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    None
+}
+
+fn terminal_tmux_target(state: &AppState, term_id: Uuid) -> Option<String> {
+    if let Some(target) = state.terminals.tmux_target(term_id) {
+        if bunny_pty::tmux::target_alive(&target) {
+            return Some(target);
+        }
+    }
+    let row = state.auth.db().lock().get_terminal(term_id).ok()??;
+    let record = row_to_record(row);
+    resolve_tmux_target(state, &record).ok()?
+}
+
+fn read_pane_env_var(target: &str, key: &str) -> Option<String> {
+    let value = bunny_pty::tmux::pane_shell_env_var(target, key)?;
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn virtual_env_has_activate(venv: &str) -> bool {
+    std::path::Path::new(venv)
+        .join("bin/activate")
+        .is_file()
+}
+
+fn virtual_env_from_pane_path(target: &str) -> Option<String> {
+    let path = read_pane_env_var(target, "PATH")?;
+    for segment in path.split(':') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        let bin = std::path::Path::new(segment);
+        if bin.file_name().and_then(|s| s.to_str()) != Some("bin") {
+            continue;
+        }
+        let venv = bin.parent()?;
+        if virtual_env_has_activate(&venv.to_string_lossy()) {
+            return Some(venv.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+fn pane_shows_virtualenv_prompt(state: &AppState, term_id: Uuid) -> bool {
+    let cap = capture_pane_visible_for_terminal(state, term_id).unwrap_or_default();
+    pane_text_shows_virtualenv_prefix(&cap)
+}
+
+fn pane_text_shows_virtualenv_prefix(cap: &str) -> bool {
+    cap.lines().rev().any(|line| {
+        let t = line.trim();
+        let (Some(open), Some(close)) = (t.find('('), t.find(')')) else {
+            return false;
+        };
+        if close <= open + 1 {
+            return false;
+        }
+        let rest = t[close + 1..].trim();
+        rest.is_empty()
+            || rest.ends_with('$')
+            || rest.ends_with('#')
+            || rest.ends_with('%')
+            || rest.contains('$')
+            || rest.contains('#')
+    })
+}
+
+/// Prefix a command with `source …/bin/activate` when a venv is active.
+pub fn wrap_command_with_virtualenv(venv: &str, command: &str) -> Option<String> {
+    if notebook_shell_state_command(command) {
+        return None;
+    }
+    let activate = std::path::Path::new(venv).join("bin/activate");
+    if !activate.is_file() {
+        return None;
+    }
+    Some(format!(
+        "source {} && {}",
+        shell_single_quote(&activate.to_string_lossy()),
+        command
+    ))
+}
+
+fn discord_subprocess_command(
+    state: &AppState,
+    term_id: Uuid,
+    command: &str,
+) -> String {
+    terminal_active_virtual_env(state, term_id)
+        .and_then(|venv| wrap_command_with_virtualenv(&venv, command))
+        .unwrap_or_else(|| command.to_string())
 }
 
 /// Virtualenv prefix from the live shell, e.g. `(test-venv) `.
@@ -1751,7 +2088,71 @@ fn pane_text_after_prompt_anchor(before: &str, after: &str) -> Option<String> {
     Some(rest)
 }
 
+fn command_echo_variants(command: &str) -> Vec<String> {
+    let mut variants = vec![command.to_string()];
+    let safe = pager_safe_command(command);
+    if safe != command {
+        variants.push(safe);
+    }
+    if let Some(body) = command.split("; echo ").next() {
+        let body = body.trim().to_string();
+        if !body.is_empty() && body != command && !variants.contains(&body) {
+            variants.push(body);
+        }
+    }
+    variants
+}
+
 fn line_echoes_command(line: &str, command: &str) -> bool {
+    for variant in command_echo_variants(command) {
+        if line_echoes_command_variant(line, &variant) {
+            return true;
+        }
+    }
+    false
+}
+
+fn git_command_echo_tail(command: &str) -> Option<String> {
+    let mut cmd = command.trim();
+    cmd = cmd.split("; echo ").next().unwrap_or(cmd).trim();
+    if let Some(inner) = cmd.strip_prefix('(').and_then(|s| s.split(')').next()) {
+        cmd = inner.trim();
+    }
+    let mut body = cmd;
+    if let Some(rest) = body.strip_prefix("PAGER=cat GIT_PAGER=cat ") {
+        body = rest;
+    }
+    body = body.strip_suffix(" 2>&1").unwrap_or(body).trim();
+    if let Some(rest) = body.strip_prefix("git --no-pager ") {
+        return Some(rest.to_string());
+    }
+    if let Some(rest) = body.strip_prefix("git ") {
+        return Some(rest.to_string());
+    }
+    None
+}
+
+/// Tmux often clips long echoed lines — match when the pane line contains a git prefix of `tail`.
+fn line_echoes_git_tail(line: &str, tail: &str) -> bool {
+    if !line.contains('#') && !line.contains('@') {
+        return false;
+    }
+    for git_prefix in ["git --no-pager ", "git "] {
+        let full = format!("{git_prefix}{tail}");
+        if line.contains(&full) {
+            return true;
+        }
+        if let Some(pos) = line.find(git_prefix) {
+            let after = line[pos + git_prefix.len()..].trim_end();
+            if !after.is_empty() && tail.starts_with(after) && after.len() >= 3 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn line_echoes_command_variant(line: &str, command: &str) -> bool {
     let t = line.trim();
     if t.is_empty() || command.is_empty() {
         return false;
@@ -1762,6 +2163,32 @@ fn line_echoes_command(line: &str, command: &str) -> bool {
     // Avoid `ls` matching `rails`, `tools`, or directory listings via `ends_with("ls")`.
     if command.len() > 3 && t.ends_with(command) {
         return true;
+    }
+    if let Some(tail) = git_command_echo_tail(command) {
+        if line_echoes_git_tail(t, &tail) {
+            return true;
+        }
+        // Git subcommands share the same tmux wrapper prefix (`PAGER=cat … git --no-pa`).
+        // Do not fall through to the generic wrapper prefix or `git status` echoes
+        // false-match `git commit` (and vice versa).
+        return false;
+    }
+    if let Some(tail) = command.strip_prefix("git ") {
+        if line_echoes_git_tail(t, tail) {
+            return true;
+        }
+    }
+    // Tmux truncates long echoed wrapper lines — match a stable inner prefix.
+    if (t.contains('#') || t.contains('@')) && command.len() >= 24 {
+        let body = command
+            .trim_start_matches('(')
+            .split(") 2>&1")
+            .next()
+            .unwrap_or(command);
+        let prefix_len = body.len().min(36);
+        if prefix_len >= 16 && t.contains(&body[..prefix_len]) {
+            return true;
+        }
     }
     if (t.contains('#') || t.contains('$') || t.contains('@')) && t.contains(command) {
         if command.len() <= 3 {
@@ -1789,6 +2216,128 @@ fn pane_text_after_command_echo(after: &str, command: &str) -> Option<String> {
     Some(lines.join("\n").trim().to_string())
 }
 
+/// Output + exit code from the last command echo through a complete exit marker.
+pub fn parse_captured_run_after_last_echo(
+    text: &str,
+    command: &str,
+    exec_line: &str,
+) -> Option<(String, i32)> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    let mut last_match: Option<usize> = None;
+    for cmd in command_echo_variants(exec_line) {
+        for variant in command_echo_variants(&cmd) {
+            update_last_command_echo_match(text, &variant, &mut last_match);
+        }
+    }
+    for variant in command_echo_variants(command) {
+        update_last_command_echo_match(text, &variant, &mut last_match);
+    }
+    let start = last_match? + 1;
+    let after_echo: String = text.lines().skip(start).collect::<Vec<_>>().join("\n");
+    split_on_exit_marker(&after_echo)
+}
+
+fn update_last_command_echo_match(text: &str, variant: &str, last_match: &mut Option<usize>) {
+    let lines: Vec<&str> = text.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        if line_echoes_command_variant(line, variant) {
+            *last_match = Some(last_match.map_or(idx, |m| m.max(idx)));
+        }
+        if idx + 1 < lines.len() {
+            let joined = format!("{}{}", line, lines[idx + 1]);
+            if line_echoes_command_variant(&joined, variant) {
+                *last_match = Some(last_match.map_or(idx, |m| m.max(idx)));
+            }
+        }
+    }
+}
+
+/// Text appended after `before` was captured (prefix match or best-effort delta).
+pub fn pane_text_new_suffix(before: &str, after: &str) -> String {
+    let before_norm = normalize_pane_text(before);
+    let after_norm = normalize_pane_text(after);
+    if after_norm.starts_with(&before_norm) {
+        after_norm[before_norm.len()..].to_string()
+    } else {
+        pane_text_since_baseline(before, after)
+    }
+}
+
+/// True when `marker_pos` points at an exit marker appended after `before` was captured.
+fn exit_marker_is_new(before: &str, after: &str, marker_pos: usize) -> bool {
+    let before_norm = normalize_pane_text(before);
+    let after_norm = normalize_pane_text(after);
+    if after_norm.starts_with(&before_norm) {
+        return marker_pos >= before_norm.len();
+    }
+    if pane_text_since_baseline(before, after).contains(BUNNY_EXIT_MARKER) {
+        return true;
+    }
+    // Scrollback can shift without a shared prefix — compare marker counts instead.
+    let before_markers = before_norm.matches(BUNNY_EXIT_MARKER).count();
+    let after_markers = after_norm[..marker_pos.saturating_add(BUNNY_EXIT_MARKER.len())]
+        .matches(BUNNY_EXIT_MARKER)
+        .count();
+    after_markers > before_markers
+}
+
+/// Parse a finished Discord/tmux command from delta or full-pane fallback.
+fn discord_try_parse_finished_command(
+    baseline: &str,
+    cap: &str,
+    command: &str,
+    wrapped: &str,
+    since: &str,
+) -> Option<(String, i32)> {
+    let suffix = pane_text_new_suffix(baseline, cap);
+    for text in [&suffix, since, cap] {
+        if let Some((output, code)) = parse_captured_run_after_last_echo(text, command, wrapped) {
+            return Some((strip_shell_capture_artifacts(command, &output), code));
+        }
+    }
+    // Tmux often truncates echoed wrapper lines — fall back to the exit marker alone.
+    for text in [since, &suffix, cap] {
+        if let Some((output, code)) = split_on_exit_marker(text) {
+            if text == cap {
+                let after_norm = normalize_pane_text(cap);
+                let idx = after_norm.rfind(BUNNY_EXIT_MARKER)?;
+                if !exit_marker_is_new(baseline, cap, idx) {
+                    continue;
+                }
+            }
+            return Some((strip_shell_capture_artifacts(command, &output), code));
+        }
+    }
+    for cmd in [wrapped, command] {
+        let delta = pane_text_delta(baseline, cap, Some(cmd));
+        if let Some((output, code)) = split_on_exit_marker(&delta) {
+            return Some((strip_shell_capture_artifacts(command, &output), code));
+        }
+    }
+    parse_finished_from_newest_exit_marker(baseline, cap, command, wrapped)
+}
+
+/// Last-resort parse when scrollback shifted but a new exit marker appeared on screen.
+fn parse_finished_from_newest_exit_marker(
+    baseline: &str,
+    cap: &str,
+    command: &str,
+    wrapped: &str,
+) -> Option<(String, i32)> {
+    let cap_norm = normalize_pane_text(cap);
+    let idx = cap_norm.rfind(BUNNY_EXIT_MARKER)?;
+    if !exit_marker_is_new(baseline, cap, idx) {
+        return None;
+    }
+    if let Some((output, code)) = parse_captured_run_after_last_echo(&cap_norm, command, wrapped) {
+        return Some((strip_shell_capture_artifacts(command, &output), code));
+    }
+    let (output, code) = split_on_exit_marker(&cap_norm)?;
+    Some((strip_shell_capture_artifacts(command, &output), code))
+}
+
 /// Capture output for fast notebook commands using the same pane delta logic as
 /// non-instant commands (prefix match, command echo, baseline line stripping).
 pub fn capture_instant_notebook_output(
@@ -1809,12 +2358,19 @@ pub fn capture_instant_notebook_output(
         raw = pane_text_delta(baseline, cap, None);
     }
     let (parsed, code) = notebook_parse_captured_output(&raw);
+    if parsed.trim().is_empty() {
+        if let Some((fallback, code)) =
+            parse_finished_from_newest_exit_marker(baseline, cap, command, exec_line)
+        {
+            return (fallback, Some(code));
+        }
+    }
     (parsed, code)
 }
 
 fn split_on_exit_marker(delta: &str) -> Option<(String, i32)> {
     let idx = delta.rfind(BUNNY_EXIT_MARKER)?;
-    let output = delta[..idx].trim_end().to_string();
+    let output = strip_shell_capture_artifacts("", &delta[..idx]);
     let code_str = delta[idx + BUNNY_EXIT_MARKER.len()..]
         .lines()
         .next()?
@@ -1830,6 +2386,85 @@ pub fn notebook_parse_captured_output(raw: &str) -> (String, Option<i32>) {
     } else {
         (raw.to_string(), None)
     }
+}
+
+fn finalize_discord_run_excerpt(command: &str, raw: &str) -> String {
+    let sanitized = sanitize_discord_terminal_excerpt(raw);
+    curate_discord_install_output(command, &sanitized)
+}
+
+/// Keep pip/npm install replies short in Discord — progress bars are noisy in chat.
+fn curate_discord_install_output(command: &str, output: &str) -> String {
+    let text = output.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    let lower = command.to_lowercase();
+    if lower.contains("pip install") || lower.contains("pip3 install") {
+        return curate_pip_discord_output(text);
+    }
+    if lower.contains("npm install") || lower.contains("npm ci") {
+        return curate_npm_discord_output(text);
+    }
+    text.to_string()
+}
+
+fn curate_pip_discord_output(output: &str) -> String {
+    let mut highlights: Vec<String> = Vec::new();
+    for line in output.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let tl = t.to_lowercase();
+        if tl.contains("successfully installed")
+            || tl.contains("requirement already satisfied")
+            || tl.starts_with("error")
+            || tl.contains("could not find a version")
+            || tl.contains("no matching distribution")
+            || tl.contains("permission denied")
+            || tl.contains("externally-managed-environment")
+        {
+            highlights.push(t.to_string());
+        }
+    }
+    if !highlights.is_empty() {
+        return highlights.join("\n");
+    }
+    tail_non_empty_lines(output, 6)
+}
+
+fn curate_npm_discord_output(output: &str) -> String {
+    let mut highlights: Vec<String> = Vec::new();
+    for line in output.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let tl = t.to_lowercase();
+        if tl.starts_with("added ")
+            || tl.starts_with("up to date")
+            || tl.contains("packages are looking for funding")
+            || tl.starts_with("npm err")
+            || tl.contains("error code")
+        {
+            highlights.push(t.to_string());
+        }
+    }
+    if !highlights.is_empty() {
+        return highlights.join("\n");
+    }
+    tail_non_empty_lines(output, 6)
+}
+
+fn tail_non_empty_lines(output: &str, max: usize) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let start = lines.len().saturating_sub(max);
+    lines[start..].join("\n")
 }
 
 /// Clean tmux capture for Discord: drop wrapper noise, dev-server boilerplate, cap size.
@@ -1885,9 +2520,66 @@ fn sanitize_discord_terminal_excerpt(raw: &str) -> String {
 }
 
 fn should_skip_discord_run_line(trimmed: &str) -> bool {
-    trimmed.contains(BUNNY_EXIT_MARKER)
+    is_exit_capture_noise_line(trimmed)
         || trimmed.starts_with("bash -lc ")
+        || trimmed.starts_with("bash --noprofile")
         || trimmed.contains("[discord] $")
+}
+
+/// Wrapper echoes and partial `__BUNNY_EXIT__$?` tmux capture artifacts.
+fn is_exit_capture_noise_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() || t == "?" {
+        return true;
+    }
+    if t.contains(BUNNY_EXIT_MARKER) || t.contains("BUNNY_EXIT__") {
+        return true;
+    }
+    if t.starts_with("(PAGER=cat GIT_PAGER=cat") || t.starts_with("PAGER=cat GIT_PAGER=cat") {
+        return true;
+    }
+    if t.contains("PAGER=cat GIT_PAGER=cat") && t.contains("2>&1") {
+        return true;
+    }
+    // Truncated tmux echo: prompt + wrapper without the trailing `2>&1; echo …`.
+    if t.contains("PAGER=cat GIT_PAGER=cat git") && (t.contains('#') || t.contains('@')) {
+        return true;
+    }
+    if t.contains("; echo ") && t.contains("EXIT__") {
+        return true;
+    }
+    if t.ends_with("$?") && (t.contains("EXIT__") || t.len() <= 12) {
+        return true;
+    }
+    false
+}
+
+/// Clean Discord/tmux captured output before notebook blocks or API excerpts.
+pub(crate) fn curate_discord_shell_output(command: &str, output: &str) -> String {
+    let text = strip_shell_capture_artifacts(command, output);
+    if text.is_empty() {
+        "(no output)".to_string()
+    } else {
+        text
+    }
+}
+
+fn strip_shell_capture_artifacts(command: &str, output: &str) -> String {
+    let output = strip_ansi_escapes(output);
+    let output = output.replace("\r\n", "\n").replace('\r', "\n");
+    output
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            !t.is_empty()
+                && t != command
+                && !is_exit_capture_noise_line(line)
+                && !is_shell_prompt_line(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn is_mostly_box_drawing(s: &str) -> bool {
@@ -1906,6 +2598,22 @@ mod discord_run_tests {
     use super::*;
 
     #[test]
+    fn virtualenv_subprocess_path_prepends_venv_bin() {
+        let path = discord_subprocess_path_for_venv("/root/project", None, "/usr/bin");
+        assert_eq!(path, "/root/project/bin:/usr/bin");
+    }
+
+    #[test]
+    fn virtualenv_subprocess_path_prefers_pane_path() {
+        let path = discord_subprocess_path_for_venv(
+            "/root/project",
+            Some("/root/project/bin:/usr/bin"),
+            "/usr/bin",
+        );
+        assert_eq!(path, "/root/project/bin:/usr/bin");
+    }
+
+    #[test]
     fn activate_after_prompt_change_still_finds_exit_marker() {
         let baseline = "root@host:~/project# ";
         let cap = concat!(
@@ -1918,6 +2626,19 @@ mod discord_run_tests {
         let (_, code) = split_on_exit_marker(&since).unwrap();
         assert_eq!(code, 0);
         assert!(!since.is_empty());
+    }
+
+    #[test]
+    fn split_on_exit_marker_leaves_empty_not_no_output_placeholder() {
+        let (out, code) = split_on_exit_marker("source bin/activate; echo __BUNNY_EXIT__$?\n__BUNNY_EXIT__0").unwrap();
+        assert_eq!(code, 0);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn curate_strips_partial_exit_marker_echo() {
+        let out = curate_discord_shell_output("pwd", "_BUNNY_EXIT__$?\n/root/project");
+        assert_eq!(out, "/root/project");
     }
 
     #[test]
@@ -2114,16 +2835,54 @@ mod discord_run_tests {
     fn cd_runs_in_interactive_shell_not_subshell() {
         assert!(discord_run_needs_interactive_shell("cd my-app"));
         assert!(discord_run_needs_interactive_shell("cd my-app && npm install"));
-        let wrapped = discord_run_wrap_command("cd my-app");
+        let wrapped = discord_run_wrap_command("cd my-app", true);
         assert!(!wrapped.contains("bash -lc"));
+        assert!(!wrapped.contains("bash --noprofile"));
         assert!(wrapped.contains(BUNNY_EXIT_MARKER));
     }
 
     #[test]
-    fn ordinary_commands_still_use_bash_subshell() {
+    fn ordinary_commands_use_bash_subshell_outside_tmux() {
         assert!(!discord_run_needs_interactive_shell("ls -la"));
-        let wrapped = discord_run_wrap_command("ls -la");
-        assert!(wrapped.starts_with("bash -lc "));
+        let wrapped = discord_run_wrap_command("ls -la", false);
+        assert!(wrapped.contains("bash --noprofile --norc -c "));
+    }
+
+    #[test]
+    fn ordinary_commands_use_tmux_subshell_in_pane() {
+        let wrapped = discord_run_wrap_command("pip list", true);
+        assert!(wrapped.contains("PAGER=cat GIT_PAGER=cat pip list"));
+        assert!(!wrapped.contains("bash --noprofile"));
+        assert!(wrapped.contains(BUNNY_EXIT_MARKER));
+    }
+
+    #[test]
+    fn pane_text_detects_virtualenv_prompt() {
+        assert!(pane_text_shows_virtualenv_prefix("(project) $ "));
+        assert!(pane_text_shows_virtualenv_prefix("root@host:~/project# source bin/activate\n(project) $ "));
+        assert!(!pane_text_shows_virtualenv_prefix("root@host:~/project# "));
+    }
+
+    #[test]
+    fn virtual_env_from_path_prefix() {
+        let venv = virtual_env_from_pane_path_for_test("/root/project/bin:/usr/bin");
+        assert_eq!(venv, Some("/root/project".to_string()));
+    }
+
+    fn virtual_env_from_pane_path_for_test(path: &str) -> Option<String> {
+        for segment in path.split(':') {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                continue;
+            }
+            let bin = std::path::Path::new(segment);
+            if bin.file_name().and_then(|s| s.to_str()) != Some("bin") {
+                continue;
+            }
+            let venv = bin.parent()?;
+            return Some(venv.to_string_lossy().into_owned());
+        }
+        None
     }
 
     #[test]
@@ -2195,7 +2954,7 @@ mod discord_run_tests {
     #[test]
     fn transcript_leaves_ordinary_command_output() {
         let out = super::sanitize_discord_transcript_output("git log -1", "abc1234 fix\n");
-        assert_eq!(out, "abc1234 fix\n");
+        assert_eq!(out, "abc1234 fix");
     }
 
     #[test]
@@ -2210,13 +2969,59 @@ mod discord_run_tests {
     }
 
     #[test]
-    fn non_interactive_commands_use_subprocess_not_tmux_wrap() {
+    fn non_interactive_commands_use_subprocess_only_as_fallback() {
         assert!(!discord_run_needs_interactive_shell("git log"));
         assert!(!discord_run_needs_interactive_shell("ls -la"));
-        let wrapped = discord_run_wrap_command("git log");
-        assert!(wrapped.contains(BUNNY_EXIT_MARKER));
+        let tmux_wrapped = discord_run_wrap_command("git log", true);
+        assert!(tmux_wrapped.contains(BUNNY_EXIT_MARKER));
+        assert!(tmux_wrapped.contains("PAGER=cat GIT_PAGER=cat git --no-pager log"));
+        let subprocess_wrapped = discord_run_wrap_command("git log", false);
+        assert!(subprocess_wrapped.contains("bash --noprofile"));
         // Interactive builtins still need the tmux pane.
         assert!(discord_run_needs_interactive_shell("cd my-app"));
+    }
+
+    #[test]
+    fn pane_detects_pip_uninstall_confirmation_prompt() {
+        let cap = "Proceed (y/n)?";
+        assert!(pane_text_awaits_user_input(cap));
+    }
+
+    #[test]
+    fn pip_uninstall_suggests_yes_flag_for_discord() {
+        assert_eq!(
+            suggest_noninteractive_pip_uninstall("pip uninstall requests"),
+            Some("pip uninstall -y requests".to_string())
+        );
+        assert_eq!(
+            suggest_noninteractive_pip_uninstall("pip uninstall -y requests"),
+            None
+        );
+    }
+
+    #[test]
+    fn pip_uninstall_blocked_from_discord_without_yes() {
+        assert!(discord_shell_run_preflight("pip uninstall requests").is_err());
+        assert!(discord_shell_run_preflight("pip uninstall -y requests").is_ok());
+    }
+
+    #[test]
+    fn pip_uninstall_preflight_carries_i18n_key() {
+        let err = discord_shell_run_preflight("pip uninstall requests").unwrap_err();
+        assert_eq!(err.key, "discord.run.interactive_pip_uninstall");
+        assert_eq!(err.args[0].1, "pip uninstall -y requests");
+        let en = bunny_i18n::t(
+            Locale::En,
+            err.key,
+            &[("suggested", &err.args[0].1)],
+        );
+        assert!(en.contains("interactive confirmation"));
+        let fr = bunny_i18n::t(
+            Locale::Fr,
+            err.key,
+            &[("suggested", &err.args[0].1)],
+        );
+        assert!(fr.contains("confirmation interactive"));
     }
 
     #[test]
@@ -2226,6 +3031,307 @@ mod discord_run_tests {
         assert!(!pip_command_expects_interactive("pip uninstall -y requests"));
         assert!(!pip_command_expects_interactive("pip install requests"));
         assert!(user_command_expects_interactive("pip uninstall requests"));
+    }
+
+    #[test]
+    fn pip_install_gets_extended_quick_wait() {
+        assert_eq!(
+            discord_run_quick_wait("pip install requests"),
+            std::time::Duration::from_secs(45)
+        );
+        assert_eq!(discord_run_quick_wait("ls -la"), DISCORD_RUN_QUICK_WAIT);
+    }
+
+    #[test]
+    fn curate_pip_install_keeps_success_line_only() {
+        let raw = "Collecting requests\n  Downloading requests-2.32.0.whl (120 kB)\nInstalling collected packages: requests\nSuccessfully installed requests-2.32.0 urllib3-2.2.0";
+        let out = curate_pip_discord_output(raw);
+        assert!(out.contains("Successfully installed requests"));
+        assert!(!out.contains("Downloading"));
+    }
+
+    #[test]
+    fn curate_pip_install_keeps_already_satisfied() {
+        let raw = "Requirement already satisfied: requests in ./lib/python3.12/site-packages (2.32.0)";
+        let out = curate_pip_discord_output(raw);
+        assert!(out.contains("Requirement already satisfied"));
+    }
+
+    #[test]
+    fn line_echoes_truncated_git_log_oneline() {
+        let line = "root@2ccd835b85cb:~/project# (PAGER=cat GIT_PAGER=cat git --no-pager log -1 --on";
+        assert!(line_echoes_command(line, "git log -1 --oneline"));
+        let wrapped = discord_run_wrap_command("git log -1 --oneline", true);
+        assert!(line_echoes_command(line, &wrapped));
+    }
+
+    #[test]
+    fn parse_truncated_git_log_oneline_echo_returns_single_line() {
+        let wrapped = discord_run_wrap_command("git log -1 --oneline", true);
+        let truncated = "(PAGER=cat GIT_PAGER=cat git --no-pager log -1 --on";
+        let text = format!(
+            "root@host:~/project# {truncated}\n\
+             58a3135 (HEAD -> master) added yo\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# "
+        );
+        let (out, code) =
+            parse_captured_run_after_last_echo(&text, "git log -1 --oneline", &wrapped).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out.trim(), "58a3135 (HEAD -> master) added yo");
+    }
+
+    #[test]
+    fn parse_after_last_echo_ignores_prior_git_log_when_echo_truncated() {
+        let wrapped = discord_run_wrap_command("git log -1 --oneline", true);
+        let truncated = "(PAGER=cat GIT_PAGER=cat git --no-pager log -1 --on";
+        let text = format!(
+            "58a3135 (HEAD -> master) added yo\n\
+             root@host:~/project# {truncated}\n\
+             58a3135 (HEAD -> master) added yo\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# "
+        );
+        let (out, code) =
+            parse_captured_run_after_last_echo(&text, "git log -1 --oneline", &wrapped).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out.matches("58a3135").count(), 1);
+    }
+
+    #[test]
+    fn discord_git_status_parses_via_exit_marker_without_echo_match() {
+        let baseline = "(project) root@host:~/project# ";
+        let wrapped = discord_run_wrap_command("git status", true);
+        let cap = format!(
+            "(project) root@host:~/project# {wrapped}\n\
+             On branch master\n\
+             Untracked files:\n\
+               .gitignore\n\
+             nothing added to commit but untracked files present (use \"git add\" to track)\n\
+             __BUNNY_EXIT__0\n\
+             (project) root@host:~/project# "
+        );
+        let since = pane_text_delta_for_discord_run(baseline, &cap, "git status", &wrapped);
+        let parsed =
+            discord_try_parse_finished_command(baseline, &cap, "git status", &wrapped, &since)
+                .expect("git status should finish via exit marker");
+        assert_eq!(parsed.1, 0);
+        assert!(parsed.0.contains("On branch master"));
+        assert!(parsed.0.contains(".gitignore"));
+    }
+
+    #[test]
+    fn notebook_instant_includes_non_interactive_git() {
+        assert!(notebook_instant_command("git status"));
+        assert!(notebook_instant_command("git log -1 --oneline"));
+        assert!(notebook_instant_command("git commit -m \"fix\""));
+        assert!(!notebook_instant_command("git commit"));
+        assert!(!notebook_instant_command("git add -p"));
+    }
+
+    #[test]
+    fn wrapped_commit_echo_tail_parses_subcommand() {
+        let wrapped = discord_run_wrap_command("git commit -m \"nothing\"", true);
+        assert_eq!(
+            git_command_echo_tail(&wrapped).as_deref(),
+            Some("commit -m \"nothing\"")
+        );
+    }
+
+    #[test]
+    fn git_status_echo_does_not_match_git_commit_command() {
+        let line = "root@host:~/project# (PAGER=cat GIT_PAGER=cat git --no-pager status) 2>&1; echo __BUNNY_EXIT__$?";
+        let commit = "git commit -m \"nothing\"";
+        assert!(!line_echoes_command(line, commit));
+        let wrapped = discord_run_wrap_command(commit, true);
+        for v in command_echo_variants(&wrapped) {
+            assert!(
+                !line_echoes_command_variant(line, &v),
+                "status echo matched commit variant: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_git_commit_after_git_status_uses_commit_echo_not_status() {
+        let status_wrapped = discord_run_wrap_command("git status", true);
+        let commit = "git commit -m \"nothing2\"";
+        let commit_wrapped = discord_run_wrap_command(commit, true);
+        let text = format!(
+            "root@host:~/project# {status_wrapped}\n\
+             On branch master\n\
+             Untracked files:\n\
+               .gitignore\n\
+             nothing added to commit but untracked files present (use \"git add\" to track)\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# {commit_wrapped}\n\
+             On branch master\n\
+             Untracked files:\n\
+               .gitignore\n\
+             nothing added to commit but untracked files present (use \"git add\" to track)\n\
+             __BUNNY_EXIT__1\n\
+             root@host:~/project# "
+        );
+        let (out, code) =
+            parse_captured_run_after_last_echo(&text, commit, &commit_wrapped).unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(out.matches("On branch master").count(), 1);
+        assert!(out.contains("nothing added to commit"));
+    }
+
+    #[test]
+    fn line_echoes_git_status_with_no_pager_and_truncated_wrap() {
+        let line = "root@2ccd835b85cb:~/project# (PAGER=cat GIT_PAGER=cat git --no-pager status) 2>&1";
+        assert!(line_echoes_command(line, "git status"));
+        let wrapped = discord_run_wrap_command("git status", true);
+        assert!(line_echoes_command(line, &wrapped));
+    }
+
+    #[test]
+    fn parse_after_last_echo_returns_only_latest_git_status() {
+        let wrapped = discord_run_wrap_command("git status", true);
+        let truncated = "(PAGER=cat GIT_PAGER=cat git --no-pager status) 2>&1";
+        let text = format!(
+            "root@host:~/project# {truncated}\n\
+             On branch master\n\
+             Untracked files:\n\
+               .gitignore\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# {truncated}\n\
+             On branch master\n\
+             Untracked files:\n\
+               .gitignore\n\
+             __BUNNY_EXIT__0\n\
+             root@host:~/project# "
+        );
+        let (out, code) =
+            parse_captured_run_after_last_echo(&text, "git status", &wrapped).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(out.matches("On branch master").count(), 1);
+        assert!(out.contains(".gitignore"));
+    }
+
+    #[test]
+    fn pane_new_marker_finds_git_log_when_delta_misses_exit() {
+        let baseline = "(project) root@host:~/project# ";
+        let wrapped = discord_run_wrap_command("git log -1 --oneline", true);
+        let cap = concat!(
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat git --no-pager log -1 --oneline) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "58a3135 (HEAD -> master) added yo\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (out, code) = discord_try_parse_finished_command(
+            baseline,
+            cap,
+            "git log -1 --oneline",
+            &wrapped,
+            "",
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("58a3135"));
+    }
+
+    #[test]
+    fn discord_try_parse_uses_pane_fallback_when_delta_empty() {
+        let baseline = "(project) root@host:~/project# ";
+        let wrapped = discord_run_wrap_command("git log -1 --oneline", true);
+        let cap = concat!(
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat git --no-pager log -1 --oneline) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "58a3135 (HEAD -> master) added yo\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (out, code) = discord_try_parse_finished_command(
+            baseline,
+            cap,
+            "git log -1 --oneline",
+            &wrapped,
+            "",
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("58a3135"));
+    }
+
+    #[test]
+    fn git_status_after_prior_commands_finds_new_exit_marker() {
+        let baseline = concat!(
+            "(project) root@host:~/project# (PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root/project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let wrapped = discord_run_wrap_command("git status", true);
+        let cap = format!(
+            "{baseline}{wrapped}\nOn branch master\nUntracked files:\n  .gitignore\n__BUNNY_EXIT__0\n(project) root@host:~/project# "
+        );
+        let since = pane_text_delta_for_discord_run(baseline, &cap, "git status", &wrapped);
+        let (out, code) = discord_try_parse_finished_command(
+            baseline,
+            &cap,
+            "git status",
+            &wrapped,
+            &since,
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("On branch master"));
+        assert!(out.contains(".gitignore"));
+    }
+
+    #[test]
+    fn git_status_parses_when_scrollback_prefix_diverges() {
+        let baseline = concat!(
+            "older scrollback line\n",
+            "(project) root@host:~/project# (PAGER=cat GIT_PAGER=cat git --no-pager log) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "commit abc\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let wrapped = discord_run_wrap_command("git status", true);
+        let cap = concat!(
+            "completely different tmux layout after resize\n",
+            "(project) root@host:~/project# (PAGER=cat GIT_PAGER=cat git --no-pager s\n",
+            "tatus) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "On branch master\n",
+            "Untracked files:\n",
+            "  .gitignore\n",
+            "nothing added to commit but untracked files present (use \"git add\" to track)\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let since = pane_text_delta_for_discord_run(baseline, cap, "git status", &wrapped);
+        assert!(
+            since.is_empty(),
+            "prefix mismatch should leave delta empty: {since:?}"
+        );
+        let (out, code) = discord_try_parse_finished_command(
+            baseline,
+            cap,
+            "git status",
+            &wrapped,
+            &since,
+        )
+        .expect("git status should parse via newest exit marker");
+        assert_eq!(code, 0);
+        assert!(out.contains("On branch master"));
+        assert!(out.contains(".gitignore"));
+    }
+
+    #[test]
+    fn pager_safe_command_prefixes_git_no_pager() {
+        assert_eq!(
+            pager_safe_command("git log -1 --oneline"),
+            "git --no-pager log -1 --oneline"
+        );
+        assert_eq!(
+            pager_safe_command("git --no-pager log"),
+            "git --no-pager log"
+        );
     }
 
     #[test]
@@ -2240,21 +3346,38 @@ mod discord_run_tests {
     #[test]
     fn notebook_exec_line_disables_pager() {
         assert_eq!(
-            notebook_shell_exec_line("tree", false, true),
+            notebook_shell_exec_line("tree", false, true, None),
             "(PAGER=cat GIT_PAGER=cat tree) 2>&1 | cat; echo __BUNNY_EXIT__$?"
         );
         assert_eq!(
-            notebook_shell_exec_line("tree", false, false),
+            notebook_shell_exec_line("tree", false, false, None),
             "tree"
         );
         assert_eq!(
-            notebook_shell_exec_line("ls", false, true),
+            notebook_shell_exec_line("ls", false, true, None),
             "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?"
         );
         assert_eq!(
-            notebook_shell_exec_line("npx create-next-app", true, true),
+            notebook_shell_exec_line("npx create-next-app", true, true, None),
             "npx create-next-app"
         );
+    }
+
+    #[test]
+    fn wrap_command_with_existing_activate() {
+        let base = std::env::temp_dir().join(format!("bunny-venv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("bin")).unwrap();
+        std::fs::write(base.join("bin/activate"), "").unwrap();
+        let venv = base.to_string_lossy().into_owned();
+        let wrapped = wrap_command_with_virtualenv(&venv, "pip list").unwrap();
+        assert!(wrapped.contains("source "));
+        assert!(wrapped.contains("bin/activate"));
+        assert!(wrapped.ends_with("pip list"));
+        let line = notebook_shell_exec_line("pip list", false, true, Some(&venv));
+        assert!(line.contains("source "));
+        assert!(line.contains("pip list"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -2265,11 +3388,11 @@ mod discord_run_tests {
         assert!(notebook_shell_state_command("deactivate"));
         assert!(!notebook_shell_state_command("ls"));
         assert_eq!(
-            notebook_shell_exec_line("source bin/activate", false, true),
+            notebook_shell_exec_line("source bin/activate", false, true, None),
             "source bin/activate; echo __BUNNY_EXIT__$?"
         );
         assert_eq!(
-            notebook_shell_exec_line("cd yo", false, true),
+            notebook_shell_exec_line("cd yo", false, true, None),
             "cd yo; echo __BUNNY_EXIT__$?"
         );
     }
@@ -2367,10 +3490,11 @@ pub fn exec_discord_shell_command_timed(
     }
 
     let long_running = bunny_discord::risk::is_long_running_discord_shell_command(command);
+    let with_venv = discord_subprocess_command(state, term_id, command);
     let run_command = if long_running {
-        wrap_long_running_discord_command(command)
+        wrap_long_running_discord_command(&with_venv)
     } else {
-        command.to_string()
+        with_venv
     };
     let run_timeout = if long_running {
         DISCORD_BACKGROUND_START_TIMEOUT
@@ -2402,7 +3526,9 @@ pub fn exec_discord_shell_command_timed(
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
     let mut cmd = Command::new(&shell);
-    cmd.arg("-lc")
+    cmd.arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
         .arg(&run_command)
         .current_dir(&cwd)
         .stdout(Stdio::piped())
@@ -2475,6 +3601,51 @@ fn apply_discord_shell_env(
             apply_git_env(cmd, &git_env);
         }
     }
+    apply_discord_shell_virtualenv(cmd, state, term_id, &home);
+}
+
+/// Mirror an active virtualenv from the live tmux shell into Discord subprocess runs.
+fn apply_discord_shell_virtualenv(
+    cmd: &mut std::process::Command,
+    state: &AppState,
+    term_id: Uuid,
+    home: &str,
+) {
+    if !state.terminals.uses_tmux() {
+        return;
+    }
+    let Some(target) = state.terminals.tmux_target(term_id) else {
+        return;
+    };
+    let Some(venv) = bunny_pty::tmux::pane_shell_env_var(&target, "VIRTUAL_ENV") else {
+        return;
+    };
+    let venv = venv.trim();
+    if venv.is_empty() {
+        return;
+    }
+    cmd.env("VIRTUAL_ENV", venv);
+    let pane_path = bunny_pty::tmux::pane_shell_env_var(&target, "PATH");
+    let base_path = state.git_identity.path_with_bunny_bin(home);
+    cmd.env(
+        "PATH",
+        discord_subprocess_path_for_venv(venv, pane_path.as_deref(), &base_path),
+    );
+}
+
+fn discord_subprocess_path_for_venv(
+    venv: &str,
+    pane_path: Option<&str>,
+    base_path: &str,
+) -> String {
+    if let Some(path) = pane_path.map(str::trim).filter(|p| !p.is_empty()) {
+        return path.to_string();
+    }
+    format!(
+        "{}:{}",
+        std::path::Path::new(venv).join("bin").display(),
+        base_path
+    )
 }
 
 fn prepare_discord_tmux_git_actor(
@@ -2679,10 +3850,9 @@ fn cap_discord_transcript_output(text: &str) -> String {
 }
 
 fn sanitize_discord_transcript_output(command: &str, output: &str) -> String {
-    let output = strip_ansi_escapes(output);
-    let output = output.replace("\r\n", "\n").replace('\r', "\n");
-    if output.trim().is_empty() {
-        return "(no output)".to_string();
+    let output = curate_discord_shell_output(command, output);
+    if output == "(no output)" {
+        return output;
     }
     let summarized = if is_claude_print_discord_command(command) {
         summarize_claude_print_json_for_transcript(&output)

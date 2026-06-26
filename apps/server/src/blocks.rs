@@ -495,6 +495,16 @@ pub fn record_discord_transcript_blocks(
                 exit_code.or(Some(0)),
             )
         };
+        let mut content = crate::terminals::curate_discord_shell_output(command, output);
+        if crate::terminals::discord_display_output_is_empty(&content) {
+            let cap =
+                crate::terminals::capture_pane_visible_for_terminal(state, term_id).unwrap_or_default();
+            if let Some(msg) =
+                shell_state_success_message(state, term_id, command, &cap)
+            {
+                content = msg;
+            }
+        }
         append_block(
             state,
             AppendBlockParams {
@@ -504,7 +514,7 @@ pub fn record_discord_transcript_blocks(
                 author_display,
                 author_source: AuthorSource::Discord,
                 command: None,
-                content: output.to_string(),
+                content,
                 status,
                 exit_code,
                 parent_block_id: Some(cmd_block.id),
@@ -561,6 +571,7 @@ pub fn submit_user_command(
         command,
         interactive,
         state.config.terminal.notebook_shells,
+        crate::terminals::terminal_active_virtual_env(&state, terminal_id).as_deref(),
     );
     let tui_hint = command.split_whitespace().next().unwrap_or(command);
     let output_meta = if interactive {
@@ -1292,6 +1303,16 @@ fn capture_non_interactive_output(
         command: &str,
         exec_line: &str,
     ) -> (String, Option<i32>) {
+        let suffix = crate::terminals::pane_text_new_suffix(baseline, cap);
+        for text in [&suffix, cap] {
+            if let Some((parsed, code)) =
+                crate::terminals::parse_captured_run_after_last_echo(text, command, exec_line)
+            {
+                let from_echo = sanitize_collected_output(&parsed, command, exec_line);
+                return (from_echo, Some(code));
+            }
+        }
+
         let mut exit_code = None;
         for cmd in [exec_line, command] {
             let delta = crate::terminals::pane_text_delta(baseline, cap, Some(cmd));

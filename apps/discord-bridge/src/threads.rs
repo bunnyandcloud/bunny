@@ -184,7 +184,7 @@ pub async fn handle_message(
     let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), thread_ch.id);
 
     let bind = match bunny
-        .post_json_timeout("/thread/bind", &bind_body, THREAD_CLAUDE_TIMEOUT)
+        .post_json_timeout("/thread/bind", &bind_body, THREAD_CLAUDE_TIMEOUT, None)
         .await
     {
         Ok(v) => v,
@@ -273,7 +273,7 @@ async fn handle_thread_message(
     let mut body = bctx.clone();
     body["thread_id"] = serde_json::json!(thread_id);
 
-    let status = bunny.post_json("/thread/status", &body).await;
+    let status = bunny.post_json("/thread/status", &body, None).await;
     let status = match status {
         Ok(v) => v,
         Err(_) => return Ok(()),
@@ -319,7 +319,7 @@ async fn handle_thread_message(
         let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), msg.channel_id);
 
         let res = match bunny
-            .post_json_timeout("/thread/input", &input_body, THREAD_CLAUDE_TIMEOUT)
+            .post_json_timeout("/thread/input", &input_body, THREAD_CLAUDE_TIMEOUT, None)
             .await
         {
             Ok(v) => v,
@@ -366,7 +366,7 @@ async fn handle_thread_message(
         "content": msg.content,
         "author_name": msg.author.name,
     });
-    bunny.post_json("/thread/discussion", &discussion_body).await?;
+    bunny.post_json("/thread/discussion", &discussion_body, None).await?;
 
     Ok(())
 }
@@ -517,7 +517,7 @@ pub async fn handle_thread_merge_button(
     let mut body = bctx;
     body["thread_id"] = serde_json::json!(thread_id);
 
-    let res = bunny.post_json("/thread/merge", &body).await?;
+    let res = bunny.post_json("/thread/merge", &body, None).await?;
     let base = res
         .get("base_branch")
         .and_then(|v| v.as_str())
@@ -650,7 +650,7 @@ pub async fn handle_thread_permission_button(
     let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
 
     let res = match bunny
-        .post_json_timeout("/thread/permission", &body, THREAD_CLAUDE_TIMEOUT)
+        .post_json_timeout("/thread/permission", &body, THREAD_CLAUDE_TIMEOUT, None)
         .await
     {
         Ok(v) => v,
@@ -819,7 +819,7 @@ pub async fn handle_thread_question_button(
     let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
 
     let res = match bunny
-        .post_json_timeout("/thread/answer", &body, THREAD_CLAUDE_TIMEOUT)
+        .post_json_timeout("/thread/answer", &body, THREAD_CLAUDE_TIMEOUT, None)
         .await
     {
         Ok(v) => v,
@@ -958,7 +958,7 @@ pub async fn handle_goal_cancel_button(
     )
     .await?;
 
-    let res = bunny.post_json("/thread/finalize", &body).await?;
+    let res = bunny.post_json("/thread/finalize", &body, None).await?;
     let status_emoji = if approve { "✅" } else { "❌" };
     let offer_merge = res.get("offer_merge").and_then(|v| v.as_bool()) == Some(true);
     let merge_base = res
@@ -1060,7 +1060,7 @@ pub async fn handle_stop_reaction(
     let mut body = bctx.clone();
     body["thread_id"] = serde_json::json!(thread_id);
 
-    let status = bunny.post_json("/thread/status", &body).await?;
+    let status = bunny.post_json("/thread/status", &body, None).await?;
     if status.get("status").and_then(|v| v.as_str()) != Some("active") {
         return Ok(());
     }
@@ -1072,7 +1072,7 @@ pub async fn handle_stop_reaction(
         return Ok(());
     }
 
-    bunny.post_json("/thread/stop", &body).await?;
+    bunny.post_json("/thread/stop", &body, None).await?;
 
     let channel_id = ChannelId::new(thread_id.parse()?);
     channel_id
@@ -1103,7 +1103,7 @@ async fn upload_message_attachments(
         body["thread_id"] = serde_json::json!(thread_id);
         body["filename"] = serde_json::json!(att.filename);
         body["content_base64"] = serde_json::json!(b64);
-        let _ = bunny.post_json("/thread/attachment", &body).await;
+        let _ = bunny.post_json("/thread/attachment", &body, None).await;
     }
     Ok(())
 }
@@ -1124,7 +1124,7 @@ pub async fn run_git_command(
         "branch": branch,
         "path": path,
     });
-    let res = bunny.post_json("/git", &body).await?;
+    let res = bunny.post_json("/git", &body, None).await?;
     if let Some(output) = res.get("output").and_then(|v| v.as_str()) {
         Ok(CommandReply::Text(crate::paginate_plain(output)))
     } else {
@@ -1148,7 +1148,7 @@ pub async fn run_project_command(
             "discord_user_id": bctx["discord_user_id"],
             "path": p,
         });
-        let res = bunny.post_json("/project/set", &body).await?;
+        let res = bunny.post_json("/project/set", &body, None).await?;
         Ok(CommandReply::Text(vec![format!(
             "Project cwd: `{}` (git: {})",
             res.get("project_cwd").and_then(|v| v.as_str()).unwrap_or("?"),

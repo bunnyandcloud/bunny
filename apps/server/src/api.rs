@@ -1212,8 +1212,13 @@ async fn terminal_command(
         command,
         baseline,
     );
-    let exec_line =
-        crate::terminals::notebook_shell_exec_line(command, interactive, notebook_shells);
+    let venv = crate::terminals::terminal_active_virtual_env(&state, id);
+    let exec_line = crate::terminals::notebook_shell_exec_line(
+        command,
+        interactive,
+        notebook_shells,
+        venv.as_deref(),
+    );
     if interactive {
         let state_bg = Arc::clone(&state);
         tokio::spawn(async move {
@@ -2338,16 +2343,84 @@ pub struct ApiError {
     status: StatusCode,
     code: String,
     message: String,
+    details: Option<serde_json::Value>,
 }
 
 impl ApiError {
-    pub(crate) fn unauthorized() -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: "authentication required".into() } }
-    pub(crate) fn unauthorized_msg(msg: &str) -> Self { Self { status: StatusCode::UNAUTHORIZED, code: "UNAUTHORIZED".into(), message: msg.into() } }
-    pub(crate) fn too_many_requests(msg: &str) -> Self { Self { status: StatusCode::TOO_MANY_REQUESTS, code: "TOO_MANY_REQUESTS".into(), message: msg.into() } }
-    pub(crate) fn forbidden(msg: &str) -> Self { Self { status: StatusCode::FORBIDDEN, code: "FORBIDDEN".into(), message: msg.into() } }
-    pub(crate) fn not_found(r: &str) -> Self { Self { status: StatusCode::NOT_FOUND, code: "NOT_FOUND".into(), message: format!("{r} not found") } }
-    pub(crate) fn conflict(msg: &str) -> Self { Self { status: StatusCode::CONFLICT, code: "CONFLICT".into(), message: msg.into() } }
-    pub(crate) fn validation(msg: &str) -> Self { Self { status: StatusCode::BAD_REQUEST, code: "VALIDATION_ERROR".into(), message: msg.into() } }
+    pub(crate) fn unauthorized() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "UNAUTHORIZED".into(),
+            message: "authentication required".into(),
+            details: None,
+        }
+    }
+    pub(crate) fn unauthorized_msg(msg: &str) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "UNAUTHORIZED".into(),
+            message: msg.into(),
+            details: None,
+        }
+    }
+    pub(crate) fn too_many_requests(msg: &str) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "TOO_MANY_REQUESTS".into(),
+            message: msg.into(),
+            details: None,
+        }
+    }
+    pub(crate) fn forbidden(msg: &str) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "FORBIDDEN".into(),
+            message: msg.into(),
+            details: None,
+        }
+    }
+    pub(crate) fn not_found(r: &str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: "NOT_FOUND".into(),
+            message: format!("{r} not found"),
+            details: None,
+        }
+    }
+    pub(crate) fn conflict(msg: &str) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: "CONFLICT".into(),
+            message: msg.into(),
+            details: None,
+        }
+    }
+    pub(crate) fn validation(msg: &str) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "VALIDATION_ERROR".into(),
+            message: msg.into(),
+            details: None,
+        }
+    }
+
+    /// Validation error with i18n metadata for Discord bridge re-localization.
+    pub(crate) fn validation_i18n(key: &str, args: &[(&str, &str)]) -> Self {
+        let i18n_args: serde_json::Map<String, serde_json::Value> = args
+            .iter()
+            .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
+            .collect();
+        let details = serde_json::json!({
+            "i18n_key": key,
+            "i18n_args": i18n_args,
+        });
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "VALIDATION_ERROR".into(),
+            message: bunny_i18n::t(bunny_i18n::Locale::En, key, args),
+            details: Some(details),
+        }
+    }
 }
 
 impl std::fmt::Display for ApiError {
@@ -2368,7 +2441,7 @@ impl IntoResponse for ApiError {
             error: bunny_core::types::ApiErrorBody {
                 code: self.code,
                 message: self.message,
-                details: None,
+                details: self.details,
             },
         };
         (self.status, Json(body)).into_response()

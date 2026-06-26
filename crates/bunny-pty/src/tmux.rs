@@ -307,6 +307,70 @@ pub fn send_keys_key(target: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
+/// Stop the foreground job in a pane: Ctrl+C, then SIGTERM direct children if still busy.
+pub fn interrupt_pane_foreground(target: &str) -> Result<()> {
+    if !target_alive(target) {
+        anyhow::bail!("tmux target not alive: {target}");
+    }
+    for _ in 0..2 {
+        send_keys_key(target, "C-c")?;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    if pane_foreground_busy(target) {
+        terminate_pane_foreground_children(target);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let _ = send_keys_key(target, "C-c");
+    }
+    Ok(())
+}
+
+fn pane_foreground_busy(target: &str) -> bool {
+    if pane_has_non_shell_child(target) {
+        return true;
+    }
+    let Some(cmd) = pane_current_command(target) else {
+        return false;
+    };
+    let base = cmd
+        .rsplit('/')
+        .next()
+        .unwrap_or(&cmd)
+        .trim()
+        .to_lowercase();
+    const IDLE: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "nu", "ksh", "tcsh", "-sh"];
+    !IDLE.iter().any(|shell| base == *shell || base.ends_with(shell))
+}
+
+fn terminate_pane_foreground_children(target: &str) {
+    let Some(shell_pid) = pane_pid(target) else {
+        return;
+    };
+    let Ok(out) = Command::new("ps")
+        .args([
+            "--ppid",
+            &shell_pid.to_string(),
+            "-o",
+            "pid=",
+            "--no-headers",
+        ])
+        .output()
+    else {
+        return;
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Ok(child_pid) = line.trim().parse::<u32>() else {
+            continue;
+        };
+        if child_pid == 0 {
+            continue;
+        }
+        let _ = Command::new("kill")
+            .args(["-TERM", &child_pid.to_string()])
+            .status();
+    }
+}
+
 /// Visible pane + scrollback (use before respawn or recreating a session).
 /// Current working directory of the tmux pane (if session still exists).
 pub fn pane_cwd(target: &str) -> Option<String> {

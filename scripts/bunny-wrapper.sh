@@ -23,11 +23,16 @@ runnable() {
   [[ -x "$bin" ]] && "$bin" run --help >/dev/null 2>&1
 }
 
-server_sources_newer_than_release() {
-  [[ -f "$RELEASE" ]] || return 1
+server_sources_newer_than_binary() {
+  local bin="$1"
+  [[ -f "$bin" ]] || return 1
   find "$ROOT/apps/server/src" "$ROOT/crates" \
     \( -name '*.rs' -o -name 'Cargo.toml' \) \
-    -newer "$RELEASE" -print -quit 2>/dev/null | grep -q .
+    -newer "$bin" -print -quit 2>/dev/null | grep -q .
+}
+
+server_sources_newer_than_release() {
+  server_sources_newer_than_binary "$RELEASE"
 }
 
 build_release_binary() {
@@ -221,10 +226,6 @@ if runnable "$RELEASE"; then
   fi
 fi
 
-if runnable "$DEBUG" && cli_supports_discord "$DEBUG"; then
-  exec_bunny "$DEBUG" "$@"
-fi
-
 if ! command -v cargo >/dev/null 2>&1; then
   ensure_docker_toolchain
 fi
@@ -241,7 +242,7 @@ if runnable "$RELEASE"; then
   exec_bunny "$RELEASE" "$@"
 fi
 
-if runnable "$DEBUG"; then
+if runnable "$DEBUG" && cli_supports_discord "$DEBUG" && ! server_sources_newer_than_binary "$DEBUG"; then
   exec_bunny "$DEBUG" "$@"
 fi
 

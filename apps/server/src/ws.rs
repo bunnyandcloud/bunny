@@ -206,10 +206,15 @@ pub async fn handle_terminal_ws(
                                         text,
                                         baseline,
                                     );
+                                    let venv = crate::terminals::terminal_active_virtual_env(
+                                        &state,
+                                        terminal_id,
+                                    );
                                     let exec_line = crate::terminals::notebook_shell_exec_line(
                                         text,
                                         interactive,
                                         notebook_shells,
+                                        venv.as_deref(),
                                     );
                                     let _ = state
                                         .terminals
