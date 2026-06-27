@@ -194,7 +194,7 @@ pub async fn handle_terminal_ws(
                                             terminal_id,
                                         );
                                     }
-                                    let baseline = crate::terminals::capture_pane_for_terminal(
+                                    let baseline = crate::terminals::notebook_command_baseline_for_terminal(
                                         &state,
                                         terminal_id,
                                     )
@@ -238,7 +238,7 @@ pub async fn handle_terminal_ws(
                                     if crate::blocks::terminal_input_locked(&state, terminal_id) {
                                         continue;
                                     }
-                                    let baseline = crate::terminals::capture_pane_for_terminal(
+                                    let baseline = crate::terminals::notebook_command_baseline_for_terminal(
                                         &state,
                                         terminal_id,
                                     )

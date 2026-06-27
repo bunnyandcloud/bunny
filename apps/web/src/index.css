@@ -92,3 +92,9 @@ html.light .hover\:text-gray-200:hover {
 .bunny-terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--bunny-scrollbar-thumb-hover);
 }
+
+/* Notebook shell: collapse long command output (~15 lines). */
+.notebook-output-pre--collapsed {
+  max-height: 15rem;
+  overflow: hidden;
+}

@@ -3,6 +3,7 @@ import { isInteractiveRunning, isRunningOutput } from '../../lib/blockMeta';
 import type { TerminalBlock } from '../../lib/api';
 import { useT } from '../../i18n';
 import BlockAuthorBadge from './BlockAuthorBadge';
+import BlockOutput from './BlockOutput';
 import BlockTimelineRail from './BlockTimelineRail';
 
 interface Props {
@@ -75,15 +76,11 @@ export default function BlockCard({ block, outputBlock, onStop }: Props) {
           {interactiveRunning ? (
             <p className="ml-8 text-xs text-bunny-muted">{tr('web.notebook.interactiveFullscreen')}</p>
           ) : outputText ? (
-            <pre
-              className={
-                outputBlock?.status === 'failed'
-                  ? 'ml-8 whitespace-pre-wrap break-words font-mono text-xs text-red-400/90'
-                  : 'ml-8 whitespace-pre-wrap break-words font-mono text-xs text-bunny-fg/90'
-              }
-            >
-              {outputText}
-            </pre>
+            <BlockOutput
+              key={outputBlock.id}
+              text={outputText}
+              failed={outputBlock?.status === 'failed'}
+            />
           ) : running ? (
             <pre className="ml-8 font-mono text-xs text-bunny-muted">…</pre>
           ) : null}

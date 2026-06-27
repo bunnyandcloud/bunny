@@ -6,6 +6,7 @@ use bunny_blocks::{
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -56,6 +57,7 @@ impl BlockHub {
 
 #[derive(Clone)]
 struct ActiveCollector {
+    run_id: u64,
     output_block_id: Uuid,
     command: String,
     exec_line: String,
@@ -72,13 +74,19 @@ struct ActiveCollector {
 
 pub struct OutputCollectors {
     inner: Mutex<HashMap<Uuid, ActiveCollector>>,
+    next_run_id: AtomicU64,
 }
 
 impl OutputCollectors {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            next_run_id: AtomicU64::new(1),
         }
+    }
+
+    fn next_run_id(&self) -> u64 {
+        self.next_run_id.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -637,9 +645,11 @@ pub fn submit_user_command(
         );
     }
 
+    let run_id = state.output_collectors.next_run_id();
     state.output_collectors.inner.lock().insert(
         terminal_id,
         ActiveCollector {
+            run_id,
             output_block_id: output_block.id,
             command: command.to_string(),
             exec_line,
@@ -655,7 +665,7 @@ pub fn submit_user_command(
         },
     );
 
-    tokio::spawn(output_collector_loop(state, terminal_id));
+    tokio::spawn(output_collector_loop(state, terminal_id, run_id));
 }
 
 /// Record a command the user already ran in the attach TTY (no re-execution).
@@ -677,7 +687,12 @@ pub fn record_tty_command(
     } else {
         crate::terminals::user_command_expects_interactive(command)
     };
-    let exec_line = command.to_string();
+    let exec_line = crate::terminals::notebook_shell_exec_line(
+        command,
+        interactive,
+        notebook_shells,
+        crate::terminals::terminal_active_virtual_env(&state, terminal_id).as_deref(),
+    );
     let tui_hint = command.split_whitespace().next().unwrap_or(command);
     let output_meta = if interactive {
         serde_json::json!({
@@ -743,9 +758,11 @@ pub fn record_tty_command(
         );
     }
 
+    let run_id = state.output_collectors.next_run_id();
     state.output_collectors.inner.lock().insert(
         terminal_id,
         ActiveCollector {
+            run_id,
             output_block_id: output_block.id,
             command: command.to_string(),
             exec_line,
@@ -761,7 +778,7 @@ pub fn record_tty_command(
         },
     );
 
-    tokio::spawn(output_collector_loop(state, terminal_id));
+    tokio::spawn(output_collector_loop(state, terminal_id, run_id));
 }
 
 pub fn on_user_command_submitted(
@@ -770,11 +787,39 @@ pub fn on_user_command_submitted(
     user_id: Uuid,
     command: &str,
 ) {
-    let baseline = crate::terminals::capture_pane_for_terminal(&state, terminal_id).unwrap_or_default();
+    let baseline = crate::terminals::notebook_command_baseline_for_terminal(&state, terminal_id)
+        .unwrap_or_default();
     submit_user_command(state, terminal_id, user_id, command, baseline);
 }
 
-async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
+async fn capture_notebook_command_output(
+    state: &Arc<AppState>,
+    terminal_id: Uuid,
+    baseline: &str,
+    command: &str,
+    exec_line: &str,
+) -> (String, Option<i32>) {
+    let state = Arc::clone(state);
+    let baseline = baseline.to_string();
+    let command = command.to_string();
+    let exec_line = exec_line.to_string();
+    tokio::task::spawn_blocking(move || {
+        let (out, code) = capture_non_interactive_output(
+            &state,
+            terminal_id,
+            &baseline,
+            &command,
+            &exec_line,
+        );
+        let cap = crate::terminals::capture_pane_for_terminal(&state, terminal_id).unwrap_or_default();
+        reconcile_git_commit_capture(&command, &exec_line, &out, &cap, code)
+    })
+    .await
+    .ok()
+    .unwrap_or_default()
+}
+
+async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid, run_id: u64) {
     let started = std::time::Instant::now();
     let max_duration = std::time::Duration::from_secs(3600);
     let mut poll_ms = 100u64;
@@ -789,6 +834,9 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
         let Some(mut collector) = collector else {
             return;
         };
+        if collector.run_id != run_id {
+            return;
+        }
         let instant = crate::terminals::notebook_instant_command(&collector.command);
         poll_ms = if instant { 20 } else { 100 };
 
@@ -825,8 +873,9 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
                     .await;
                     collector.pager_dismissed = true;
                 }
-                let tui = crate::terminals::is_interactive_tui_command(cmd)
-                    || crate::terminals::pane_process_suggests_interactive(cmd, &collector.command);
+                let tui = (crate::terminals::is_interactive_tui_command(cmd)
+                    || crate::terminals::pane_process_suggests_interactive(cmd, &collector.command))
+                    && !crate::terminals::apt_command_is_query(&collector.command);
                 if tui
                     && !crate::terminals::pane_cmd_is_incidental_pager(cmd, &collector.command)
                 {
@@ -983,7 +1032,9 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
             if !instant
                 && exec_line_expects_exit_marker(&collector.exec_line)
                 && collector.last_exit_code.is_none()
-                && started.elapsed() < std::time::Duration::from_millis(2000)
+                && collector.saw_busy
+                && started.elapsed()
+                    < crate::terminals::notebook_capture_marker_wait(&collector.command)
             {
                 state
                     .output_collectors
@@ -993,32 +1044,50 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
                 continue;
             }
 
-            let (mut final_output, exit_code) = tokio::task::spawn_blocking({
-                let state = Arc::clone(&state);
-                let baseline = collector.baseline.clone();
-                let command = collector.command.clone();
-                let exec_line = collector.exec_line.clone();
-                move || {
-                    let (out, code) = capture_non_interactive_output(
+            let baseline = collector.baseline.clone();
+            let command = collector.command.clone();
+            let exec_line = collector.exec_line.clone();
+            let mut final_output;
+            let mut exit_code;
+            (final_output, exit_code) = capture_notebook_command_output(
+                &state,
+                terminal_id,
+                &baseline,
+                &command,
+                &exec_line,
+            )
+            .await;
+
+            if final_output.trim().is_empty() && exec_line_expects_exit_marker(&exec_line) {
+                for delay_ms in [150_u64, 300, 600, 1200] {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    let current = state.output_collectors.inner.lock().get(&terminal_id).cloned();
+                    if current.as_ref().map(|c| c.run_id) != Some(run_id) {
+                        return;
+                    }
+                    let (out, code) = capture_notebook_command_output(
                         &state,
                         terminal_id,
                         &baseline,
                         &command,
                         &exec_line,
-                    );
-                    let cap =
-                        crate::terminals::capture_pane_for_terminal(&state, terminal_id)
-                            .unwrap_or_default();
-                    reconcile_git_commit_capture(&command, &exec_line, &out, &cap, code)
+                    )
+                    .await;
+                    if !out.trim().is_empty() || code.is_some() {
+                        final_output = out;
+                        exit_code = code;
+                        break;
+                    }
                 }
-            })
-            .await
-            .ok()
-            .unwrap_or_default();
+            }
 
             let exit_code = exit_code
                 .or(collector.last_exit_code)
                 .unwrap_or(0);
+            let current = state.output_collectors.inner.lock().get(&terminal_id).cloned();
+            if current.as_ref().map(|c| c.run_id) != Some(run_id) {
+                return;
+            }
             let failed = exit_code != 0;
             let status = if failed {
                 BlockStatus::Failed
@@ -1059,20 +1128,23 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid) {
         }
     }
 
-    if let Some(collector) = state.output_collectors.inner.lock().remove(&terminal_id) {
-        let _ = patch_block(
-            &state,
-            terminal_id,
-            collector.output_block_id,
-            BlockPatch {
-                status: Some(BlockStatus::Completed),
-                content_delta: None,
-                content_replace: None,
-                meta: None,
-                exit_code: Some(0),
-                finished_at: Some(Utc::now()),
-            },
-        );
+    if let Some(collector) = state.output_collectors.inner.lock().get(&terminal_id).cloned() {
+        if collector.run_id == run_id {
+            state.output_collectors.inner.lock().remove(&terminal_id);
+            let _ = patch_block(
+                &state,
+                terminal_id,
+                collector.output_block_id,
+                BlockPatch {
+                    status: Some(BlockStatus::Completed),
+                    content_delta: None,
+                    content_replace: None,
+                    meta: None,
+                    exit_code: Some(0),
+                    finished_at: Some(Utc::now()),
+                },
+            );
+        }
     }
 }
 
@@ -1187,6 +1259,19 @@ fn finish_interactive_collector(
     if let Some(target) = state.terminals.tmux_target(terminal_id) {
         bunny_pty::tmux::configure_pane_for_web(&target);
     }
+    let mut content = output.to_string();
+    if content.trim().is_empty() {
+        let (fallback, _) = capture_non_interactive_output(
+            state,
+            terminal_id,
+            &collector.baseline,
+            &collector.command,
+            &collector.exec_line,
+        );
+        if !fallback.trim().is_empty() {
+            content = fallback;
+        }
+    }
     let status = if failed {
         BlockStatus::Failed
     } else {
@@ -1200,7 +1285,7 @@ fn finish_interactive_collector(
         BlockPatch {
             status: Some(status),
             content_delta: None,
-            content_replace: Some(output.to_string()),
+            content_replace: Some(content),
             meta: None,
             exit_code,
             finished_at: Some(Utc::now()),
@@ -1348,6 +1433,14 @@ fn capture_non_interactive_output(
                     }
                 }
                 return (from_extract, exit_code);
+            }
+        }
+        if let Some((parsed, code)) =
+            crate::terminals::parse_notebook_finished_command(baseline, cap, command, exec_line)
+        {
+            let from_marker = sanitize_collected_output(&parsed, command, exec_line);
+            if !from_marker.is_empty() {
+                return (from_marker, Some(code));
             }
         }
         (String::new(), exit_code)

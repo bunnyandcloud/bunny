@@ -836,6 +836,51 @@ pub fn pane_cmd_is_incidental_pager(pane_cmd: &str, user_command: &str) -> bool 
     )
 }
 
+/// How long to wait for `__BUNNY_EXIT__` before giving up on notebook capture.
+pub fn notebook_capture_marker_wait(command: &str) -> std::time::Duration {
+    if apt_command_is_query(command) {
+        std::time::Duration::from_secs(15)
+    } else {
+        std::time::Duration::from_secs(5)
+    }
+}
+
+/// Trim scrollback-heavy pane text to the idle prompt tail before a new notebook command.
+pub fn notebook_command_baseline(pane: &str) -> String {
+    let norm = normalize_pane_text(pane);
+    if norm.is_empty() {
+        return String::new();
+    }
+    if let Some(idx) = norm.rfind(BUNNY_EXIT_MARKER) {
+        let after = &norm[idx + BUNNY_EXIT_MARKER.len()..];
+        let rest = after
+            .split_once('\n')
+            .map(|(_, tail)| tail)
+            .unwrap_or("")
+            .trim_end();
+        if !rest.is_empty() {
+            return rest.to_string();
+        }
+    }
+    let lines: Vec<&str> = norm.lines().collect();
+    lines
+        .iter()
+        .rev()
+        .take(4)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Pane tail used as the capture baseline for the next notebook command.
+pub fn notebook_command_baseline_for_terminal(state: &AppState, term_id: Uuid) -> Result<String> {
+    let full = capture_pane_for_terminal(state, term_id)?;
+    Ok(notebook_command_baseline(&full))
+}
+
 /// Prefix notebook commands so pagers write to the pane instead of spawning `less`.
 pub fn notebook_shell_exec_line(
     command: &str,
@@ -866,12 +911,16 @@ pub fn tmux_pager_wrap(command: &str) -> String {
             .unwrap_or(&command),
     );
     let inner = format!("PAGER=cat GIT_PAGER=cat {command}");
-    let body = if matches!(first.as_str(), "tree" | "find") {
-        format!("({inner}) 2>&1 | cat")
-    } else {
-        format!("({inner}) 2>&1")
-    };
-    format!("{body}; echo {BUNNY_EXIT_MARKER}$?")
+    if matches!(first.as_str(), "tree" | "find") {
+        return format!("({inner}) 2>&1 | cat; echo {BUNNY_EXIT_MARKER}$?");
+    }
+    // apt list emits 80k+ lines — tail keeps output + exit marker inside tmux scrollback.
+    if apt_command_is_query(&command) {
+        return format!(
+            "({inner}) 2>&1 | tail -n 3000; echo {BUNNY_EXIT_MARKER}${{PIPESTATUS[0]}}"
+        );
+    }
+    format!("({inner}) 2>&1; echo {BUNNY_EXIT_MARKER}$?")
 }
 
 /// Prevent `git log` and similar from blocking on `less` inside capture wrappers.
@@ -928,6 +977,9 @@ pub fn runtime_interactive_promotion_allowed(command: &str, pane_cmd: Option<&st
     if notebook_instant_command(command) {
         return false;
     }
+    if apt_command_is_query(command) {
+        return false;
+    }
     if user_command_expects_interactive(command) {
         return true;
     }
@@ -935,7 +987,7 @@ pub fn runtime_interactive_promotion_allowed(command: &str, pane_cmd: Option<&st
         return false;
     };
     let tui = is_interactive_tui_command(cmd) || pane_process_suggests_interactive(cmd, command);
-    tui && !pane_cmd_is_incidental_pager(cmd, command)
+    tui && !pane_cmd_is_incidental_pager(cmd, command) && !apt_command_is_query(command)
 }
 
 /// Send `q` to dismiss an incidental `less`/`more` pager.
@@ -1170,7 +1222,74 @@ pub fn pane_process_suggests_interactive(pane_cmd: &str, user_command: &str) -> 
             || lower.contains("create-")
             || package_runner_expects_interactive(user_command);
     }
+    if base == "apt" || base == "apt-get" {
+        return apt_command_expects_interactive_tui(user_command);
+    }
     false
+}
+
+/// First non-flag token after `apt` / `apt-get` (handles `sudo apt list`, etc.).
+pub fn apt_subcommand(command: &str) -> Option<&str> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    for (i, part) in parts.iter().enumerate() {
+        let base = command_base_name(part);
+        if base == "apt" || base == "apt-get" {
+            return parts.get(i + 1).copied().filter(|s| !s.starts_with('-'));
+        }
+    }
+    None
+}
+
+/// Read-only apt queries that print and exit — safe for notebook block capture.
+pub fn apt_command_is_query(command: &str) -> bool {
+    const QUERY: &[&str] = &[
+        "list",
+        "search",
+        "show",
+        "policy",
+        "version",
+        "changelog",
+        "depends",
+        "rdepends",
+        "download",
+        "clean",
+        "autoclean",
+        "moo",
+        "help",
+        "indextargets",
+    ];
+    apt_subcommand(command)
+        .is_some_and(|sub| QUERY.iter().any(|q| sub.eq_ignore_ascii_case(q)))
+}
+
+/// True when apt needs a real TTY (bare `apt`, `edit-sources`, etc.) — not list/search/show.
+pub fn apt_command_expects_interactive_tui(command: &str) -> bool {
+    let lower = command.to_lowercase();
+    let mut parts = command.split_whitespace();
+    let first = parts.next().unwrap_or("");
+    let base = command_base_name(first);
+    if base != "apt" && base != "apt-get" {
+        return false;
+    }
+    if lower.contains(" install")
+        || lower.contains(" update")
+        || lower.contains(" upgrade")
+        || lower.contains(" remove")
+        || lower.contains(" purge")
+        || lower.contains(" autoremove")
+        || lower.contains(" -y")
+        || lower.contains(" --yes")
+    {
+        return false;
+    }
+    if apt_command_is_query(command) {
+        return false;
+    }
+    match apt_subcommand(command) {
+        None => true,
+        Some("edit-sources") => true,
+        Some(_) => false,
+    }
 }
 
 /// True when a user-typed command is likely to need interactive TTY (first token only).
@@ -1181,18 +1300,7 @@ pub fn user_command_expects_interactive(command: &str) -> bool {
     let base = command_base_name(first);
 
     if base == "apt" || base == "apt-get" {
-        if lower.contains(" install")
-            || lower.contains(" update")
-            || lower.contains(" upgrade")
-            || lower.contains(" remove")
-            || lower.contains(" purge")
-            || lower.contains(" autoremove")
-            || lower.contains(" -y")
-            || lower.contains(" --yes")
-        {
-            return false;
-        }
-        return true;
+        return apt_command_expects_interactive_tui(command);
     }
 
     if package_runner_expects_interactive(command) {
@@ -2319,6 +2427,17 @@ fn discord_try_parse_finished_command(
     parse_finished_from_newest_exit_marker(baseline, cap, command, wrapped)
 }
 
+/// Parse notebook capture when the echoed wrapper scrolled out of tmux history.
+pub fn parse_notebook_finished_command(
+    baseline: &str,
+    cap: &str,
+    command: &str,
+    exec_line: &str,
+) -> Option<(String, i32)> {
+    let since = pane_text_new_suffix(baseline, cap);
+    discord_try_parse_finished_command(baseline, cap, command, exec_line, &since)
+}
+
 /// Last-resort parse when scrollback shifted but a new exit marker appeared on screen.
 fn parse_finished_from_newest_exit_marker(
     baseline: &str,
@@ -2338,14 +2457,18 @@ fn parse_finished_from_newest_exit_marker(
     Some((strip_shell_capture_artifacts(command, &output), code))
 }
 
-/// Capture output for fast notebook commands using the same pane delta logic as
-/// non-instant commands (prefix match, command echo, baseline line stripping).
+/// Capture output for fast notebook commands (pwd, ls, cd, …).
 pub fn capture_instant_notebook_output(
     baseline: &str,
     cap: &str,
     command: &str,
     exec_line: &str,
 ) -> (String, Option<i32>) {
+    if let Some((parsed, code)) =
+        parse_notebook_finished_command(baseline, cap, command, exec_line)
+    {
+        return (parsed, Some(code));
+    }
     let mut raw = String::new();
     for cmd in [exec_line, command] {
         let delta = pane_text_delta(baseline, cap, Some(cmd));
@@ -2357,15 +2480,7 @@ pub fn capture_instant_notebook_output(
     if raw.is_empty() {
         raw = pane_text_delta(baseline, cap, None);
     }
-    let (parsed, code) = notebook_parse_captured_output(&raw);
-    if parsed.trim().is_empty() {
-        if let Some((fallback, code)) =
-            parse_finished_from_newest_exit_marker(baseline, cap, command, exec_line)
-        {
-            return (fallback, Some(code));
-        }
-    }
-    (parsed, code)
+    notebook_parse_captured_output(&raw)
 }
 
 fn split_on_exit_marker(delta: &str) -> Option<(String, i32)> {
@@ -3425,6 +3540,132 @@ mod discord_run_tests {
         assert!(!notebook_user_command_expects_interactive("git commit"));
         assert!(!notebook_user_command_expects_interactive("git commit -m msg"));
         assert!(user_command_expects_interactive("git commit"));
+    }
+
+    #[test]
+    fn apt_list_and_search_not_interactive() {
+        assert!(!user_command_expects_interactive("apt list"));
+        assert!(!user_command_expects_interactive("apt list --installed"));
+        assert!(!user_command_expects_interactive("apt search curl"));
+        assert!(!user_command_expects_interactive("apt-get show bash"));
+        assert!(!notebook_user_command_expects_interactive("apt list"));
+        assert!(user_command_expects_interactive("apt"));
+        assert!(user_command_expects_interactive("apt edit-sources"));
+        assert!(!runtime_interactive_promotion_allowed("apt list", Some("apt")));
+        let wrapped = tmux_pager_wrap("apt list");
+        assert!(wrapped.contains("tail -n 3000"));
+        assert!(wrapped.contains("PIPESTATUS[0]"));
+    }
+
+    #[test]
+    fn notebook_parse_when_command_echo_scrolled_out() {
+        let baseline = "root@host:~# ls\nfile.txt\nroot@host:~# ";
+        let command = "apt list";
+        let exec = tmux_pager_wrap(command);
+        let mut cap = String::from(baseline);
+        for i in 0..6000 {
+            cap.push_str(&format!("pkg{i}/noble 1.0 all\n"));
+        }
+        cap.push_str("__BUNNY_EXIT__0\nroot@host:~# ");
+        let (out, code) = parse_notebook_finished_command(baseline, &cap, command, &exec).unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("pkg5999"));
+        assert!(!out.contains("__BUNNY_EXIT__"));
+    }
+
+    #[test]
+    fn notebook_command_baseline_trims_prior_output() {
+        let pane = concat!(
+            "WARNING: apt does not have a stable CLI interface.\n",
+            "Listing...\n",
+            "curl/noble 8.5.0 arm64\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# "
+        );
+        let baseline = notebook_command_baseline(pane);
+        assert!(baseline.contains("root@host:~/project#"));
+        assert!(!baseline.contains("curl/noble"));
+        assert!(!baseline.contains(BUNNY_EXIT_MARKER));
+    }
+
+    #[test]
+    fn consecutive_instant_shell_commands_capture_independently() {
+        let pwd_cmd = "pwd";
+        let _pwd_exec = tmux_pager_wrap(pwd_cmd);
+        let after_pwd = concat!(
+            "root@host:~# ",
+            "(PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~# "
+        );
+        let baseline_ls = notebook_command_baseline(after_pwd);
+
+        let ls_cmd = "ls";
+        let ls_exec = tmux_pager_wrap(ls_cmd);
+        let after_ls = format!(
+            "{after_pwd}(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\nhello project\n__BUNNY_EXIT__0\nroot@host:~# "
+        );
+        let (ls_out, ls_code) =
+            capture_instant_notebook_output(&baseline_ls, &after_ls, ls_cmd, &ls_exec);
+        assert_eq!(ls_code, Some(0));
+        assert_eq!(ls_out, "hello project");
+        assert!(!ls_out.contains("/root"));
+
+        let baseline_ls_la = notebook_command_baseline(&after_ls);
+        let ls_la_cmd = "ls -la";
+        let ls_la_exec = tmux_pager_wrap(ls_la_cmd);
+        let after_ls_la = format!(
+            "{after_ls}(PAGER=cat GIT_PAGER=cat ls -la) 2>&1; echo __BUNNY_EXIT__$?\ntotal 8\n-rw-r--r-- 1 root root 7 Jun 26 19:36 hello\n__BUNNY_EXIT__0\nroot@host:~# "
+        );
+        let (ls_la_out, ls_la_code) = capture_instant_notebook_output(
+            &baseline_ls_la,
+            &after_ls_la,
+            ls_la_cmd,
+            &ls_la_exec,
+        );
+        assert_eq!(ls_la_code, Some(0));
+        assert!(ls_la_out.contains("total 8"));
+        assert!(!ls_la_out.contains("/root"));
+        assert!(!ls_la_out.contains("hello project"));
+
+        let baseline_cd = notebook_command_baseline(&after_ls_la);
+        let cd_cmd = "cd hello";
+        let cd_exec = notebook_shell_exec_line(cd_cmd, false, true, None);
+        assert_eq!(cd_exec, "cd hello; echo __BUNNY_EXIT__$?");
+        let after_cd = format!(
+            "{after_ls_la}root@host:~# cd hello; echo __BUNNY_EXIT__$?\nbash: cd: hello: Not a directory\n__BUNNY_EXIT__1\nroot@host:~# "
+        );
+        let (cd_out, cd_code) =
+            capture_instant_notebook_output(&baseline_cd, &after_cd, cd_cmd, &cd_exec);
+        assert_eq!(cd_code, Some(1));
+        assert_eq!(cd_out, "bash: cd: hello: Not a directory");
+        assert!(!cd_out.contains("/root"));
+        assert!(!cd_out.contains("hello project"));
+        assert!(!cd_out.contains("total 8"));
+    }
+
+    #[test]
+    fn consecutive_notebook_commands_capture_independently() {
+        let cmd = "apt list";
+        let exec = tmux_pager_wrap(cmd);
+        let first_cap = concat!(
+            "root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat apt list) 2>&1 | tail -n 3000; echo __BUNNY_EXIT__${PIPESTATUS[0]}\n",
+            "Listing...\n",
+            "curl/noble 8.5.0 arm64\n",
+            "__BUNNY_EXIT__0\n",
+            "root@host:~/project# "
+        );
+        let baseline = notebook_command_baseline(first_cap);
+        let second_cap = format!(
+            "{first_cap}(PAGER=cat GIT_PAGER=cat apt list) 2>&1 | tail -n 3000; echo __BUNNY_EXIT__${{PIPESTATUS[0]}}\nListing...\nbash/noble 5.2 arm64\n__BUNNY_EXIT__0\nroot@host:~/project# "
+        );
+        let (out, code) =
+            parse_notebook_finished_command(&baseline, &second_cap, cmd, &exec).unwrap();
+        assert_eq!(code, 0);
+        assert!(out.contains("bash/noble"));
+        assert!(!out.contains("curl/noble"));
     }
 
     #[test]

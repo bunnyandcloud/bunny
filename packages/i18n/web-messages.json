@@ -927,6 +927,18 @@
     "en": "Stop",
     "fr": "Arrêter"
   },
+  "web.notebook.readMore": {
+    "en": "Read more ({count} lines)",
+    "fr": "Afficher la suite ({count} lignes)"
+  },
+  "web.notebook.readMoreSimple": {
+    "en": "Read more",
+    "fr": "Afficher la suite"
+  },
+  "web.notebook.showLess": {
+    "en": "Show less",
+    "fr": "Réduire"
+  },
   "web.notebook.fullscreen": {
     "en": "Fullscreen",
     "fr": "Plein écran"

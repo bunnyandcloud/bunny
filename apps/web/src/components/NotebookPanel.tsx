@@ -266,6 +266,15 @@ export default function NotebookPanel({
     wasInteractiveRef.current = interactiveSessionActive;
   }, [interactiveSessionActive, refreshShellPrefix]);
 
+  // Retract auto-opened attach when a non-interactive command finishes (client heuristic mismatch).
+  useEffect(() => {
+    if (!attachAutoOpenedRef.current || !attachOpen) return;
+    if (interactiveSessionActive || inputLocked) return;
+    attachAutoOpenedRef.current = false;
+    setAttachOpen(false);
+    refreshShellPrefix();
+  }, [interactiveSessionActive, inputLocked, attachOpen, refreshShellPrefix]);
+
   useEffect(() => {
     if (interactiveSessionActive) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });

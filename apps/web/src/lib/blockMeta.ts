@@ -26,6 +26,21 @@ export function interactiveTtySnapshot(block: TerminalBlock | undefined): string
   return typeof snap === 'string' && snap.trim() ? snap : undefined;
 }
 
+function aptSubcommand(command: string): string | undefined {
+  const parts = command.trim().split(/\s+/);
+  for (let i = 0; i < parts.length; i++) {
+    const base = (parts[i]?.replace(/^.*\//, '').toLowerCase() ?? '');
+    if (base === 'apt' || base === 'apt-get') {
+      const next = parts[i + 1];
+      if (next && !next.startsWith('-')) {
+        return next;
+      }
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 export function commandExpectsInteractive(cmd: string): boolean {
   const lower = cmd.trim().toLowerCase();
   const parts = cmd.trim().split(/\s+/);
@@ -97,6 +112,26 @@ export function commandExpectsInteractive(cmd: string): boolean {
   }
 
   if (first === 'apt' || first === 'apt-get') {
+    const sub = aptSubcommand(cmd);
+    const querySubs = new Set([
+      'list',
+      'search',
+      'show',
+      'policy',
+      'version',
+      'changelog',
+      'depends',
+      'rdepends',
+      'download',
+      'clean',
+      'autoclean',
+      'moo',
+      'help',
+      'indextargets',
+    ]);
+    if (sub && querySubs.has(sub.toLowerCase())) {
+      return false;
+    }
     if (
       lower.includes(' install') ||
       lower.includes(' update') ||
@@ -109,12 +144,14 @@ export function commandExpectsInteractive(cmd: string): boolean {
     ) {
       return false;
     }
-    return true;
+    if (!sub) return true;
+    if (sub.toLowerCase() === 'edit-sources') return true;
+    return false;
   }
 
   const tui = new Set([
     'nvim', 'vim', 'vi', 'view', 'nano', 'micro', 'emacs', 'emacsclient',
-    'htop', 'top', 'btop', 'less', 'more', 'man', 'apt', 'apt-get', 'dpkg',
+    'htop', 'top', 'btop', 'less', 'more', 'man', 'dpkg',
     'dialog', 'whiptail', 'mysql', 'psql', 'sqlite3', 'mc', 'ranger', 'tig',
     'lazygit', 'claude', 'aider', 'ipython', 'bpython',
   ]);

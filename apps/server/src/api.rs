@@ -1204,7 +1204,12 @@ async fn terminal_command(
         crate::terminals::clear_terminal_for_interactive_session(&state, id)
             .map_err(|_| ApiError::not_found("terminal"))?;
     }
-    let baseline = crate::terminals::capture_pane_for_terminal(&state, id).unwrap_or_default();
+    let baseline = if notebook_shells {
+        crate::terminals::notebook_command_baseline_for_terminal(&state, id)
+            .unwrap_or_default()
+    } else {
+        crate::terminals::capture_pane_for_terminal(&state, id).unwrap_or_default()
+    };
     crate::blocks::submit_user_command(
         Arc::clone(&state),
         id,
