@@ -4,6 +4,10 @@
 
 # Node / frontend
 node_modules/
+website/node_modules/
+website/build/
+website/.docusaurus/
+dist/
 dist/
 .vite/
 *.tsbuildinfo

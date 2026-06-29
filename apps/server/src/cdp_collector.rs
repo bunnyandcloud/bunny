@@ -1,6 +1,7 @@
 use crate::realtime::map_cdp_line_to_event;
 use crate::state::AppState;
 use anyhow::{anyhow, Result};
+use bunny_core::install_root;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -17,20 +18,25 @@ pub struct CdpCollectorHandle {
 }
 
 pub fn sidecar_script_path() -> Option<PathBuf> {
+    if let Some(dir) = install_root::sidecar_dir("cdp-sidecar") {
+        let script = dir.join("index.js");
+        if script.is_file() {
+            return Some(script);
+        }
+    }
     let candidates = [
         PathBuf::from("apps/server/cdp-sidecar/index.js"),
         PathBuf::from("cdp-sidecar/index.js"),
     ];
     for p in candidates {
-        if p.exists() {
+        if p.is_file() {
             return Some(p);
         }
     }
-    // Relative to executable for installed binary
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let p = parent.join("cdp-sidecar/index.js");
-            if p.exists() {
+            if p.is_file() {
                 return Some(p);
             }
         }

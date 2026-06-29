@@ -1,0 +1,602 @@
+/**
+ * bunny docs — aligned with https://bunnyandcloud.com landing palette
+ */
+
+:root {
+  --bunny-navy: #1a0b40;
+  --bunny-purple: #9d8af2;
+  --bunny-purple-dim: #6b5cad;
+  --bunny-teal: #48cbb9;
+  --bunny-teal-dim: #2a8f82;
+  --bunny-font: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --bunny-font-mono: "SF Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
+
+  --ifm-font-family-base: var(--bunny-font);
+  --ifm-font-family-monospace: var(--bunny-font-mono);
+  --ifm-code-font-size: 90%;
+  --ifm-heading-font-weight: 700;
+  --ifm-global-radius: 8px;
+}
+
+/* ── Light mode ─────────────────────────────────────────────── */
+
+[data-theme='light'] {
+  --bunny-bg: #f6f5fb;
+  --bunny-bg-elevated: #ffffff;
+  --bunny-bg-card: #ffffff;
+  --bunny-text: #1a0b40;
+  --bunny-text-muted: #5c5780;
+  --bunny-border: rgba(26, 11, 64, 0.12);
+  --bunny-purple-glow: rgba(157, 138, 242, 0.22);
+  --bunny-teal-glow: rgba(72, 203, 185, 0.18);
+
+  --ifm-color-primary: #6b5cad;
+  --ifm-color-primary-dark: #5f52a0;
+  --ifm-color-primary-darker: #524690;
+  --ifm-color-primary-darkest: #443878;
+  --ifm-color-primary-light: #7c6cd6;
+  --ifm-color-primary-lighter: #9d8af2;
+  --ifm-color-primary-lightest: #b0a0f5;
+
+  --ifm-background-color: var(--bunny-bg);
+  --ifm-background-surface-color: var(--bunny-bg-elevated);
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.88);
+  --ifm-footer-background-color: #eeedf5;
+  --ifm-font-color-base: var(--bunny-text);
+  --ifm-font-color-secondary: var(--bunny-text-muted);
+  --ifm-heading-color: var(--bunny-text);
+  --ifm-link-color: var(--bunny-purple-dim);
+  --ifm-link-hover-color: var(--bunny-teal-dim);
+  --ifm-menu-color: var(--bunny-text-muted);
+  --ifm-menu-color-active: var(--bunny-text);
+  --ifm-menu-color-background-active: rgba(157, 138, 242, 0.14);
+  --ifm-toc-border-color: var(--bunny-border);
+  --ifm-hr-border-color: var(--bunny-border);
+  --ifm-table-border-color: var(--bunny-border);
+  --ifm-color-emphasis-300: var(--bunny-border);
+  --ifm-code-background: rgba(26, 11, 64, 0.06);
+  --ifm-pre-background: #f0eff8;
+  --ifm-navbar-link-color: var(--bunny-text-muted);
+  --ifm-navbar-link-hover-color: var(--bunny-purple-dim);
+  --docusaurus-highlighted-code-line-bg: rgba(157, 138, 242, 0.15);
+}
+
+/* ── Dark mode ──────────────────────────────────────────────── */
+
+[data-theme='dark'] {
+  --bunny-bg: #050508;
+  --bunny-bg-elevated: #0d0d14;
+  --bunny-bg-card: #12121c;
+  --bunny-text: #f4f2ff;
+  --bunny-text-muted: #8b87a8;
+  --bunny-border: rgba(157, 138, 242, 0.15);
+  --bunny-purple-glow: rgba(157, 138, 242, 0.25);
+  --bunny-teal-glow: rgba(72, 203, 185, 0.2);
+
+  --ifm-color-primary: #9d8af2;
+  --ifm-color-primary-dark: #8a78e8;
+  --ifm-color-primary-darker: #7c6cd6;
+  --ifm-color-primary-darkest: #6b5cad;
+  --ifm-color-primary-light: #b0a0f5;
+  --ifm-color-primary-lighter: #c4b8f7;
+  --ifm-color-primary-lightest: #d8d0fa;
+
+  --ifm-background-color: var(--bunny-bg);
+  --ifm-background-surface-color: var(--bunny-bg-elevated);
+  --ifm-navbar-background-color: rgba(5, 5, 8, 0.85);
+  --ifm-footer-background-color: var(--bunny-bg);
+  --ifm-font-color-base: var(--bunny-text);
+  --ifm-font-color-secondary: var(--bunny-text-muted);
+  --ifm-heading-color: var(--bunny-text);
+  --ifm-link-color: var(--bunny-purple);
+  --ifm-link-hover-color: var(--bunny-teal);
+  --ifm-menu-color: var(--bunny-text-muted);
+  --ifm-menu-color-active: var(--bunny-text);
+  --ifm-menu-color-background-active: rgba(157, 138, 242, 0.12);
+  --ifm-toc-border-color: var(--bunny-border);
+  --ifm-hr-border-color: var(--bunny-border);
+  --ifm-table-border-color: var(--bunny-border);
+  --ifm-color-emphasis-300: var(--bunny-border);
+  --ifm-code-background: rgba(18, 18, 28, 0.9);
+  --ifm-pre-background: var(--bunny-bg-card);
+  --ifm-navbar-link-color: var(--bunny-text-muted);
+  --ifm-navbar-link-hover-color: var(--bunny-purple);
+  --docusaurus-highlighted-code-line-bg: rgba(72, 203, 185, 0.1);
+}
+
+/* ── Ambient background glows ───────────────────────────────── */
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  background-color: var(--bunny-bg);
+}
+
+html[data-theme='light'] {
+  background-color: #f6f5fb;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 90% 0%, rgba(157, 138, 242, 0.28), transparent 70%),
+    radial-gradient(ellipse 70% 55% at 0% 85%, rgba(72, 203, 185, 0.22), transparent 65%),
+    linear-gradient(180deg, #f6f5fb 0%, #edeaf8 40%, #e8f5f3 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+html[data-theme='dark'] {
+  background-color: var(--bunny-bg);
+}
+
+body {
+  background: transparent;
+}
+
+.main-wrapper,
+.docsWrapper,
+.docMainContainer,
+.theme-doc-markdown,
+.container {
+  background: transparent !important;
+}
+
+html body::before,
+html body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+html body::before {
+  width: 420px;
+  height: 420px;
+  top: -80px;
+  right: -80px;
+  background: var(--bunny-purple-glow);
+}
+
+html body::after {
+  width: 320px;
+  height: 320px;
+  bottom: 15%;
+  left: -100px;
+  background: var(--bunny-teal-glow);
+}
+
+.navbar,
+.main-wrapper,
+.footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Navbar ─────────────────────────────────────────────────── */
+
+.navbar {
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--bunny-border);
+  box-shadow: none;
+}
+
+.navbar__title {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--bunny-text);
+}
+
+.navbar__logo img,
+.bunny-sidebar-logo img {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 56px !important;
+  height: 50px !important;
+  object-fit: contain;
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+[data-theme='dark'] .navbar__logo img,
+[data-theme='dark'] .bunny-sidebar-logo img,
+[data-theme='light'] .navbar__logo img,
+[data-theme='light'] .bunny-sidebar-logo img {
+  filter: drop-shadow(0 0 8px rgba(157, 138, 242, 0.35));
+}
+
+.navbar__link {
+  font-size: 0.9rem;
+  transition: color 0.2s;
+}
+
+.navbar__link--active {
+  color: var(--bunny-teal) !important;
+}
+
+[data-theme='light'] .navbar__link--active {
+  color: var(--bunny-teal-dim) !important;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--bunny-border) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(8px);
+}
+
+[data-theme='dark'] .theme-doc-sidebar-container {
+  background: rgba(13, 13, 20, 0.88) !important;
+}
+
+.menu__link {
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+  background: var(--ifm-menu-color-background-active);
+  color: var(--bunny-text);
+  border-left: 2px solid var(--bunny-purple);
+}
+
+.menu__list-item-collapsible:hover,
+.menu__link:hover {
+  background: rgba(157, 138, 242, 0.08);
+  color: var(--bunny-purple-dim);
+}
+
+[data-theme='dark'] .menu__list-item-collapsible:hover,
+[data-theme='dark'] .menu__link:hover {
+  color: var(--bunny-purple);
+}
+
+/* ── Markdown content ───────────────────────────────────────── */
+
+.markdown h1 {
+  letter-spacing: -0.03em;
+  color: var(--bunny-text);
+}
+
+.markdown h2 {
+  letter-spacing: -0.02em;
+  border-bottom: 1px solid var(--bunny-border);
+  padding-bottom: 0.35rem;
+  color: var(--bunny-text);
+}
+
+.markdown table {
+  border: 1px solid var(--bunny-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.markdown table th {
+  background: var(--bunny-bg-card);
+  color: var(--bunny-text);
+}
+
+[data-theme='light'] .markdown table tr:nth-child(2n) {
+  background: rgba(157, 138, 242, 0.05);
+}
+
+[data-theme='dark'] .markdown table tr:nth-child(2n) {
+  background: rgba(18, 18, 28, 0.5);
+}
+
+.markdown a {
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.markdown a:hover {
+  color: var(--bunny-teal);
+}
+
+[data-theme='light'] .markdown a:hover {
+  color: var(--bunny-teal-dim);
+}
+
+code {
+  border: 1px solid var(--bunny-border);
+  border-radius: 4px;
+}
+
+pre {
+  border: 1px solid var(--bunny-border);
+  border-radius: 10px;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+
+.footer {
+  border-top: 1px solid var(--bunny-border);
+}
+
+.footer--dark {
+  --ifm-footer-background-color: #0d0d14;
+  background-color: #0d0d14;
+}
+
+[data-theme='light'] .footer--dark {
+  --ifm-footer-background-color: #12121c;
+  background-color: #12121c;
+}
+
+.footer--dark .footer__title {
+  color: #f4f2ff;
+}
+
+.footer--dark .footer__link-item,
+.footer--dark .footer__link-item a {
+  color: #a9a5c4;
+}
+
+.footer--dark .footer__link-item a:hover {
+  color: #9d8af2;
+}
+
+.footer--dark .footer__copyright {
+  color: #8b87a8;
+}
+
+.footer__title {
+  color: var(--bunny-text);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.footer__copyright {
+  color: var(--bunny-text-muted);
+  font-size: 0.85rem;
+}
+
+.footer__link-item {
+  color: var(--bunny-text-muted);
+}
+
+/* ── Pagination & TOC ───────────────────────────────────────── */
+
+.pagination-nav__link {
+  border: 1px solid var(--bunny-border);
+  border-radius: 10px;
+  background: var(--bunny-bg-card);
+}
+
+.pagination-nav__link:hover {
+  border-color: rgba(157, 138, 242, 0.35);
+}
+
+.table-of-contents__link {
+  color: var(--bunny-text-muted);
+}
+
+.table-of-contents__link--active,
+.table-of-contents__link:hover {
+  color: var(--bunny-teal);
+}
+
+[data-theme='light'] .table-of-contents__link--active,
+[data-theme='light'] .table-of-contents__link:hover {
+  color: var(--bunny-teal-dim);
+}
+
+/* ── Hero & cards ───────────────────────────────────────────── */
+
+.bunny-doc-hero {
+  margin: 0 0 2.5rem;
+  padding: 2rem 1.5rem 2.25rem;
+  border-radius: 12px;
+  border: 1px solid var(--bunny-border);
+  background: linear-gradient(135deg, rgba(157, 138, 242, 0.12), rgba(72, 203, 185, 0.08));
+  border-left: 3px solid var(--bunny-purple);
+  box-shadow: 0 0 32px rgba(157, 138, 242, 0.08);
+  overflow: hidden;
+}
+
+.bunny-doc-hero__layout {
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+}
+
+@media (min-width: 768px) {
+  .bunny-doc-hero__layout {
+    grid-template-columns: 1fr minmax(200px, 280px);
+    gap: 2.5rem;
+  }
+}
+
+.bunny-doc-hero__content {
+  min-width: 0;
+}
+
+.bunny-doc-hero__visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.bunny-doc-hero__logo {
+  width: min(280px, 70vw);
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 0 40px rgba(157, 138, 242, 0.25));
+}
+
+@media (max-width: 767px) {
+  .bunny-doc-hero__visual {
+    order: -1;
+  }
+
+  .bunny-doc-hero__logo {
+    width: min(200px, 55vw);
+  }
+}
+
+[data-theme='light'] .bunny-doc-hero {
+  background: linear-gradient(135deg, rgba(157, 138, 242, 0.14), rgba(72, 203, 185, 0.1));
+  box-shadow: 0 4px 24px rgba(26, 11, 64, 0.06);
+}
+
+.bunny-doc-hero__eyebrow {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--bunny-teal-dim);
+  margin-bottom: 0.75rem;
+}
+
+[data-theme='dark'] .bunny-doc-hero__eyebrow {
+  color: var(--bunny-teal);
+}
+
+.bunny-doc-hero__title {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 0.75rem;
+  color: var(--bunny-text);
+}
+
+.bunny-doc-hero__lead {
+  font-size: 1.05rem;
+  color: var(--bunny-text-muted);
+  max-width: 52ch;
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+
+.bunny-doc-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.bunny-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+  text-decoration: none !important;
+}
+
+.bunny-btn:hover {
+  transform: translateY(-1px);
+}
+
+.bunny-btn--primary {
+  background: var(--bunny-purple);
+  color: var(--bunny-navy) !important;
+  border-color: var(--bunny-purple);
+}
+
+.bunny-btn--primary:hover {
+  background: #b0a0f5;
+}
+
+.bunny-btn--secondary {
+  background: transparent;
+  color: var(--bunny-text) !important;
+  border-color: var(--bunny-border);
+}
+
+.bunny-btn--secondary:hover {
+  border-color: var(--bunny-purple);
+  color: var(--bunny-purple-dim) !important;
+}
+
+[data-theme='dark'] .bunny-btn--secondary:hover {
+  color: var(--bunny-purple) !important;
+}
+
+.bunny-card-grid {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+
+@media (min-width: 768px) {
+  .bunny-card-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.bunny-card {
+  background: var(--bunny-bg-card);
+  border: 1px solid var(--bunny-border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+}
+
+[data-theme='light'] .bunny-card {
+  box-shadow: 0 2px 12px rgba(26, 11, 64, 0.05);
+}
+
+.bunny-card:hover {
+  border-color: rgba(157, 138, 242, 0.35);
+  transform: translateY(-2px);
+}
+
+[data-theme='light'] .bunny-card:hover {
+  box-shadow: 0 6px 20px rgba(26, 11, 64, 0.08);
+}
+
+.bunny-card h3 {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+  color: var(--bunny-text);
+}
+
+.bunny-card p {
+  font-size: 0.9rem;
+  color: var(--bunny-text-muted);
+  margin: 0;
+}
+
+.bunny-card a {
+  color: var(--bunny-purple-dim);
+  font-weight: 500;
+}
+
+[data-theme='dark'] .bunny-card a {
+  color: var(--bunny-purple);
+}
+
+.bunny-card a:hover {
+  color: var(--bunny-teal);
+}
+
+[data-theme='light'] .bunny-card a:hover {
+  color: var(--bunny-teal-dim);
+}
+
+/* ── Mermaid diagrams ───────────────────────────────────────── */
+
+.docusaurus-mermaid-container {
+  margin: 1.5rem 0;
+  padding: 1.25rem;
+  border-radius: 12px;
+  border: 1px solid var(--bunny-border);
+  background: var(--bunny-bg-card);
+  overflow-x: auto;
+}
+
+[data-theme='light'] .docusaurus-mermaid-container {
+  box-shadow: 0 2px 12px rgba(26, 11, 64, 0.05);
+}
+

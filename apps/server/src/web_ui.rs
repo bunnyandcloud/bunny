@@ -1,42 +1,15 @@
 use anyhow::{bail, Context, Result};
+use bunny_core::install_root;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
-/// Monorepo root containing `apps/web/package.json`.
-pub fn find_repo_root() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::current_dir() {
-        if let Some(root) = search_repo_root(&dir) {
-            return Some(root);
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let mut dir = exe.parent()?.to_path_buf();
-        for _ in 0..8 {
-            if let Some(root) = search_repo_root(&dir) {
-                return Some(root);
-            }
-            if !dir.pop() {
-                break;
-            }
-        }
-    }
-    None
-}
-
-fn search_repo_root(dir: &Path) -> Option<PathBuf> {
-    let mut current = dir.to_path_buf();
-    loop {
-        if current.join("apps/web/package.json").is_file() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
+pub use bunny_core::install_root::find_repo_root;
 
 pub fn web_dist_dir(repo_root: Option<&Path>) -> Option<PathBuf> {
+    if let Some(dist) = install_root::resolved_web_dist() {
+        return Some(dist);
+    }
     if let Some(root) = repo_root {
         let dist = root.join("apps/web/dist");
         if dist.join("index.html").is_file() {
@@ -126,7 +99,35 @@ fn install_web_deps(web_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn ensure_web_ui_built(repo_root: &Path) -> Result<PathBuf> {
+/// Ensure web UI dist exists. Uses pre-built share dir in release installs; builds from source in dev.
+pub fn ensure_web_ui_built() -> Result<PathBuf> {
+    if let Some(dist) = install_root::web_dist_path() {
+        if dist.join("index.html").is_file() {
+            if !install_root::is_dev_checkout() {
+                println!("✓ Web UI ready ({})", dist.display());
+                return Ok(dist);
+            }
+            let repo = install_root::find_repo_root();
+            if let Some(root) = repo {
+                let web_dir = root.join("apps/web");
+                if web_ui_stale(&web_dir, &dist) {
+                    return build_web_from_repo(&root);
+                }
+            }
+            println!("✓ Web UI ready ({})", dist.display());
+            return Ok(dist);
+        }
+    }
+
+    let repo_root = install_root::find_repo_root().ok_or_else(|| {
+        anyhow::anyhow!(
+            "could not find web UI (no share/bunny/web/dist and no apps/web in a git checkout)"
+        )
+    })?;
+    build_web_from_repo(&repo_root)
+}
+
+fn build_web_from_repo(repo_root: &Path) -> Result<PathBuf> {
     let web_dir = repo_root.join("apps/web");
     let dist = web_dir.join("dist");
     let dist_ready = dist.join("index.html").is_file();

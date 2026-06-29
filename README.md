@@ -1,18 +1,26 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="bunny" width="280">
+  <img src="website/static/img/logo.png" alt="bunny" width="280">
 </p>
 
 # Build products together on the same remote environment
 
-This project turns a remote server or hosted container into a collaborative product-making station: web terminals, live port previews, live-streamed browsers, Discord workflows, and a unified timeline where code, feedback, decisions, and experiments come together. A real server-side agent gives teams an open workspace they control, without being locked into a proprietary cloud. It lets teams install and orchestrate the tools they already use — shell commands, project CLIs, scripts, and AI agents like Codex or Claude — through prompts, commands, and shared workflows in one open environment.
+This project turns a remote server or hosted container into a collaborative product-making station: web terminals, live port previews, live-streamed browsers, Discord workflows, and a unified timeline where code, feedback, decisions, and experiments come together. A real server-side agent gives teams an open workspace they control, without being locked into a proprietary cloud.
 
 It is designed for engineers, designers, operators, founders, and non-technical contributors to participate in the same development flow — and for versioning to evolve beyond code commits into a more organic record of how the product is actually made.
 
-## Install on a Linux server
+## Choose your path
 
-Best for a VPS, cloud VM, or any machine where you develop over SSH.
+| You are… | Recommended install | Docs |
+|----------|---------------------|------|
+| **Trying bunny, on Mac/Windows, or deploying with Docker** | Pre-built Docker image → `configure` → `run` | [Install with Docker](https://docs.bunnyandcloud.com/getting-started/install-docker) |
+| **Running on a Linux VPS (no Docker)** | Native release (`curl \| sh`) → `configure` → `run` | [Install on Linux](https://docs.bunnyandcloud.com/getting-started/install-linux) |
+| **Developing bunny itself** | Git clone → `./bunny setup` → `configure` → `run` | [Developer install](https://docs.bunnyandcloud.com/getting-started/install-dev) |
 
-**From a git clone** (recommended for development):
+Full walkthrough: **[docs.bunnyandcloud.com](https://docs.bunnyandcloud.com)**
+
+## Quick start (from a git clone)
+
+Today, the fastest way to try bunny from source:
 
 ```bash
 git clone https://github.com/bunnyandcloud/bunny.git && cd bunny
@@ -21,84 +29,50 @@ bunny configure
 bunny run
 ```
 
+> **First install takes 5–10 minutes** — `./bunny setup` compiles the Rust agent; the first `bunny run` also builds the web UI. Subsequent starts are much faster.
+
 On Debian/Ubuntu, `./bunny setup` installs missing prerequisites (Rust, Node, tmux, browser stack) automatically.
 
-**Recommended — Discord:** create a bot in the [Discord Developer Portal](https://discord.com/developers/applications) and invite it to your server (see walkthrough below). Bunny normally runs `bunny discord setup` during `bunny configure`; you can also run `bunny discord setup` later if you skipped it. Walkthrough: [Discord application and server setup](docs/integrations/discord.md#discord-application-and-server).
+**Pre-built installs (no compile):**
 
-**First install takes a few minutes** — `./bunny setup` compiles the Rust agent from source; the first `bunny run` also builds the web UI (Node.js required). Subsequent starts are much faster.
+```bash
+# Docker (Mac, Windows, Linux VPS, quick try)
+curl -fsSL https://raw.githubusercontent.com/bunnyandcloud/bunny/main/scripts/docker-quickstart.sh | sh
 
-By default, the agent listens on **localhost only** (`127.0.0.1` on the server). From your laptop, use an **SSH tunnel** (recommended):
+# Linux VPS without Docker
+curl -fsSL https://raw.githubusercontent.com/bunnyandcloud/bunny/main/scripts/install-release.sh | sh
+```
+
+See [Install with Docker](https://docs.bunnyandcloud.com/getting-started/install-docker) or [Install on Linux](https://docs.bunnyandcloud.com/getting-started/install-linux).
+
+## After install
+
+1. **Configure** — `bunny configure` creates the owner account (MFA) and optionally sets up Discord. Create a bot first: [Discord walkthrough](https://docs.bunnyandcloud.com/team-chats/discord/setup#discord-application-and-server).
+2. **Run** — `bunny run` starts the agent (use `--host 0.0.0.0` inside Docker).
+3. **Connect** — from your laptop, open an SSH tunnel (recommended):
 
 ```bash
 ssh -L 7681:127.0.0.1:7681 user@your-server
 ```
 
-Then open **[http://127.0.0.1:7681](http://127.0.0.1:7681)** in your browser — on your laptop, not the server’s public IP.
-
-To reach the UI via the server’s IP directly, bind on all interfaces and open the firewall (less secure — see [Installation](docs/install/README.md)):
-
-```bash
-bunny run --host 0.0.0.0 --port 7681
-# then http://YOUR_SERVER_IP:7681
-```
+Then open **[http://127.0.0.1:7681](http://127.0.0.1:7681)** in your browser.
 
 Run `bunny doctor` to verify dependencies.
 
-## Install with Docker
+## Documentation
 
-Run the agent inside a container — useful for trying bunny locally or keeping a clean dev environment.
-
-**Quick container** (Ubuntu 24.04):
-
-```bash
-docker run -dit --name bunny-dev \
-  -v "$(pwd)":/opt/bunny \
-  -w /opt/bunny \
-  -p 127.0.0.1:7681:7681 \
-  --shm-size=2g \
-  ubuntu:24.04 sleep infinity
-
-docker exec -it bunny-dev bash
-cd /opt/bunny
-./bunny setup
-bunny configure
-bunny run
-```
-
-Same as above: first `./bunny setup` and `bunny run` compile from source — allow a few minutes.
-
-Open **[http://127.0.0.1:7681](http://127.0.0.1:7681)** on the host.
-
-**Mac / local dev** — use the helper script (agent in Docker, optional Discord bridge on the host):
-
-```bash
-./scripts/docker-dev.sh bootstrap
-./scripts/docker-dev.sh shell
-bunny run
-```
-
-Browser tab (noVNC) needs a one-time `./scripts/docker-dev.sh browser-setup`. Details: [Installation → Docker](docs/install/README.md#docker) and [Discord + Docker on Mac](docs/integrations/discord-docker-dev.md).
-
-**Recommended — Discord:** create the application and invite the bot to your server first ([walkthrough](docs/integrations/discord.md#discord-application-and-server)). `bootstrap` runs `bunny configure`, which normally includes `bunny discord setup`; run `bunny discord setup` separately if you skipped it.
+| Topic | Link |
+|-------|------|
+| **Getting started** | [docs.bunnyandcloud.com](https://docs.bunnyandcloud.com) |
+| Architecture | [Overview](https://docs.bunnyandcloud.com/architecture/overview) |
+| Security | [Security](https://docs.bunnyandcloud.com/security/) |
+| API | [API reference](https://docs.bunnyandcloud.com/api/) |
+| Discord | [Team chats → Discord](https://docs.bunnyandcloud.com/team-chats/discord/setup) |
+| Mobile app | [Mobile](https://docs.bunnyandcloud.com/mobile/) |
 
 ## Community
 
 Discord server for questions, feedback, and release announcements — **invite link coming soon**.
-
-## Documentation
-
-
-| Topic                                     | Link                                                                                                                       |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Full install guide (systemd, secrets)     | [docs/install/README.md](docs/install/README.md)                                                                           |
-| macOS local dev                           | [docs/install/README.md#macos-local-development](docs/install/README.md#macos-local-development)                           |
-| Architecture                              | [docs/architecture/overview.md](docs/architecture/overview.md)                                                             |
-| Security                                  | [docs/security/README.md](docs/security/README.md)                                                                         |
-| API                                       | [docs/api/README.md](docs/api/README.md)                                                                                   |
-| Discord (app, bot, server, `/bunny link`) | [docs/integrations/discord.md#discord-application-and-server](docs/integrations/discord.md#discord-application-and-server) |
-| Mobile app                                | [docs/mobile/README.md](docs/mobile/README.md)                                                                             |
-| Everything else                           | [docs/README.md](docs/README.md)                                                                                           |
-
 
 ## Contributing
 

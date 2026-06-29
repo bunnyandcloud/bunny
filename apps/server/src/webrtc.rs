@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use anyhow::{anyhow, Result};
+use bunny_core::install_root;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -15,18 +16,24 @@ pub struct WebRtcSidecar {
 }
 
 pub fn sidecar_script_path() -> Option<PathBuf> {
+    if let Some(dir) = install_root::sidecar_dir("webrtc-sidecar") {
+        let script = dir.join("index.js");
+        if script.is_file() {
+            return Some(script);
+        }
+    }
     for p in [
         PathBuf::from("apps/server/webrtc-sidecar/index.js"),
         PathBuf::from("webrtc-sidecar/index.js"),
     ] {
-        if p.exists() {
+        if p.is_file() {
             return Some(p);
         }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let p = parent.join("webrtc-sidecar/index.js");
-            if p.exists() {
+            if p.is_file() {
                 return Some(p);
             }
         }

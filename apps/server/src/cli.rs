@@ -539,18 +539,14 @@ pub async fn run_run(state: Arc<AppState>, opts: RunOpts) -> Result<()> {
 
     let serve_web_ui = !opts.no_web_ui;
     let web_dist = if serve_web_ui {
-        let repo_root = crate::web_ui::find_repo_root().ok_or_else(|| {
-            anyhow::anyhow!(
-                "could not find repo root (apps/web/package.json). \
-                 Run from the bunny clone or set cwd to the repository root."
-            )
-        })?;
-        std::env::set_current_dir(&repo_root)?;
-        if opts.web_ui_rebuild {
-            let web_dir = repo_root.join("apps/web");
-            let _ = std::fs::remove_dir_all(web_dir.join("dist"));
+        if let Some(root) = crate::web_ui::find_repo_root() {
+            if opts.web_ui_rebuild {
+                let web_dir = root.join("apps/web");
+                let _ = std::fs::remove_dir_all(web_dir.join("dist"));
+            }
+            std::env::set_current_dir(&root)?;
         }
-        Some(crate::web_ui::ensure_web_ui_built(&repo_root)?)
+        Some(crate::web_ui::ensure_web_ui_built()?)
     } else {
         crate::web_ui::web_dist_dir(crate::web_ui::find_repo_root().as_deref())
     };

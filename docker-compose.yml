@@ -1,0 +1,25 @@
+# Pre-built bunny agent — no source mount. See scripts/docker-quickstart.sh
+services:
+  bunny:
+    image: ghcr.io/bunnyandcloud/bunny:latest
+    container_name: bunny
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7681:7681"
+    volumes:
+      - bunny-config:/root/.config/bunny
+    environment:
+      BUNNY_INSTALL_DIR: /opt/bunny
+      BUNNY_SERVER__BIND_HOST: 0.0.0.0
+    shm_size: "2gb"
+    entrypoint: ["/opt/bunny/scripts/docker-entrypoint.sh"]
+    command: ["sleep", "infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:7681/api/v1/agent/info || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  bunny-config:

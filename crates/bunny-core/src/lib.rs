@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod install_root;
 pub mod permissions;
 pub mod redaction;
 pub mod types;

@@ -1,0 +1,11 @@
+target/
+.git/
+.cursor/
+**node_modules/
+apps/web/dist/
+website/node_modules/
+website/build/
+website/.docusaurus/
+.discord/
+.env
+*.db

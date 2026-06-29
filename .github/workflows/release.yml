@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --no-fund --no-audit
+        working-directory: apps/web
+      - run: npm run build
+        working-directory: apps/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+  build-sidecars:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install sidecar dependencies
+        run: |
+          cd apps/server/webrtc-sidecar && npm ci --omit=dev --no-fund --no-audit
+          cd ../cdp-sidecar && npm ci --omit=dev --no-fund --no-audit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidecars
+          path: |
+            apps/server/webrtc-sidecar
+            apps/server/cdp-sidecar
+
+  build-rust:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: linux-amd64
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            arch: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    needs: [build-web, build-sidecars]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sidecars
+          path: apps/server
+      - name: Build release binaries
+        run: |
+          cargo build --release -p bunny-server -p bunny-discord-bridge --target ${{ matrix.target }}
+      - name: Package tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          STAGING="bunny-${VERSION}-${{ matrix.arch }}"
+          mkdir -p "${STAGING}/bin" "${STAGING}/share/bunny/web" "${STAGING}/scripts"
+          cp "target/${{ matrix.target }}/release/bunny" "${STAGING}/bin/"
+          cp "target/${{ matrix.target }}/release/bunny-discord-bridge" "${STAGING}/bin/"
+          cp -R apps/web/dist "${STAGING}/share/bunny/web/"
+          cp -R apps/server/webrtc-sidecar "${STAGING}/share/bunny/"
+          cp -R apps/server/cdp-sidecar "${STAGING}/share/bunny/"
+          cp scripts/install-runtime.sh "${STAGING}/scripts/"
+          chmod +x "${STAGING}/bin/"* "${STAGING}/scripts/"*
+          mkdir -p dist
+          tar -czf "dist/bunny-${VERSION}-${{ matrix.arch }}.tar.gz" "${STAGING}"
+          cp "dist/bunny-${VERSION}-${{ matrix.arch }}.tar.gz" "dist/bunny-${{ matrix.arch }}.tar.gz"
+          sha256sum dist/*.tar.gz > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.arch }}
+          path: dist/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+            type=ref,event=tag
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-rust]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tarball-*
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
