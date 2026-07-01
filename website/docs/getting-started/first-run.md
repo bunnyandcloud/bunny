@@ -50,23 +50,60 @@ Or set `BUNNY_SERVER__BIND_HOST=0.0.0.0` in your compose file.
 
 ## 4. Connect from your laptop
 
-By default the agent binds to **localhost on the server**. Use an SSH tunnel:
+### Remote server or container (recommended)
+
+When bunny runs on a **VPS or managed container**, open it with the **server's IP or URL** — not `127.0.0.1` on your laptop:
+
+```text
+http://203.0.113.5:7681          # public IP
+http://bunny.internal:7681       # hostname on your LAN/VPN
+https://your-host.example.com    # reverse proxy (recommended in production)
+```
+
+Requirements:
+
+1. Bunny listens on `0.0.0.0` (step 3 — required in Docker).
+2. Port `7681` is published and reachable (`7681:7681` in compose, firewall open if needed).
+3. **`discord.public_url`** in `~/.config/bunny/config.yaml` matches that same base URL.
+
+```yaml
+discord:
+  public_url: "https://your-host.example.com"   # or http://203.0.113.5:7681
+```
+
+`bunny configure` / `bunny discord setup` ask for this URL. You can also set `BUNNY_PUBLIC_URL`.
+
+This matters for **Discord watch links**: `/bunny stream_browser_start` posts URLs like `{public_url}/watch/<token>`. If `public_url` is `http://127.0.0.1:7681`, only someone with an SSH tunnel on that machine can open them — teammates clicking the link in Discord will not reach the stream.
+
+Use MFA and prefer HTTPS in production. See [Install on Linux](./install-linux#expose-on-public-ip).
+
+### Local trial (Docker on your laptop)
+
+When the container runs on the **same machine** as your browser:
+
+```text
+http://127.0.0.1:7681
+```
+
+`public_url` can stay `http://127.0.0.1:7681` for local Discord dev.
+
+### SSH tunnel (solo admin access only)
+
+Use when bunny (or Docker's port publish) listens only on **localhost of the remote host** and you do **not** want port 7681 on the network. Fine for your own Web UI access; **not** for shared Discord streams or OAuth.
 
 ```bash
 ssh -L 7681:127.0.0.1:7681 user@your-server
 ```
 
-Open **http://127.0.0.1:7681** on your laptop.
+Then open **http://127.0.0.1:7681** on your laptop while the tunnel is active.
 
 ```
-  Laptop                    Server / container
+  Laptop                    Remote server
   ┌─────────┐   SSH tunnel   ┌──────────────────┐
   │ Browser │ ─────────────► │ bunny :7681      │
   │ :7681   │   -L 7681:...  │ (127.0.0.1)      │
   └─────────┘                └──────────────────┘
 ```
-
-To expose the UI on the server's public IP (less secure), bind `0.0.0.0` and open the firewall. See [Install on Linux](./install-linux#expose-on-public-ip).
 
 ## 5. Verify
 
@@ -92,6 +129,7 @@ See [Security](../security/) for scopes and CLI reference.
 
 | Problem | Fix |
 |---------|-----|
-| UI not loading | Check tunnel or port mapping `7681` |
+| UI not loading | Check `public_url`, port mapping `7681`, firewall |
+| Discord watch link broken | Set `discord.public_url` to a URL reachable from browsers (not `127.0.0.1` on a remote host) |
 | Browser tab missing | Run full install (not `--minimal`); check `bunny doctor` |
 | Discord bridge fails | Verify bot token; check outbound DNS from container |

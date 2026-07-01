@@ -129,7 +129,7 @@ ssh -L 7681:127.0.0.1:7681 user@your-server
 
 Open **http://127.0.0.1:7681** locally.
 
-### Public IP (less secure)
+### Public IP
 
 ```bash
 bunny run --host 0.0.0.0 --port 7681
