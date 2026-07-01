@@ -845,6 +845,46 @@ pub fn notebook_capture_marker_wait(command: &str) -> std::time::Duration {
     }
 }
 
+/// True when text after an exit marker is only a short idle prompt (not scrolled command output).
+fn is_short_notebook_prompt_tail(text: &str) -> bool {
+    let text = text.trim_end();
+    if text.is_empty() {
+        return true;
+    }
+    if text.len() > 512 || text.lines().count() > 4 {
+        return false;
+    }
+    text.lines().all(|line| {
+        let t = line.trim();
+        t.is_empty() || is_shell_prompt_line(t)
+    })
+}
+
+fn trailing_notebook_prompt_tail(pane: &str) -> String {
+    let lines: Vec<&str> = pane.lines().collect();
+    for (idx, line) in lines.iter().enumerate().rev() {
+        if !is_shell_prompt_line(line.trim()) {
+            continue;
+        }
+        let start = if idx > 0 && lines[idx - 1].trim().is_empty() {
+            idx - 1
+        } else {
+            idx
+        };
+        return lines[start..].join("\n");
+    }
+    lines
+        .iter()
+        .rev()
+        .take(4)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Trim scrollback-heavy pane text to the idle prompt tail before a new notebook command.
 pub fn notebook_command_baseline(pane: &str) -> String {
     let norm = normalize_pane_text(pane);
@@ -858,21 +898,11 @@ pub fn notebook_command_baseline(pane: &str) -> String {
             .map(|(_, tail)| tail)
             .unwrap_or("")
             .trim_end();
-        if !rest.is_empty() {
+        if !rest.is_empty() && is_short_notebook_prompt_tail(rest) {
             return rest.to_string();
         }
     }
-    let lines: Vec<&str> = norm.lines().collect();
-    lines
-        .iter()
-        .rev()
-        .take(4)
-        .copied()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
+    trailing_notebook_prompt_tail(&norm)
 }
 
 /// Pane tail used as the capture baseline for the next notebook command.
@@ -2324,6 +2354,30 @@ fn pane_text_after_command_echo(after: &str, command: &str) -> Option<String> {
     Some(lines.join("\n").trim().to_string())
 }
 
+/// Output after the last echo of `command` / `exec_line`, with baseline lines removed.
+/// Used for still-running notebook commands that have not printed `__BUNNY_EXIT__` yet.
+pub fn scoped_notebook_output_after_echo(
+    cap: &str,
+    baseline: &str,
+    command: &str,
+    exec_line: &str,
+) -> Option<String> {
+    for cmd in [exec_line, command] {
+        let after_echo = pane_text_after_command_echo(cap, cmd)?;
+        let scoped = strip_lines_in_baseline(&after_echo, baseline);
+        if !scoped.trim().is_empty() {
+            return Some(scoped);
+        }
+    }
+    None
+}
+
+pub(crate) fn command_echo_present_in_cap(cap: &str, command: &str, exec_line: &str) -> bool {
+    [exec_line, command]
+        .into_iter()
+        .any(|cmd| pane_text_after_command_echo(cap, cmd).is_some())
+}
+
 /// Output + exit code from the last command echo through a complete exit marker.
 pub fn parse_captured_run_after_last_echo(
     text: &str,
@@ -2894,6 +2948,221 @@ mod discord_run_tests {
         assert_eq!(code, Some(0));
         assert!(parsed.contains("bin  lib  pyvenv.cfg  tentative.md"));
         assert!(!parsed.contains("project"));
+    }
+
+    #[test]
+    fn ls_after_apt_install_does_not_repeat_apt_output() {
+        let apt_cmd = "apt install virtualenv";
+        let _apt_exec = tmux_pager_wrap(apt_cmd);
+        let after_apt = concat!(
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat apt install virtualenv) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "Reading state information... Done\n",
+            "The following NEW packages will be installed:\n",
+            "  python3-virtualenv\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let baseline_ls = notebook_command_baseline(after_apt);
+        let ls_exec = tmux_pager_wrap("ls");
+        // Visible pane still shows tail of apt output above the new ls run.
+        let cap = concat!(
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "Reading state information... Done\n",
+            "The following NEW packages will be installed:\n",
+            "  python3-virtualenv\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (parsed, code) =
+            capture_instant_notebook_output(&baseline_ls, cap, "ls", &ls_exec);
+        assert_eq!(code, Some(0));
+        assert_eq!(parsed.trim(), "project");
+        assert!(!parsed.contains("Reading package lists"));
+        assert!(!parsed.contains("python3-virtualenv"));
+    }
+
+    #[test]
+    fn repeated_ls_after_apt_install_does_not_repeat_apt_output() {
+        let after_first_ls = concat!(
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let after_apt = format!(
+            "{after_first_ls}(PAGER=cat GIT_PAGER=cat apt install virtualenv) 2>&1; echo __BUNNY_EXIT__$?\n\
+             Reading package lists... Done\n\
+             Building dependency tree... Done\n\
+             Reading state information... Done\n\
+             The following NEW packages will be installed:\n\
+               python3-virtualenv\n\
+             __BUNNY_EXIT__0\n\
+             (project) root@host:~/project# "
+        );
+        let baseline_ls = notebook_command_baseline(&after_apt);
+        let ls_exec = tmux_pager_wrap("ls");
+        let cap = concat!(
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat apt install virtualenv) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "Reading state information... Done\n",
+            "The following NEW packages will be installed:\n",
+            "  python3-virtualenv\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (parsed, code) =
+            capture_instant_notebook_output(&baseline_ls, cap, "ls", &ls_exec);
+        assert_eq!(code, Some(0), "parsed={parsed:?}");
+        assert_eq!(parsed.trim(), "project", "parsed={parsed:?}");
+        assert!(!parsed.contains("Reading package lists"), "parsed={parsed:?}");
+    }
+
+    #[test]
+    fn repeated_ls_with_same_output_after_apt_visible_pane() {
+        let baseline = concat!(
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat apt install virtualenv) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let ls_exec = tmux_pager_wrap("ls");
+        let cap = concat!(
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (parsed, code) = capture_instant_notebook_output(baseline, cap, "ls", &ls_exec);
+        assert_eq!(code, Some(0), "parsed={parsed:?}");
+        assert_eq!(parsed.trim(), "project", "parsed={parsed:?}");
+        assert!(!parsed.contains("Reading package lists"), "parsed={parsed:?}");
+    }
+
+    #[test]
+    fn repeated_ls_same_output_without_new_marker_strips_stale_apt_lines() {
+        // Baseline still contains the first `ls` output; second `ls` repeats `project`.
+        let baseline = concat!(
+            "Reading state information... Done\n",
+            "The following NEW packages will be installed:\n",
+            "  python3-virtualenv\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let ls_exec = tmux_pager_wrap("ls");
+        let cap = concat!(
+            "Reading package lists... Done\n",
+            "Building dependency tree... Done\n",
+            "Reading state information... Done\n",
+            "The following NEW packages will be installed:\n",
+            "  python3-virtualenv\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let (parsed, code) = capture_instant_notebook_output(baseline, cap, "ls", &ls_exec);
+        assert_eq!(code, Some(0), "parsed={parsed:?}");
+        assert_eq!(parsed.trim(), "project", "parsed={parsed:?}");
+        assert!(!parsed.contains("Reading package lists"), "parsed={parsed:?}");
+        assert!(!parsed.contains("python3-virtualenv"), "parsed={parsed:?}");
+    }
+
+    #[test]
+    fn running_http_server_visible_pane_excludes_prior_commands() {
+        let baseline = concat!(
+            "(project) root@e83a5ab85f04:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root/project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@e83a5ab85f04:~/project# "
+        );
+        let cmd = "python -m http.server 3000";
+        let exec = "(PAGER=cat GIT_PAGER=cat source '/root/project/bin/activate' && python -m http.server 3000) 2>&1; echo __BUNNY_EXIT__$?";
+        let cap_vis = concat!(
+            "bin  index.html  lib  pyvenv.cfg\n",
+            "(project) root@e83a5ab85f04:~/project# claude\n",
+            "(project) root@e83a5ab85f04:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat source '/root/project/bin/activate' && pwd) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "/root/project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@e83a5ab85f04:~/project# ",
+            "(PAGER=cat GIT_PAGER=cat source '/root/project/bin/activate' && python -m http.server 3000) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "Serving HTTP on 0.0.0.0 port 3000 (http://0.0.0.0:3000/) ...\n"
+        );
+        let scoped = scoped_notebook_output_after_echo(cap_vis, baseline, cmd, exec)
+            .expect("command echo should be found");
+        let (parsed, _) = notebook_parse_captured_output(&scoped);
+        assert!(parsed.contains("Serving HTTP on"));
+        assert!(!parsed.contains("index.html"));
+        assert!(!parsed.contains("/root/project"));
+        assert!(!parsed.contains("claude"));
+    }
+
+    #[test]
+    fn ls_after_huge_apt_when_exit_marker_scrolled_out() {
+        let first_ls = concat!(
+            "(project) root@host:~/project# (PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n",
+            "project\n",
+            "__BUNNY_EXIT__0\n",
+            "(project) root@host:~/project# "
+        );
+        let mut after_apt = String::from(first_ls);
+        after_apt.push_str(
+            "(PAGER=cat GIT_PAGER=cat apt install virtualenv) 2>&1; echo __BUNNY_EXIT__$?\n",
+        );
+        for i in 0..5000 {
+            after_apt.push_str(&format!("Setting up package-{i} ...\n"));
+        }
+        // Apt's own exit marker fell out of tmux scrollback.
+        after_apt.push_str("(project) root@host:~/project# ");
+
+        let baseline_ls = notebook_command_baseline(&after_apt);
+        assert!(
+            !baseline_ls.contains("Setting up package"),
+            "baseline should not include apt output: {baseline_ls:?}"
+        );
+
+        let ls_exec = tmux_pager_wrap("ls");
+        let mut cap = after_apt.clone();
+        cap.push_str("(PAGER=cat GIT_PAGER=cat ls) 2>&1; echo __BUNNY_EXIT__$?\n");
+        cap.push_str("project\n__BUNNY_EXIT__0\n(project) root@host:~/project# ");
+        let (parsed, code) = capture_instant_notebook_output(&baseline_ls, &cap, "ls", &ls_exec);
+        assert_eq!(code, Some(0), "parsed={parsed:?}");
+        assert_eq!(parsed.trim(), "project", "parsed={parsed:?}");
+        assert!(!parsed.contains("Setting up package"), "parsed={parsed:?}");
+        assert!(!parsed.contains("Reading package lists"), "parsed={parsed:?}");
     }
 
     #[test]
@@ -4287,10 +4556,43 @@ fn prepare_snapshot_terminal_text(text: &str) -> String {
     crate::compositor::normalize_terminal_text(&expanded)
 }
 
+fn live_tmux_pane_text(state: &AppState, term_id: Uuid) -> String {
+    if let Ok(Some(row)) = state.auth.db().lock().get_terminal(term_id) {
+        let record = row_to_record(row);
+        for target in tmux_target_candidates(&record) {
+            if tmux::target_alive(&target) {
+                if let Ok(cap) = tmux::capture_pane(&target) {
+                    return strip_ansi_escapes(&cap);
+                }
+                break;
+            }
+        }
+    }
+    String::new()
+}
+
 /// Best-effort view of what is **currently** in the shell (live tmux pane + attach buffer).
 /// Persisted disk scrollback is only used when the shell is not running / has no live capture.
 pub fn terminal_display_text(state: &AppState, term_id: Uuid) -> String {
     let _ = prepare_terminal_connection(state, term_id);
+
+    if state.config.terminal.notebook_shells {
+        let mut text = crate::blocks::blocks_snapshot_text(state, term_id);
+        if crate::blocks::terminal_has_interactive_session(state, term_id)
+            || crate::blocks::terminal_input_locked(state, term_id)
+        {
+            let live = live_tmux_pane_text(state, term_id);
+            if !live.trim().is_empty() {
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                text.push_str(&live);
+            }
+        }
+        if !text.trim().is_empty() {
+            return text;
+        }
+    }
 
     let mut live_parts: Vec<String> = Vec::new();
 
@@ -4361,6 +4663,14 @@ fn tail_logical_lines(text: &str, max_lines: usize) -> String {
 
 /// Recent Discord transcript tail merged into shell snapshots only.
 pub fn discord_transcript_for_snapshot(state: &AppState, term_id: Uuid) -> String {
+    if state.config.terminal.notebook_shells {
+        let text = crate::blocks::blocks_snapshot_text(state, term_id);
+        const TAIL: usize = 1500;
+        if text.len() <= TAIL {
+            return text;
+        }
+        return text[text.len() - TAIL..].to_string();
+    }
     let path = discord_transcript_path(state, term_id);
     let full = std::fs::read_to_string(&path).unwrap_or_default();
     const TAIL: usize = 1500;

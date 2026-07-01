@@ -397,6 +397,93 @@ pub fn blocks_snapshot(
     }
 }
 
+fn output_block_for_command<'a>(
+    blocks: &'a [TerminalBlock],
+    command_id: Uuid,
+) -> Option<&'a TerminalBlock> {
+    blocks.iter().find(|b| {
+        b.parent_block_id == Some(command_id)
+            && matches!(b.kind, BlockKind::Output | BlockKind::ProcessRun)
+    })
+}
+
+fn is_visible_snapshot_block(block: &TerminalBlock) -> bool {
+    if block.parent_block_id.is_some()
+        && matches!(block.kind, BlockKind::Output | BlockKind::ProcessRun)
+    {
+        return false;
+    }
+    matches!(
+        block.kind,
+        BlockKind::UserCommand
+            | BlockKind::DiscordCommand
+            | BlockKind::SystemEvent
+    )
+}
+
+/// Render notebook blocks as plain text for Discord `/bunny snapshot`.
+pub fn blocks_snapshot_text(state: &AppState, terminal_id: Uuid) -> String {
+    let rows = state
+        .auth
+        .db()
+        .lock()
+        .list_terminal_blocks(terminal_id, 0, 10_000)
+        .unwrap_or_default();
+    let blocks: Vec<TerminalBlock> = rows.into_iter().map(row_to_block).collect();
+    format_blocks_snapshot_text(&blocks)
+}
+
+fn format_blocks_snapshot_text(blocks: &[TerminalBlock]) -> String {
+    let mut out = String::new();
+
+    for block in blocks.iter().filter(|b| is_visible_snapshot_block(b)) {
+        match block.kind {
+            BlockKind::UserCommand | BlockKind::DiscordCommand => {
+                let command = block
+                    .command
+                    .as_deref()
+                    .filter(|c| !c.trim().is_empty())
+                    .unwrap_or(block.content.as_str());
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str("$ ");
+                out.push_str(command.trim());
+                out.push('\n');
+
+                if let Some(output) = output_block_for_command(blocks, block.id) {
+                    let command = command.trim();
+                    let content = crate::terminals::curate_discord_shell_output(
+                        command,
+                        &output.content,
+                    );
+                    if content != "(no output)" {
+                        out.push_str(&content);
+                        if !content.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                }
+            }
+            BlockKind::SystemEvent => {
+                let content =
+                    crate::terminals::strip_ansi_escapes(block.content.trim());
+                if content.is_empty() {
+                    continue;
+                }
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(&content);
+                out.push('\n');
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
 pub fn stop_running_processes(state: &AppState, terminal_id: Uuid) -> Result<()> {
     state.output_collectors.inner.lock().remove(&terminal_id);
 
@@ -921,6 +1008,15 @@ async fn output_collector_loop(state: Arc<AppState>, terminal_id: Uuid, run_id: 
                 collector.saw_busy = true;
             }
             if sanitized != collector.last_output {
+                let still_current = state
+                    .output_collectors
+                    .inner
+                    .lock()
+                    .get(&terminal_id)
+                    .is_some_and(|c| c.run_id == run_id);
+                if !still_current {
+                    return;
+                }
                 let _ = patch_block(
                     &state,
                     terminal_id,
@@ -1398,41 +1494,55 @@ fn capture_non_interactive_output(
             }
         }
 
+        if let Some(scoped) = crate::terminals::scoped_notebook_output_after_echo(
+            cap, baseline, command, exec_line,
+        ) {
+            let (parsed, code) = crate::terminals::notebook_parse_captured_output(&scoped);
+            let from_echo = sanitize_collected_output(&parsed, command, exec_line);
+            if !from_echo.is_empty() {
+                return (from_echo, code);
+            }
+        }
+
+        let echo_present =
+            crate::terminals::command_echo_present_in_cap(cap, command, exec_line);
         let mut exit_code = None;
-        for cmd in [exec_line, command] {
-            let delta = crate::terminals::pane_text_delta(baseline, cap, Some(cmd));
-            let (parsed, code) = crate::terminals::notebook_parse_captured_output(&delta);
-            if code.is_some() {
-                exit_code = code;
-            }
-            let from_delta = sanitize_collected_output(&parsed, command, exec_line);
-            if !from_delta.is_empty() {
-                if command.to_lowercase().contains("git commit")
-                    && git_commit_nothing_staged_in_cap(cap, command, exec_line)
-                {
-                    let full = git_commit_output_from_pane(cap, command, exec_line);
-                    if !full.is_empty() {
-                        return (full, exit_code.or(Some(1)));
-                    }
+        if echo_present {
+            for cmd in [exec_line, command] {
+                let delta = crate::terminals::pane_text_delta(baseline, cap, Some(cmd));
+                let (parsed, code) = crate::terminals::notebook_parse_captured_output(&delta);
+                if code.is_some() {
+                    exit_code = code;
                 }
-                return (from_delta, exit_code);
-            }
-            let extracted = crate::terminals::extract_command_output_from_pane(cap, cmd);
-            let (parsed, code) = crate::terminals::notebook_parse_captured_output(&extracted);
-            if code.is_some() {
-                exit_code = code;
-            }
-            let from_extract = sanitize_collected_output(&parsed, command, exec_line);
-            if !from_extract.is_empty() {
-                if command.to_lowercase().contains("git commit")
-                    && git_commit_nothing_staged_in_cap(cap, command, exec_line)
-                {
-                    let full = git_commit_output_from_pane(cap, command, exec_line);
-                    if !full.is_empty() {
-                        return (full, exit_code.or(Some(1)));
+                let from_delta = sanitize_collected_output(&parsed, command, exec_line);
+                if !from_delta.is_empty() {
+                    if command.to_lowercase().contains("git commit")
+                        && git_commit_nothing_staged_in_cap(cap, command, exec_line)
+                    {
+                        let full = git_commit_output_from_pane(cap, command, exec_line);
+                        if !full.is_empty() {
+                            return (full, exit_code.or(Some(1)));
+                        }
                     }
+                    return (from_delta, exit_code);
                 }
-                return (from_extract, exit_code);
+                let extracted = crate::terminals::extract_command_output_from_pane(cap, cmd);
+                let (parsed, code) = crate::terminals::notebook_parse_captured_output(&extracted);
+                if code.is_some() {
+                    exit_code = code;
+                }
+                let from_extract = sanitize_collected_output(&parsed, command, exec_line);
+                if !from_extract.is_empty() {
+                    if command.to_lowercase().contains("git commit")
+                        && git_commit_nothing_staged_in_cap(cap, command, exec_line)
+                    {
+                        let full = git_commit_output_from_pane(cap, command, exec_line);
+                        if !full.is_empty() {
+                            return (full, exit_code.or(Some(1)));
+                        }
+                    }
+                    return (from_extract, exit_code);
+                }
             }
         }
         if let Some((parsed, code)) =
@@ -2012,5 +2122,87 @@ mod capture_noise_tests {
             String::new()
         };
         assert_eq!(msg, "Virtual environment deactivated.");
+    }
+}
+
+#[cfg(test)]
+mod snapshot_text_tests {
+    use super::*;
+    use bunny_blocks::{AuthorSource, BlockKind, BlockStatus};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn sample_block(
+        id: Uuid,
+        kind: BlockKind,
+        command: Option<&str>,
+        content: &str,
+        parent: Option<Uuid>,
+    ) -> TerminalBlock {
+        TerminalBlock {
+            id,
+            terminal_id: Uuid::new_v4(),
+            seq: 0,
+            kind,
+            author_user_id: None,
+            author_display: "user".into(),
+            author_git_name: None,
+            author_git_email: None,
+            author_source: AuthorSource::Web,
+            created_at: Utc::now(),
+            finished_at: None,
+            command: command.map(str::to_string),
+            content: content.to_string(),
+            exit_code: None,
+            status: BlockStatus::Completed,
+            parent_block_id: parent,
+            meta: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn formats_command_and_output_blocks() {
+        let echo_id = Uuid::new_v4();
+        let pwd_id = Uuid::new_v4();
+        let blocks = vec![
+            sample_block(echo_id, BlockKind::UserCommand, Some("echo hello -3"), "", None),
+            sample_block(
+                Uuid::new_v4(),
+                BlockKind::Output,
+                None,
+                "hello -3",
+                Some(echo_id),
+            ),
+            sample_block(
+                pwd_id,
+                BlockKind::UserCommand,
+                Some("pwd"),
+                "",
+                None,
+            ),
+            sample_block(
+                Uuid::new_v4(),
+                BlockKind::ProcessRun,
+                None,
+                "/root/project",
+                Some(pwd_id),
+            ),
+        ];
+        let text = format_blocks_snapshot_text(&blocks);
+        assert!(text.contains("$ echo hello -3\nhello -3\n"));
+        assert!(text.contains("$ pwd\n/root/project\n"));
+    }
+
+    #[test]
+    fn includes_system_events() {
+        let blocks = vec![sample_block(
+            Uuid::new_v4(),
+            BlockKind::SystemEvent,
+            None,
+            "Discord created a new shell at /root/project because the previous shell was busy.",
+            None,
+        )];
+        let text = format_blocks_snapshot_text(&blocks);
+        assert!(text.contains("Discord created a new shell"));
     }
 }
