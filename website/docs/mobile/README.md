@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+draft: true
+---
+
 # Mobile app (Flutter)
 
 Store-ready flow: the user adds a server (host + SSH credentials), opens an **integrated SSH tunnel** to `127.0.0.1:bunnyPort` on the remote machine, then signs in to bunny (email/password on the agent — not the SSH password).

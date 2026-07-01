@@ -138,4 +138,4 @@ For full browser tab support on Mac, prefer [Docker dev](#docker-dev).
 
 ## Next steps
 
-[First run](./first-run)
+[First run](../getting-started/first-run)

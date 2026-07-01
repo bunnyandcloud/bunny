@@ -4,13 +4,13 @@ sidebar_position: 1
 
 # Choose your install path
 
-Pick the path that matches your environment. All production paths end with the same steps: **`bunny configure`** → **`bunny run`** → open the UI.
+Pick how you want to run bunny. Every path ends the same way: **`bunny configure`** → **`bunny run`** → open the web UI in your browser.
 
 | You are… | Recommended | Compile? |
 |----------|-------------|----------|
 | **Trying bunny, Mac/Windows, or prod with Docker** | [Install with Docker](./install-docker) | No (pre-built image) |
 | **Linux VPS without Docker** | [Install on Linux](./install-linux) | No (release tarball) |
-| **Developing bunny itself** | [Developer install](./install-dev) | Yes (first time) |
+| **Developing bunny itself** | [Developer install](../other/install-dev) | Yes (first time) |
 
 ## Production on Linux: Docker or native?
 

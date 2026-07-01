@@ -9,28 +9,21 @@ export default function DocHero(): JSX.Element {
       <div className="bunny-doc-hero__layout">
         <div className="bunny-doc-hero__content">
           <p className="bunny-doc-hero__eyebrow">Documentation</p>
-          <h2 className="bunny-doc-hero__title">Build together on a shared remote environment</h2>
+          <h2 className="bunny-doc-hero__title">Coding in multiplayer mode with AI agents and your team</h2>
           <p className="bunny-doc-hero__lead">
-            Install bunny, configure your server, and connect Discord — same vision as{' '}
-            <a href="https://bunnyandcloud.com" target="_blank" rel="noopener noreferrer">
-              bunnyandcloud.com
-            </a>
-            .
+            Bunny is a self-hosted workspace where your team and your AI agents build on the same
+            remote machine: shared shells (SSH access), live previews (streamed browser windows), and teams chats (Discord, Slack, Teams) in one place. It's like a remote desktop, but for your team and your AI agents, repecting your governance (policies, access control, etc.).
           </p>
           <div className="bunny-doc-hero__actions">
             <Link className="bunny-btn bunny-btn--primary" to="/getting-started/choose-your-path">
-              Choose your path
+              Get started
             </Link>
-            <Link className="bunny-btn bunny-btn--secondary" to="/getting-started/configure-server">
-              Configure the server
+            <Link className="bunny-btn bunny-btn--secondary" to="/getting-started/first-run">
+              First-run checklist
             </Link>
-            <a
-              className="bunny-btn bunny-btn--secondary"
-              href="https://bunnyandcloud.com"
-              target="_blank"
-              rel="noopener noreferrer">
-              Landing page
-            </a>
+            <Link className="bunny-btn bunny-btn--secondary" to="/team-chats/discord/setup">
+              Connect Discord
+            </Link>
           </div>
         </div>
         <div className="bunny-doc-hero__visual">

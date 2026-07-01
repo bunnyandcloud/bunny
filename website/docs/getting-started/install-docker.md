@@ -56,7 +56,7 @@ If you are **developing bunny itself**, use the dev flow with a mounted git chec
 bunny run
 ```
 
-See [Developer install](./install-dev#docker-dev) and [Discord + Docker on Mac](../team-chats/discord/docker-mac).
+See [Developer install](../other/install-dev#docker-dev) and [Discord + Docker on Mac](../team-chats/discord/docker-mac).
 
 ## Next steps
 

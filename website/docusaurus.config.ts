@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'bunny',
-  tagline: 'Build together on a shared remote environment',
+  tagline: 'Coding in multiplayer mode with AI agents',
 
   favicon: 'img/logo.png',
 
@@ -104,10 +104,9 @@ const config: Config = {
         {
           title: 'Reference',
           items: [
-            {label: 'Architecture', to: '/architecture/overview'},
             {label: 'Security', to: '/security/'},
-            {label: 'API', to: '/api/'},
             {label: 'CLI reference', to: '/reference/cli'},
+            {label: 'API', to: '/api/'},
           ],
         },
         {

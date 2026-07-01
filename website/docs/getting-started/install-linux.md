@@ -67,7 +67,7 @@ You can also run the [pre-built Docker image](./install-docker) on a Linux VPS â
 
 ## Developer install from source
 
-See [Developer install](./install-dev) if you need a git checkout.
+See [Developer install](../other/install-dev) if you need a git checkout.
 
 ## Next steps
 

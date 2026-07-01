@@ -14,7 +14,7 @@ It is designed for engineers, designers, operators, founders, and non-technical 
 |----------|---------------------|------|
 | **Trying bunny, on Mac/Windows, or deploying with Docker** | Pre-built Docker image → `configure` → `run` | [Install with Docker](https://docs.bunnyandcloud.com/getting-started/install-docker) |
 | **Running on a Linux VPS (no Docker)** | Native release (`curl \| sh`) → `configure` → `run` | [Install on Linux](https://docs.bunnyandcloud.com/getting-started/install-linux) |
-| **Developing bunny itself** | Git clone → `./bunny setup` → `configure` → `run` | [Developer install](https://docs.bunnyandcloud.com/getting-started/install-dev) |
+| **Developing bunny itself** | Git clone → `./bunny setup` → `configure` → `run` | [Developer install](https://docs.bunnyandcloud.com/other/install-dev) |
 
 Full walkthrough: **[docs.bunnyandcloud.com](https://docs.bunnyandcloud.com)**
 
@@ -64,11 +64,9 @@ Run `bunny doctor` to verify dependencies.
 | Topic | Link |
 |-------|------|
 | **Getting started** | [docs.bunnyandcloud.com](https://docs.bunnyandcloud.com) |
-| Architecture | [Overview](https://docs.bunnyandcloud.com/architecture/overview) |
-| Security | [Security](https://docs.bunnyandcloud.com/security/) |
-| API | [API reference](https://docs.bunnyandcloud.com/api/) |
 | Discord | [Team chats → Discord](https://docs.bunnyandcloud.com/team-chats/discord/setup) |
-| Mobile app | [Mobile](https://docs.bunnyandcloud.com/mobile/) |
+| Security | [Security](https://docs.bunnyandcloud.com/security/) |
+| CLI & API | [Reference](https://docs.bunnyandcloud.com/reference/cli) |
 
 ## Community
 
