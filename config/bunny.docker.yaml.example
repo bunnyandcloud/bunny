@@ -7,9 +7,11 @@
 server:
   bind_host: 0.0.0.0
   port: 7681
+  public_url: "http://127.0.0.1:7681"
+
+team_chats:
+  link_code_ttl_minutes: 15
 
 discord:
   enabled: true
   bridge_token_hash: "PASTE_SHA256_FROM_bunny_discord_token"
-  public_url: "http://127.0.0.1:7681"
-  link_code_ttl_minutes: 15

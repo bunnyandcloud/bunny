@@ -103,7 +103,7 @@ bunny discord bridge
 - **Goal!** / **Cancel** close the thread shell (tab disappears from Web UI).
 - ⛔ reaction on the last input message → interrupt the running Claude subprocess.
 - `discord-*` shell in Web UI: transcript `[discord] $ claude -p …` appears after the call (reload tab if needed).
-- `error_max_turns`: agent hit `discord.claude_max_turns` (default **30**); partial plan extracted from JSON if present — raise the limit in `config.yaml` or continue in the thread.
+- `error_max_turns`: agent hit `agents.max_turns` (default **30**); partial plan extracted from JSON if present — raise the limit in `config.yaml` or continue in the thread.
 - **AskUserQuestion**: if Claude needs a choice, the bot posts **buttons** in the thread; after click, `claude -p --resume` continues with your answers. Multiple questions → one message/buttons per question.
 
 ### Enable Discord intents (required once)

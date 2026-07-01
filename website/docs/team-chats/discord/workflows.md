@@ -104,7 +104,7 @@ Full list: [Slash commands](./commands).
 
 ## Watch links (browser stream)
 
-`/bunny stream_browser_start` returns a URL like `https://host/watch/<token>`.
+`/bunny stream_browser_start` returns a URL like `https://host/watch/<token>`. The host comes from `server.public_url` in `config.yaml` (set during `bunny configure`).
 
 - Default: **read-only** noVNC
 - `interactive:true` — remote control (use carefully)

@@ -1320,12 +1320,12 @@
     "fr": "Laisser vide pour enregistrer les commandes globalement"
   },
   "web.discord.setup.publicUrlLabel": {
-    "en": "Public URL",
-    "fr": "URL publique"
+    "en": "Agent public URL",
+    "fr": "URL publique de l'agent"
   },
   "web.discord.setup.publicUrlHint": {
-    "en": "How users reach Bunny (localhost in dev, HTTPS domain in production). Use the same host in your browser (localhost vs 127.0.0.1).",
-    "fr": "Comment les utilisateurs accèdent à Bunny (localhost en dev, domaine HTTPS en prod). Utilisez le même hôte que dans votre navigateur (localhost vs 127.0.0.1)."
+    "en": "How browsers reach this agent (watch links, OAuth). Stored in server.public_url — localhost in dev, HTTPS domain or server IP in production.",
+    "fr": "Comment les navigateurs accèdent à cet agent (watch links, OAuth). Enregistré dans server.public_url — localhost en dev, domaine HTTPS ou IP serveur en prod."
   },
   "web.discord.setup.saveBot": {
     "en": "Save bot configuration",

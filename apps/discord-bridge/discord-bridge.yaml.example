@@ -6,4 +6,3 @@ discord:
 bunny:
   internal_url: "http://127.0.0.1:7681"
   bridge_token: "REPLACE_WITH_PLAINTEXT_BRIDGE_TOKEN"
-  public_url: "http://127.0.0.1:7681"

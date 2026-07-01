@@ -8,6 +8,8 @@ import {
 
 interface Props {
   sessionId: string;
+  /** When set (e.g. Claude OAuth setup), reuse this browser instead of starting port 3000. */
+  preferredBrowserId?: string | null;
 }
 
 type ViewMode = 'novnc' | 'stream';
@@ -29,7 +31,7 @@ async function waitForBrowserNovncReady(browserId: string, timeoutMs = 20_000) {
   throw new Error('Le navigateur distant met trop de temps à démarrer — clique Recharger.');
 }
 
-export default function BrowserPanel({ sessionId }: Props) {
+export default function BrowserPanel({ sessionId, preferredBrowserId }: Props) {
   const [port, setPort] = useState(3000);
   const [browserId, setBrowserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('novnc');
@@ -62,7 +64,7 @@ export default function BrowserPanel({ sessionId }: Props) {
   const ensureBrowser = useCallback(async () => {
     setStarting(true);
     setError(null);
-    const stored = sessionStorage.getItem(browserStorageKey(sessionId));
+    const stored = preferredBrowserId ?? sessionStorage.getItem(browserStorageKey(sessionId));
     if (stored) {
       try {
         const info = await getBrowser(stored);
@@ -80,7 +82,7 @@ export default function BrowserPanel({ sessionId }: Props) {
       }
     }
     await startBrowser();
-  }, [sessionId, startBrowser, showBrowser]);
+  }, [sessionId, startBrowser, showBrowser, preferredBrowserId]);
 
   const reloadBrowser = useCallback(async () => {
     if (!browserId) {
@@ -105,6 +107,26 @@ export default function BrowserPanel({ sessionId }: Props) {
     initStarted.current = true;
     void ensureBrowser();
   }, [ensureBrowser]);
+
+  useEffect(() => {
+    if (!preferredBrowserId || browserId === preferredBrowserId) return;
+    let cancelled = false;
+    setStarting(true);
+    setError(null);
+    void (async () => {
+      try {
+        await waitForBrowserNovncReady(preferredBrowserId);
+        if (!cancelled) showBrowser(preferredBrowserId);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      } finally {
+        if (!cancelled) setStarting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [preferredBrowserId, browserId, showBrowser]);
 
   const prevPort = useRef(port);
   useEffect(() => {

@@ -35,21 +35,22 @@ The wizard:
 
 1. **Owner account** — email + password (Argon2id). Only one owner at bootstrap; more users via invitations in the Web UI.
 2. **MFA (recommended)** — TOTP (Google Authenticator, etc.). Recovery codes are shown once — save them.
-3. **Discord (optional)** — if you accept, runs the same flow as `bunny discord setup` (Application ID, bot token, OAuth). See [Discord setup](../team-chats/discord/setup#discord-application-and-server).
+3. **Public URL** — how browsers reach this agent (watch links, OAuth, team chat deep links). Prompted for remote/production deployments.
+4. **Discord (optional)** — if you accept, runs the same flow as `bunny discord setup` (Application ID, bot token, OAuth). See [Discord setup](../team-chats/discord/setup#discord-application-and-server).
 
 Re-run `bunny configure` later to change Discord settings or re-bootstrap Discord when tokens rotate.
 
 Non-interactive flags:
 
 ```bash
-bunny configure --email you@example.com --password '…'
+bunny configure --email you@example.com --password '…' --public-url https://your-host.example.com
 ```
 
 ## Config files
 
 | File | Purpose |
 |------|---------|
-| `~/.config/bunny/config.yaml` | Main agent config (server, security, Discord, terminals) |
+| `~/.config/bunny/config.yaml` | Main agent config (server, security, team chats, agents, Discord, terminals) |
 | `~/.config/bunny/*.db` | Auth, sessions, audit (SQLite) |
 | `~/.config/bunny/secrets.enc` | Encrypted secrets vault (optional) |
 | `.discord/bridge.yaml` | Discord bridge bot token + guild (dev; or path from `bunny discord setup`) |
@@ -68,6 +69,7 @@ server:
   bind_host: "127.0.0.1"   # use 0.0.0.0 in Docker
   port: 7681
   data_dir: "~/.config/bunny"
+  public_url: "https://your-host.example.com"   # external URL (proxy, HTTPS); distinct from bind_host
 
 terminal:
   shell: "/bin/bash"
@@ -76,12 +78,19 @@ terminal:
 browser:
   enabled: true
 
+team_chats:
+  link_code_ttl_minutes: 15   # session ↔ channel link codes (all team chat connectors)
+
+agents:
+  max_turns: 30               # max turns per agent invocation (Claude today; future agents)
+
 discord:
   enabled: true
-  public_url: "https://your-host.example.com"   # watch links, OAuth callback base
-  link_code_ttl_minutes: 15
-  claude_max_turns: 30
 ```
+
+`team_chats` and `agents` apply to all team chat connectors (Discord today; Slack/Teams planned). Discord-specific credentials (`bridge_token_hash`, OAuth) stay under `discord:`.
+
+`server.public_url` is the URL **browsers** use to reach the agent (watch links, OAuth callbacks, future team chat deep links). It is often different from `bind_host`/`port` when behind a reverse proxy or HTTPS terminator.
 
 ### Environment variables
 
@@ -91,7 +100,9 @@ Any YAML key can be overridden with `BUNNY_` + nested keys in `SCREAMING_SNAKE`:
 |----------|--------|
 | `BUNNY_SERVER__BIND_HOST=0.0.0.0` | Listen on all interfaces (Docker) |
 | `BUNNY_SERVER__PORT=7681` | HTTP port |
-| `BUNNY_PUBLIC_URL=https://…` | Used during `bunny discord setup` |
+| `BUNNY_SERVER__PUBLIC_URL=https://…` | Agent public URL (set during `bunny configure`) |
+| `BUNNY_TEAM_CHATS__LINK_CODE_TTL_MINUTES=15` | TTL for session ↔ channel link codes |
+| `BUNNY_AGENTS__MAX_TURNS=30` | Max agent turns per invocation |
 | `BUNNY_SECRETS_PASSPHRASE=…` | Unlock secrets vault on start |
 
 Double underscore `__` = nested YAML key.

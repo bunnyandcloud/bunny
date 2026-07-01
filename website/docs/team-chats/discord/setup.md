@@ -86,10 +86,10 @@ bunny discord setup
 
 This writes the same files as the configure wizard:
 
-- **Agent:** `~/.config/bunny/config.yaml` (bridge token hash, public URL, optional OAuth)
+- **Agent:** `~/.config/bunny/config.yaml` (bridge token hash, `server.public_url`, optional OAuth)
 - **Bridge:** `.discord/bridge.yaml` in the repo (or `--bridge-out` path) — `application_id`, `bot_token`, optional `guild_id`
 
-For local dev, public URL is usually `http://127.0.0.1:7681`.
+Set the agent public URL during `bunny configure` (or `bunny configure --public-url https://…`). For local dev, it is usually `http://127.0.0.1:7681`.
 
 **Guild ID (optional but recommended):** neither `bunny configure` nor `bunny discord setup` prompts for it interactively — add your server ID (Step 2) so `/bunny` registers on that server immediately:
 
@@ -143,12 +143,18 @@ The wizard above is the supported path. Equivalent manual layout:
 **Agent** (`~/.config/bunny/config.yaml`):
 
 ```yaml
+server:
+  public_url: "https://your-bunny-host.example.com"
+
+team_chats:
+  link_code_ttl_minutes: 15
+
+agents:
+  max_turns: 30   # `--max-turns` for @mention thread agents (default 30)
+
 discord:
   enabled: true
   bridge_token_hash: "<sha256 of bridge_token — written by bunny discord setup>"
-  public_url: "https://your-bunny-host.example.com"
-  link_code_ttl_minutes: 15
-  claude_max_turns: 30   # `--max-turns` for @mention thread agents (default 30)
 ```
 
 **Bridge** (`.discord/bridge.yaml` or `~/.config/bunny/discord-bridge.yaml`):
@@ -161,7 +167,6 @@ discord:
 bunny:
   internal_url: "http://127.0.0.1:7681"
   bridge_token: "plaintext bridge token"
-  public_url: "https://your-bunny-host.example.com"
 ```
 
 Run the bridge alongside `bunny run`, or separately:

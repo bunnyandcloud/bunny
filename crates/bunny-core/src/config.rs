@@ -16,7 +16,41 @@ pub struct BunnyConfig {
     #[serde(default)]
     pub webrtc: WebRtcConfig,
     #[serde(default)]
+    pub team_chats: TeamChatsConfig,
+    #[serde(default)]
+    pub agents: AgentsConfig,
+    #[serde(default)]
     pub discord: DiscordConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamChatsConfig {
+    /// TTL for session ↔ channel link codes (all team chat connectors).
+    #[serde(default = "default_link_code_ttl")]
+    pub link_code_ttl_minutes: u64,
+}
+
+impl Default for TeamChatsConfig {
+    fn default() -> Self {
+        Self {
+            link_code_ttl_minutes: default_link_code_ttl(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentsConfig {
+    /// Max agent turns per invocation (`--max-turns` for Claude Code and future agents).
+    #[serde(default = "default_agent_max_turns")]
+    pub max_turns: u32,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            max_turns: default_agent_max_turns(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,14 +60,6 @@ pub struct DiscordConfig {
     /// SHA-256 hex of bridge bearer token (set via `bunny discord token`).
     #[serde(default)]
     pub bridge_token_hash: Option<String>,
-    /// Public base URL for watch links (e.g. https://bunny.example.com).
-    #[serde(default)]
-    pub public_url: Option<String>,
-    #[serde(default = "default_discord_link_ttl")]
-    pub link_code_ttl_minutes: u64,
-    /// Max agent turns per `claude -p` call in Discord threads (`--max-turns`).
-    #[serde(default = "default_discord_claude_max_turns")]
-    pub claude_max_turns: u32,
     #[serde(default = "default_discord_oauth_client_id")]
     pub oauth_client_id: Option<String>,
     #[serde(default)]
@@ -47,9 +73,6 @@ impl Default for DiscordConfig {
         Self {
             enabled: false,
             bridge_token_hash: None,
-            public_url: None,
-            link_code_ttl_minutes: default_discord_link_ttl(),
-            claude_max_turns: default_discord_claude_max_turns(),
             oauth_client_id: default_discord_oauth_client_id(),
             oauth_client_secret: None,
             oauth_redirect_uri: None,
@@ -61,11 +84,11 @@ fn default_discord_oauth_client_id() -> Option<String> {
     None
 }
 
-fn default_discord_link_ttl() -> u64 {
+fn default_link_code_ttl() -> u64 {
     15
 }
 
-fn default_discord_claude_max_turns() -> u32 {
+fn default_agent_max_turns() -> u32 {
     30
 }
 
@@ -87,6 +110,9 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
+    /// Base URL browsers use to reach this agent (watch links, OAuth redirects, etc.).
+    #[serde(default)]
+    pub public_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,6 +315,7 @@ impl Default for BunnyConfig {
                 bind_host: default_bind_host(),
                 port: default_port(),
                 data_dir: default_data_dir(),
+                public_url: None,
             },
             security: SecurityConfig {
                 default_role: default_role(),
@@ -364,6 +391,8 @@ impl Default for BunnyConfig {
                 turn_username: None,
                 turn_credential: None,
             },
+            team_chats: TeamChatsConfig::default(),
+            agents: AgentsConfig::default(),
             discord: DiscordConfig::default(),
         }
     }
@@ -388,5 +417,13 @@ impl BunnyConfig {
             }
         }
         self.server.data_dir.clone()
+    }
+
+    pub fn resolve_public_url(&self) -> String {
+        self.server
+            .public_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", self.server.port))
     }
 }

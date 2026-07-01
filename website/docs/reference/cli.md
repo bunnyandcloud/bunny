@@ -15,7 +15,7 @@ bunny <command> --help
 
 | Command | Description |
 |---------|-------------|
-| `bunny configure` | First-run wizard: owner account, MFA, optional Discord |
+| `bunny configure` | First-run wizard: owner account, MFA, public URL, optional Discord |
 | `bunny config-init` | Write default `~/.config/bunny/config.yaml` if missing |
 | `bunny run` | Start agent + Web UI (builds UI on first run in dev) |
 | `bunny start` | Start API only (UI if `dist` exists) |
@@ -31,6 +31,14 @@ bunny <command> --help
 | `--no-web-ui` | off | Skip Web UI build/serve |
 | `--web-ui-rebuild` | off | Force `npm run build` in apps/web |
 | `--no-discord-bridge` | off | Do not start Discord bridge with agent |
+
+### `bunny configure` flags
+
+| Flag | Description |
+|------|-------------|
+| `--email` | Owner email (non-interactive) |
+| `--password` | Owner password (non-interactive) |
+| `--public-url` / `BUNNY_SERVER__PUBLIC_URL` | Agent public URL (watch links, OAuth, team chat deep links) |
 
 ## Auth and users
 
@@ -79,7 +87,6 @@ See [Security](../security/).
 | `--guild-id` / `DISCORD_GUILD_ID` | Server ID for instant slash command registration |
 | `--bridge-out` | Bridge YAML path (default `.discord/bridge.yaml`) |
 | `--skip-oauth` | Bot only, no user linking |
-| `--public-url` / `BUNNY_PUBLIC_URL` | Public base URL for watch links and OAuth |
 
 Full Discord usage: [Discord setup](../team-chats/discord/setup), [slash commands](../team-chats/discord/commands).
 

@@ -21,7 +21,6 @@ struct BridgeDevDiscord {
 #[derive(Deserialize)]
 struct BridgeDevBunny {
     bridge_token: String,
-    public_url: Option<String>,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -54,15 +53,30 @@ pub fn write_config(path: &Path, cfg: &BunnyConfig) -> Result<()> {
     Ok(())
 }
 
-/// Enable Discord in config.yaml (merge from current effective config + new token).
-pub fn apply_discord_to_config(bridge_token_hash: &str, public_url: &str) -> Result<PathBuf> {
+/// Set the agent's public base URL in config.yaml.
+pub fn set_server_public_url(public_url: &str) -> Result<PathBuf> {
+    let path = config_path();
+    let _ = ensure_user_config()?;
+    let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
+    let mut cfg = BunnyConfig::load(&paths)?;
+    cfg.server.public_url = Some(public_url.to_string());
+    write_config(&path, &cfg)?;
+    Ok(path)
+}
+
+pub fn load_effective_config() -> Result<BunnyConfig> {
+    let path = config_path();
+    let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
+    BunnyConfig::load(&paths)
+}
+
+pub fn apply_discord_to_config(bridge_token_hash: &str) -> Result<PathBuf> {
     let path = config_path();
     let _ = ensure_user_config()?;
     let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
     let mut cfg = BunnyConfig::load(&paths)?;
     cfg.discord.enabled = true;
     cfg.discord.bridge_token_hash = Some(bridge_token_hash.to_string());
-    cfg.discord.public_url = Some(public_url.to_string());
     if Path::new("/.dockerenv").exists() {
         cfg.server.bind_host = "0.0.0.0".into();
     }
@@ -107,7 +121,6 @@ pub fn write_bridge_dev_file(
     bot_token: &str,
     bridge_token: &str,
     internal_url: &str,
-    public_url: &str,
     guild_id: Option<u64>,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -131,7 +144,6 @@ discord:
 {guild_line}bunny:
   internal_url: "{internal_url}"
   bridge_token: "{bridge_token}"
-  public_url: "{public_url}"
 "#
     );
     std::fs::write(path, yaml)?;
@@ -152,11 +164,6 @@ pub fn sync_agent_from_bridge_file(bridge_path: &Path) -> Result<bool> {
     if token.is_empty() {
         bail!("{}: bunny.bridge_token is empty", bridge_path.display());
     }
-    let public_url = parsed
-        .bunny
-        .public_url
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:7681".into());
     let hash = hash_token(token);
     let path = config_path();
     let paths = vec![path.to_str().unwrap(), ".bunny.yaml"];
@@ -164,7 +171,7 @@ pub fn sync_agent_from_bridge_file(bridge_path: &Path) -> Result<bool> {
     if cfg.discord.enabled && cfg.discord.bridge_token_hash.as_deref() == Some(hash.as_str()) {
         return Ok(false);
     }
-    apply_discord_to_config(&hash, &public_url)?;
+    apply_discord_to_config(&hash)?;
     Ok(true)
 }
 

@@ -163,37 +163,41 @@
     "en": "Open: https://discord.com/developers/applications — select (or create) your Bunny application.",
     "fr": "Ouvrez : https://discord.com/developers/applications — sélectionnez (ou créez) votre application Bunny."
   },
-  "configure.discord.section_bot": {
-    "en": "--- Step 1: Bot & bridge (/bunny commands in Discord) ---",
-    "fr": "--- Étape 1 : Bot & pont (commandes /bunny dans Discord) ---"
-  },
-  "configure.discord.deployment_local": {
+  "configure.server.deployment_local": {
     "en": "  Local development — public URL: {url}",
     "fr": "  Développement local — URL publique : {url}"
   },
-  "configure.discord.deployment_prompt": {
-    "en": "Discord deployment environment",
-    "fr": "Environnement de déploiement Discord"
+  "configure.server.deployment_prompt": {
+    "en": "Deployment environment",
+    "fr": "Environnement de déploiement"
   },
-  "configure.discord.deployment_option_local": {
+  "configure.server.deployment_option_local": {
     "en": "Local development (localhost / Docker on my machine)",
     "fr": "Développement local (localhost / Docker sur ma machine)"
   },
-  "configure.discord.deployment_option_production": {
+  "configure.server.deployment_option_production": {
     "en": "Production server (public domain, HTTPS)",
     "fr": "Serveur de production (domaine public, HTTPS)"
   },
-  "configure.discord.deployment_production": {
-    "en": "  Production deployment — Bunny needs its public URL (browser + Discord OAuth).",
-    "fr": "  Déploiement production — Bunny a besoin de son URL publique (navigateur + OAuth Discord)."
+  "configure.server.deployment_production": {
+    "en": "  Production deployment — Bunny needs its public URL (watch links, OAuth, team chat deep links).",
+    "fr": "  Déploiement production — Bunny a besoin de son URL publique (watch links, OAuth, liens team chat)."
   },
-  "configure.discord.hint_public_url": {
-    "en": "How users reach Bunny (HTTPS recommended in production, e.g. https://bunny.example.com).",
-    "fr": "Comment les utilisateurs accèdent à Bunny (HTTPS recommandé en prod, ex. https://bunny.example.com)."
+  "configure.server.hint_public_url": {
+    "en": "How browsers reach this agent (HTTPS recommended in production, e.g. https://bunny.example.com).",
+    "fr": "Comment les navigateurs accèdent à cet agent (HTTPS recommandé en prod, ex. https://bunny.example.com)."
   },
-  "configure.discord.prompt_public_url": {
+  "configure.server.prompt_public_url": {
     "en": "Public URL: ",
     "fr": "URL publique : "
+  },
+  "configure.server.public_url_saved": {
+    "en": "✓ Public URL saved to {path}: {url}",
+    "fr": "✓ URL publique enregistrée dans {path} : {url}"
+  },
+  "configure.discord.section_bot": {
+    "en": "--- Step 1: Bot & bridge (/bunny commands in Discord) ---",
+    "fr": "--- Étape 1 : Bot & pont (commandes /bunny dans Discord) ---"
   },
   "configure.discord.hint_app_id": {
     "en": "Where: General Information → Application ID (long number).",

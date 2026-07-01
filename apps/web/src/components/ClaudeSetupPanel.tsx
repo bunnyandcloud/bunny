@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   browserNavigate,
   createBrowser,
@@ -35,6 +35,7 @@ export default function ClaudeSetupPanel({
   const [browserOpening, setBrowserOpening] = useState(false);
   const [importing, setImporting] = useState(false);
   const [signInOpened, setSignInOpened] = useState(false);
+  const notifiedAuthTerminal = useRef<string | null>(null);
 
   const refresh = useCallback(() => {
     getClaudeStatus()
@@ -49,10 +50,11 @@ export default function ClaudeSetupPanel({
   }, [refresh]);
 
   useEffect(() => {
-    const terminalId = status?.auth.terminal_id;
-    if (terminalId && status && !status.authenticated) {
-      onAuthTerminalReady?.(terminalId);
-    }
+    const terminalId = status?.auth.terminal_id ?? null;
+    if (!terminalId || !status || status.authenticated) return;
+    if (notifiedAuthTerminal.current === terminalId) return;
+    notifiedAuthTerminal.current = terminalId;
+    onAuthTerminalReady?.(terminalId);
   }, [status?.auth.terminal_id, status?.authenticated, status, onAuthTerminalReady]);
 
   const tryImportFromBrowser = useCallback(

@@ -64,14 +64,14 @@ Requirements:
 
 1. Bunny listens on `0.0.0.0` (step 3 — required in Docker).
 2. Port `7681` is published and reachable (`7681:7681` in compose, firewall open if needed).
-3. **`discord.public_url`** in `~/.config/bunny/config.yaml` matches that same base URL.
+3. **`server.public_url`** in `~/.config/bunny/config.yaml` matches that same base URL.
 
 ```yaml
-discord:
+server:
   public_url: "https://your-host.example.com"   # or http://203.0.113.5:7681
 ```
 
-`bunny configure` / `bunny discord setup` ask for this URL. You can also set `BUNNY_PUBLIC_URL`.
+`bunny configure` asks for this URL (or pass `--public-url`). You can also set `BUNNY_SERVER__PUBLIC_URL`.
 
 This matters for **Discord watch links**: `/bunny stream_browser_start` posts URLs like `{public_url}/watch/<token>`. If `public_url` is `http://127.0.0.1:7681`, only someone with an SSH tunnel on that machine can open them — teammates clicking the link in Discord will not reach the stream.
 
@@ -130,6 +130,6 @@ See [Security](../security/) for scopes and CLI reference.
 | Problem | Fix |
 |---------|-----|
 | UI not loading | Check `public_url`, port mapping `7681`, firewall |
-| Discord watch link broken | Set `discord.public_url` to a URL reachable from browsers (not `127.0.0.1` on a remote host) |
+| Discord watch link broken | Set `server.public_url` to a URL reachable from browsers (not `127.0.0.1` on a remote host) |
 | Browser tab missing | Run full install (not `--minimal`); check `bunny doctor` |
 | Discord bridge fails | Verify bot token; check outbound DNS from container |

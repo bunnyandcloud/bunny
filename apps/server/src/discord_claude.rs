@@ -567,7 +567,7 @@ fn resume_claude_with_prompt(
         .lock()
         .get_thread_claude_session_id(thread_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
-    let max_turns = thread_claude_max_turns(state);
+    let max_turns = agent_max_turns(state);
     let cmd = build_thread_claude_cmd(prompt, resume.as_deref(), max_turns, &[]);
     let (raw, exit_code) = terminals::exec_discord_shell_command_for_thread(
         state, term_id, session_id, thread_id, &cmd, acting_user_id,
@@ -853,8 +853,8 @@ fn truncate_thread_transcript(messages: &[DiscordThreadMessage]) -> String {
     lines.join("\n")
 }
 
-fn thread_claude_max_turns(state: &AppState) -> u32 {
-    state.config.discord.claude_max_turns.max(1)
+fn agent_max_turns(state: &AppState) -> u32 {
+    state.config.agents.max_turns.max(1)
 }
 
 fn build_thread_claude_cmd(
@@ -918,7 +918,7 @@ pub fn run_thread_claude(
         .get_thread_claude_session_id(thread_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
 
-    let max_turns = thread_claude_max_turns(state);
+    let max_turns = agent_max_turns(state);
     let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns, &[]);
     let (raw, exit_code) =
         terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd, None)?;
@@ -1219,7 +1219,7 @@ pub fn run_thread_claude_with_answers(
         .get_thread_claude_session_id(thread_id)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     let prompt = build_thread_claude_answers_prompt(answers);
-    let max_turns = thread_claude_max_turns(state);
+    let max_turns = agent_max_turns(state);
     let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns, &[]);
     let (raw, exit_code) =
         terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd, None)?;

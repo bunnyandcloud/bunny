@@ -61,12 +61,7 @@ pub async fn create_watch_link(
         .lock()
         .create_watch(&watch)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
-    let base = state
-        .config
-        .discord
-        .public_url
-        .clone()
-        .unwrap_or_else(|| format!("http://{}:{}", state.config.server.bind_host, state.config.server.port));
+    let base = state.config.resolve_public_url();
     let watch_url = format!("{base}/watch/{token}");
     Ok(Json(WatchLinkResponse {
         watch_url,

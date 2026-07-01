@@ -3,6 +3,7 @@
 # Fill secrets, then: ./scripts/run-discord-bridge.sh
 #
 # internal_url = port published from docker-compose (7681 on the host)
+# Agent public URL lives in ~/.config/bunny/config.yaml under server.public_url
 
 discord:
   application_id: 123456789012345678
@@ -10,4 +11,3 @@ discord:
 bunny:
   internal_url: "http://127.0.0.1:7681"
   bridge_token: "PASTE_PLAINTEXT_FROM_bunny_discord_token"
-  public_url: "http://127.0.0.1:7681"

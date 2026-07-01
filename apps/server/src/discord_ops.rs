@@ -1449,7 +1449,7 @@ async fn create_discord_link_code(
         .auth
         .assert_recent_auth(&session, body.password.as_deref())
         .map_err(|_| ApiError::forbidden("recent authentication required (password)"))?;
-    let ttl = state.config.discord.link_code_ttl_minutes.max(1) as i64;
+    let ttl = state.config.team_chats.link_code_ttl_minutes.max(1) as i64;
     let code = state
         .discord
         .lock()
@@ -1507,12 +1507,11 @@ pub fn discord_oauth_configured(state: &AppState) -> bool {
     cfg.oauth_client_id.is_some() && cfg.oauth_client_secret.is_some()
 }
 
-fn setup_public_url(state: &AppState) -> String {
-    effective_discord_config(state)
-        .public_url
-        .clone()
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| format!("http://127.0.0.1:{}", state.config.server.port))
+fn agent_public_url(state: &AppState) -> String {
+    if let Ok(cfg) = crate::config_init::load_effective_config() {
+        return cfg.resolve_public_url();
+    }
+    state.config.resolve_public_url()
 }
 
 fn setup_oauth_redirect_uri(state: &AppState) -> String {
@@ -1523,7 +1522,7 @@ fn setup_oauth_redirect_uri(state: &AppState) -> String {
         .unwrap_or_else(|| {
             format!(
                 "{}/api/v1/auth/discord/callback",
-                setup_public_url(state).trim_end_matches('/')
+                agent_public_url(state).trim_end_matches('/')
             )
         })
 }
@@ -1602,7 +1601,7 @@ async fn discord_setup_status(
             let cfg = effective_discord_config(&state);
             cfg.oauth_client_id.is_some() && cfg.oauth_client_secret.is_some()
         },
-        public_url: setup_public_url(&state),
+        public_url: agent_public_url(&state),
         oauth_redirect_uri: setup_oauth_redirect_uri(&state),
         application_id,
         guild_id,
@@ -1652,12 +1651,14 @@ async fn discord_setup_bot(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.trim_end_matches('/').to_string())
-        .unwrap_or_else(|| setup_public_url(&state));
+        .unwrap_or_else(|| agent_public_url(&state));
     if !public_url.starts_with("http://") && !public_url.starts_with("https://") {
         return Err(ApiError::validation("public URL must start with http:// or https://"));
     }
     let (plain, hash) = crate::config_init::generate_bridge_credentials();
-    crate::config_init::apply_discord_to_config(&hash, &public_url)
+    crate::config_init::set_server_public_url(&public_url)
+        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    crate::config_init::apply_discord_to_config(&hash)
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     let bridge_path = default_bridge_path();
     let internal_url = format!("http://127.0.0.1:{}", state.config.server.port);
@@ -1667,7 +1668,6 @@ async fn discord_setup_bot(
         token,
         &plain,
         &internal_url,
-        &public_url,
         body.guild_id,
     )
     .map_err(|e| ApiError::validation(&e.to_string()))?;
@@ -1833,7 +1833,7 @@ pub async fn discord_oauth_callback(
     Query(q): Query<OAuthCallbackQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     if q.error.is_some() {
-        return Ok(oauth_ui_redirect("error", &setup_public_url(&state)));
+        return Ok(oauth_ui_redirect("error", &agent_public_url(&state)));
     }
     let code = q.code.ok_or_else(|| ApiError::validation("missing code"))?;
     let state_param = q
@@ -1886,7 +1886,7 @@ fn oauth_return_origin(headers: &HeaderMap, state: &AppState) -> String {
             .unwrap_or("http");
         return format!("{scheme}://{host}");
     }
-    setup_public_url(state)
+    agent_public_url(state)
 }
 
 fn validate_return_origin(origin: &str) -> Result<(), ApiError> {

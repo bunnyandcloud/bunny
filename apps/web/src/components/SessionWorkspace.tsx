@@ -513,7 +513,10 @@ export default function SessionWorkspace({ sessionId }: Props) {
               ) : null}
             </div>
             {workspaceTab === 'browser' && (
-              <BrowserPanel sessionId={sessionId} />
+              <BrowserPanel
+                sessionId={sessionId}
+                preferredBrowserId={claudeSetup ? claudeBrowserId : undefined}
+              />
             )}
             {workspaceTab === 'terminal' && (
               <>

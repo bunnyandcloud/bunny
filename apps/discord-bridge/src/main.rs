@@ -76,8 +76,6 @@ struct DiscordSection {
 struct BunnySection {
     internal_url: String,
     bridge_token: String,
-    #[allow(dead_code)]
-    public_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -2061,7 +2059,6 @@ fn load_config() -> Result<BridgeConfig> {
             bunny: BunnySection {
                 internal_url,
                 bridge_token,
-                public_url: std::env::var("BUNNY_PUBLIC_URL").ok(),
             },
         });
     }

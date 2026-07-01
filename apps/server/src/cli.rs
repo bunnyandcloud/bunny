@@ -105,9 +105,6 @@ pub enum DiscordCommands {
         /// OAuth redirect URI (default: {public_url}/api/v1/auth/discord/callback)
         #[arg(long, env = "DISCORD_OAUTH_REDIRECT_URI")]
         oauth_redirect_uri: Option<String>,
-        /// Public base URL (auto for local dev; prompted or BUNNY_PUBLIC_URL in production)
-        #[arg(long, env = "BUNNY_PUBLIC_URL")]
-        public_url: Option<String>,
     },
     /// Run the Discord bot (requires a running agent: bunny run)
     Bridge {
@@ -141,6 +138,9 @@ pub struct ConfigureOpts {
     pub email: Option<String>,
     #[arg(long)]
     pub password: Option<String>,
+    /// Public base URL browsers use to reach this agent (watch links, OAuth redirects).
+    #[arg(long, env = "BUNNY_SERVER__PUBLIC_URL")]
+    pub public_url: Option<String>,
 }
 
 #[derive(Parser)]
@@ -218,6 +218,11 @@ pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> 
     }
     if !state.auth.needs_bootstrap()? {
         println!("{}", t(locale, "configure.owner_exists", &[]));
+        if opts.public_url.is_some() {
+            let can_prompt =
+                stdin_is_tty() || std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1");
+            configure_server_public_url(state, locale, can_prompt, opts.public_url.clone())?;
+        }
         maybe_configure_discord_interactive(state, locale).await?;
         return Ok(());
     }
@@ -316,6 +321,8 @@ pub async fn run_configure(state: &AppState, opts: ConfigureOpts) -> Result<()> 
         }
     }
 
+    let can_prompt = stdin_is_tty() || std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1");
+    configure_server_public_url(state, locale, can_prompt, opts.public_url.clone())?;
     maybe_configure_discord_interactive(state, locale).await?;
     Ok(())
 }
@@ -399,8 +406,6 @@ async fn maybe_configure_discord_interactive(state: &AppState, locale: Locale) -
             {
                 let app_hint = crate::config_init::read_bridge_application_id(&bridge)
                     .map(|id| id.to_string());
-                let public_url =
-                    resolve_discord_public_url_for_setup(state, locale, can_prompt, None)?;
                 run_discord_oauth_setup(
                     state,
                     locale,
@@ -409,7 +414,7 @@ async fn maybe_configure_discord_interactive(state: &AppState, locale: Locale) -
                         client_secret: None,
                         redirect_uri: None,
                         application_id_hint: app_hint,
-                        public_url: Some(public_url),
+                        public_url: None,
                         interactive: true,
                     },
                 )
@@ -431,8 +436,6 @@ async fn maybe_configure_discord_interactive(state: &AppState, locale: Locale) -
         print_discord_run_hints(locale);
         return Ok(());
     }
-
-    let public_url = resolve_discord_public_url_for_setup(state, locale, can_prompt, None)?;
 
     println!("\n{}", t(locale, "configure.discord.section_bot", &[]));
     println!("{}", t(locale, "configure.discord.portal_link", &[]));
@@ -461,7 +464,6 @@ async fn maybe_configure_discord_interactive(state: &AppState, locale: Locale) -
             oauth_client_id: None,
             oauth_client_secret: None,
             oauth_redirect_uri: None,
-            public_url: Some(public_url),
         },
     )
     .await
@@ -756,17 +758,11 @@ struct DiscordOAuthSetupOpts {
     interactive: bool,
 }
 
-fn discord_public_url(state: &AppState) -> String {
-    state
-        .config
-        .discord
-        .public_url
-        .clone()
-        .unwrap_or_else(|| default_local_public_url(state))
-}
-
-fn default_local_public_url(state: &AppState) -> String {
-    format!("http://127.0.0.1:{}", state.config.server.port)
+fn agent_public_url(state: &AppState) -> String {
+    if let Ok(cfg) = crate::config_init::load_effective_config() {
+        return cfg.resolve_public_url();
+    }
+    state.config.resolve_public_url()
 }
 
 fn normalize_public_url(url: &str) -> String {
@@ -781,19 +777,19 @@ fn is_localhost_public_url(url: &str) -> bool {
         || lower.starts_with("https://localhost")
 }
 
-fn discord_deployment_forced_local() -> bool {
+fn deployment_forced_local() -> bool {
     std::env::var("BUNNY_DOCKER_DEV").ok().as_deref() == Some("1")
 }
 
-fn discord_deployment_forced_production() -> bool {
+fn deployment_forced_production() -> bool {
     std::env::var("BUNNY_PRODUCTION").ok().as_deref() == Some("1")
 }
 
-fn discord_deployment_heuristic_local(state: &AppState) -> bool {
-    if discord_deployment_forced_local() {
+fn deployment_heuristic_local(state: &AppState) -> bool {
+    if deployment_forced_local() {
         return true;
     }
-    if discord_deployment_forced_production() {
+    if deployment_forced_production() {
         return false;
     }
     if std::path::Path::new("/.dockerenv").exists() {
@@ -802,22 +798,18 @@ fn discord_deployment_heuristic_local(state: &AppState) -> bool {
     state.config.server.bind_host == "127.0.0.1"
 }
 
-fn prompt_discord_deployment_is_local(state: &AppState, locale: Locale) -> Result<bool> {
-    if discord_deployment_forced_local() {
+fn prompt_deployment_is_local(state: &AppState, locale: Locale) -> Result<bool> {
+    if deployment_forced_local() {
         return Ok(true);
     }
-    if discord_deployment_forced_production() {
+    if deployment_forced_production() {
         return Ok(false);
     }
     let options = [
+        t(locale, "configure.server.deployment_option_local", &[]),
         t(
             locale,
-            "configure.discord.deployment_option_local",
-            &[],
-        ),
-        t(
-            locale,
-            "configure.discord.deployment_option_production",
+            "configure.server.deployment_option_production",
             &[],
         ),
     ];
@@ -827,7 +819,7 @@ fn prompt_discord_deployment_is_local(state: &AppState, locale: Locale) -> Resul
         1
     };
     let selection = Select::new()
-        .with_prompt(&t(locale, "configure.discord.deployment_prompt", &[]))
+        .with_prompt(&t(locale, "configure.server.deployment_prompt", &[]))
         .items(&options)
         .default(default)
         .interact()
@@ -835,7 +827,7 @@ fn prompt_discord_deployment_is_local(state: &AppState, locale: Locale) -> Resul
     Ok(selection == 0)
 }
 
-fn resolve_discord_public_url_for_setup(
+fn resolve_public_url_for_setup(
     state: &AppState,
     locale: Locale,
     interactive: bool,
@@ -844,30 +836,29 @@ fn resolve_discord_public_url_for_setup(
     if let Some(url) = explicit.filter(|s| !s.trim().is_empty()) {
         return Ok(normalize_public_url(&url));
     }
-    if let Ok(env) = std::env::var("BUNNY_PUBLIC_URL") {
+    if let Ok(env) = std::env::var("BUNNY_SERVER__PUBLIC_URL") {
         if !env.trim().is_empty() {
             return Ok(normalize_public_url(&env));
         }
     }
-    let is_local = if interactive {
-        prompt_discord_deployment_is_local(state, locale)?
-    } else {
-        discord_deployment_heuristic_local(state)
-    };
-    if !is_local {
-        if let Some(url) = state.config.discord.public_url.as_ref().filter(|u| !u.trim().is_empty())
-        {
-            if !is_localhost_public_url(url) {
+    if let Ok(cfg) = crate::config_init::load_effective_config() {
+        if let Some(url) = cfg.server.public_url.as_ref().filter(|u| !u.trim().is_empty()) {
+            if !is_localhost_public_url(url) || deployment_heuristic_local(state) {
                 return Ok(normalize_public_url(url));
             }
         }
     }
+    let is_local = if interactive {
+        prompt_deployment_is_local(state, locale)?
+    } else {
+        deployment_heuristic_local(state)
+    };
     if is_local {
-        let url = default_local_public_url(state);
+        let url = agent_public_url(state);
         if interactive {
             println!(
                 "{}",
-                t(locale, "configure.discord.deployment_local", &[("url", &url)])
+                t(locale, "configure.server.deployment_local", &[("url", &url)])
             );
         }
         return Ok(url);
@@ -875,10 +866,10 @@ fn resolve_discord_public_url_for_setup(
     if interactive {
         println!(
             "{}",
-            t(locale, "configure.discord.deployment_production", &[])
+            t(locale, "configure.server.deployment_production", &[])
         );
-        print_discord_hint(locale, "configure.discord.hint_public_url");
-        let entered = prompt(&t(locale, "configure.discord.prompt_public_url", &[]));
+        print_discord_hint(locale, "configure.server.hint_public_url");
+        let entered = prompt(&t(locale, "configure.server.prompt_public_url", &[]));
         let url = normalize_public_url(&entered);
         if url.is_empty() {
             bail!("public URL is required for production deployment");
@@ -889,9 +880,43 @@ fn resolve_discord_public_url_for_setup(
         Ok(url)
     } else {
         bail!(
-            "production deployment requires --public-url or BUNNY_PUBLIC_URL (local dev: set BUNNY_DOCKER_DEV=1)"
+            "production deployment requires bunny configure --public-url or BUNNY_SERVER__PUBLIC_URL (local dev: set BUNNY_DOCKER_DEV=1)"
         )
     }
+}
+
+fn configure_server_public_url(
+    state: &AppState,
+    locale: Locale,
+    interactive: bool,
+    explicit: Option<String>,
+) -> Result<String> {
+    let url = resolve_public_url_for_setup(state, locale, interactive, explicit)?;
+    let path = crate::config_init::set_server_public_url(&url)?;
+    if interactive {
+        println!(
+            "{}",
+            t(
+                locale,
+                "configure.server.public_url_saved",
+                &[("path", &path.display().to_string()), ("url", &url)]
+            )
+        );
+    }
+    Ok(url)
+}
+
+fn require_configured_public_url(state: &AppState) -> Result<String> {
+    let cfg = crate::config_init::load_effective_config().unwrap_or_else(|_| state.config.clone());
+    if let Some(url) = cfg.server.public_url.as_ref().filter(|u| !u.trim().is_empty()) {
+        return Ok(normalize_public_url(url));
+    }
+    if deployment_heuristic_local(state) {
+        return Ok(cfg.resolve_public_url());
+    }
+    bail!(
+        "server.public_url is not set — run bunny configure --public-url https://your-host first"
+    )
 }
 
 fn discord_oauth_redirect_from_public(public_url: &str) -> String {
@@ -909,7 +934,7 @@ async fn run_discord_oauth_setup(
     let public_base = opts
         .public_url
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| discord_public_url(state));
+        .unwrap_or_else(|| agent_public_url(state));
     let default_redirect = discord_oauth_redirect_from_public(&public_base);
     let known_app_id = opts.application_id_hint.as_ref().is_some_and(|s| !s.trim().is_empty());
     if opts.interactive {
@@ -1012,11 +1037,10 @@ async fn run_discord_bot_setup(
     bridge_out: &str,
     application_id: u64,
     bot_token: &str,
-    public_url: &str,
     guild_id: Option<u64>,
 ) -> Result<()> {
     let (plain, hash) = crate::config_init::generate_bridge_credentials();
-    let agent_path = crate::config_init::apply_discord_to_config(&hash, public_url)?;
+    let agent_path = crate::config_init::apply_discord_to_config(&hash)?;
     println!(
         "{}",
         t(
@@ -1037,7 +1061,6 @@ async fn run_discord_bot_setup(
         bot_token,
         &plain,
         "http://127.0.0.1:7681",
-        public_url,
         guild_id,
     )?;
     println!(
@@ -1141,15 +1164,9 @@ pub async fn run_discord_with_locale(
             oauth_client_id,
             oauth_client_secret,
             oauth_redirect_uri,
-            public_url: setup_public_url,
         } => {
             let interactive = stdin_is_tty();
-            let public_url = resolve_discord_public_url_for_setup(
-                state,
-                locale,
-                interactive,
-                setup_public_url,
-            )?;
+            let public_url = require_configured_public_url(state)?;
             if oauth_only {
                 let oauth_interactive = oauth_client_secret.is_none() && interactive;
                 return run_discord_oauth_setup(
@@ -1176,7 +1193,6 @@ pub async fn run_discord_with_locale(
                 &bridge_out,
                 app_id,
                 &token,
-                &public_url,
                 guild_id,
             )
             .await?;
@@ -1199,8 +1215,7 @@ pub async fn run_discord_with_locale(
             client_secret,
             redirect_uri,
         } => {
-            let public_url =
-                resolve_discord_public_url_for_setup(state, locale, stdin_is_tty(), None)?;
+            let public_url = require_configured_public_url(state)?;
             run_discord_oauth_setup(
                 state,
                 locale,
