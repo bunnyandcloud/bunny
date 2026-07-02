@@ -15,6 +15,10 @@ const config: Config = {
   organizationName: 'bunnyandcloud',
   projectName: 'bunny',
 
+  customFields: {
+    docVersion: 'v0.5',
+  },
+
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 
@@ -22,7 +26,20 @@ const config: Config = {
     mermaid: true,
   },
 
-  themes: ['@docusaurus/theme-mermaid'],
+  themes: [
+    '@docusaurus/theme-mermaid',
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        language: ['en'],
+        docsRouteBasePath: '/',
+        indexBlog: false,
+        highlightSearchTermsOnTargetPage: true,
+        searchBarPosition: 'left',
+      },
+    ],
+  ],
 
   i18n: {
     defaultLocale: 'en',
@@ -57,20 +74,18 @@ const config: Config = {
       logo: {
         alt: 'bunny',
         src: 'img/logo.png',
-        href: '/intro',
+        href: '/home',
         width: 56,
         height: 50,
       },
       items: [
         {
-          type: 'docSidebar',
-          sidebarId: 'docsSidebar',
+          type: 'search',
           position: 'left',
-          label: 'Docs',
         },
         {
           href: 'https://bunnyandcloud.com',
-          label: 'Home',
+          label: 'Website',
           position: 'right',
         },
         {

@@ -1,3 +1,7 @@
+---
+unlisted: true
+---
+
 # Improvement: server-side read-only noVNC enforcement
 
 **Status:** future track (v1 accepted on client)  
