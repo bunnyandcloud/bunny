@@ -1,0 +1,1 @@
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string"},"mfa_challenge_token":{"type":"string"},"device_id":{"type":"string"}},"title":"MfaVerifyRequest"}}}}}

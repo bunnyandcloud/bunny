@@ -1,6 +1,8 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import type * as Plugin from '@docusaurus/types/src/plugin';
+import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
 
 const config: Config = {
   title: 'bunny',
@@ -27,6 +29,7 @@ const config: Config = {
   },
 
   themes: [
+    'docusaurus-theme-openapi-docs',
     '@docusaurus/theme-mermaid',
     [
       require.resolve('@easyops-cn/docusaurus-search-local'),
@@ -54,12 +57,36 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl: 'https://github.com/bunnyandcloud/bunny/tree/main/website/',
+          docItemComponent: '@theme/ApiItem',
         },
         blog: false,
         theme: {
           customCss: './src/css/custom.css',
         },
       } satisfies Preset.Options,
+    ],
+  ],
+
+  plugins: [
+    [
+      'docusaurus-plugin-openapi-docs',
+      {
+        id: 'openapi',
+        docsPluginId: 'classic',
+        config: {
+          bunny: {
+            specPath: '../packages/api-contracts/openapi.yaml',
+            outputDir: 'docs/api',
+            downloadUrl:
+              'https://github.com/bunnyandcloud/bunny/blob/main/packages/api-contracts/openapi.yaml',
+            showSchemas: true,
+            sidebarOptions: {
+              groupPathsBy: 'tag',
+              categoryLinkSource: 'tag',
+            },
+          } satisfies OpenApiPlugin.Options,
+        } satisfies Plugin.PluginOptions,
+      },
     ],
   ],
 
@@ -121,7 +148,7 @@ const config: Config = {
           items: [
             {label: 'Security', to: '/security/'},
             {label: 'CLI reference', to: '/reference/cli'},
-            {label: 'API', to: '/api/'},
+            {label: 'API', to: '/api'},
           ],
         },
         {
@@ -140,6 +167,12 @@ const config: Config = {
     },
     mermaid: {
       theme: {light: 'neutral', dark: 'dark'},
+    },
+    api: {
+      schemaExpansion: {
+        default: 1,
+        max: 4,
+      },
     },
   } satisfies Preset.ThemeConfig,
 };

@@ -424,5 +424,5 @@ Discord commands create blocks via subprocess (no `inject_transcript` into xterm
 ## See also
 
 - [Architecture overview](./overview.md)
-- [API](/api/)
+- [API](/api)
 - Example config: `.bunny.yaml.example` (`terminal`, `output_buffer_lines`)

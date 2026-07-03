@@ -16,7 +16,7 @@ All client traffic uses HTTPS/WSS with server-side RBAC. Internal Chromium CDP a
 - [Web terminals (shells, tmux, WebSocket)](./terminals.md)
 - [Discord setup](../../team-chats/discord/setup)
 - [Security](/security/)
-- [API reference](/api/)
+- [API reference](/api)
 
 ## Database schema
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"ws_url":{"type":"string"}},"title":"TerminalResponse"},"schemaType":"response"}

@@ -1,16 +1,45 @@
 openapi: 3.1.0
 info:
   title: bunny API
-  version: 1.0.0
+  version: 0.5
   description: Remote dev/debug agent API
 servers:
   - url: /api/v1
 security:
   - cookieAuth: []
   - bearerAuth: []
+tags:
+  - name: auth
+    x-displayName: Auth
+    description: Authentication, MFA, and user profile
+  - name: sessions
+    x-displayName: Sessions
+    description: Collaborative dev sessions
+  - name: terminals
+    x-displayName: Terminals
+    description: Terminal shells and WebSocket streams
+  - name: previews
+    x-displayName: Previews
+    description: Port preview tunnels
+  - name: browser
+    x-displayName: Browser
+    description: Headless browser sessions and screencast
+  - name: timeline
+    x-displayName: Timeline
+    description: Unified session timeline
+  - name: voice
+    x-displayName: Voice
+    description: Voice intent and confirmation
+  - name: push-webrtc
+    x-displayName: Push & WebRTC
+    description: Push notifications and WebRTC signaling
+  - name: secrets
+    x-displayName: Secrets vault
+    description: Encrypted secrets vault (owner only)
 paths:
   /auth/bootstrap:
     post:
+      tags: [auth]
       summary: Create owner account (first run only)
       security: []
       requestBody:
@@ -24,6 +53,7 @@ paths:
           description: Owner created
   /auth/login:
     post:
+      tags: [auth]
       summary: Login (password; may require MFA second step)
       security: []
       requestBody:
@@ -37,6 +67,7 @@ paths:
           description: Session created, or MFA challenge issued
   /auth/mfa/verify:
     post:
+      tags: [auth]
       summary: Complete login with TOTP or recovery code
       security: []
       requestBody:
@@ -52,26 +83,34 @@ paths:
           description: Challenge locked (too many failures)
   /auth/mfa/status:
     get:
+      tags: [auth]
       summary: MFA status for current user
   /auth/mfa/setup:
     post:
+      tags: [auth]
       summary: Start MFA enrollment (returns otpauth URI and manual secret)
   /auth/mfa/enable:
     post:
+      tags: [auth]
       summary: Confirm MFA with first TOTP code; returns recovery codes once
   /auth/mfa/disable:
     post:
+      tags: [auth]
       summary: Disable MFA (recent auth + TOTP code)
   /auth/mfa/recovery/regenerate:
     post:
+      tags: [auth]
       summary: Regenerate recovery codes (recent auth + TOTP code)
   /auth/logout:
     post:
+      tags: [auth]
       summary: Logout
   /auth/me:
     get:
+      tags: [auth]
       summary: Current user (includes locale en|fr)
     patch:
+      tags: [auth]
       summary: Update current user preferences (locale en|fr)
       requestBody:
         content:
@@ -87,90 +126,120 @@ paths:
           description: Updated profile
   /sessions:
     get:
+      tags: [sessions]
       summary: List sessions
     post:
+      tags: [sessions]
       summary: Create session
   /sessions/{id}:
     get:
+      tags: [sessions]
       summary: Get session
   /sessions/{id}/join:
     post:
+      tags: [sessions]
       summary: Join session
   /sessions/{id}/stop:
     post:
+      tags: [sessions]
       summary: Stop session
   /sessions/{id}/reset:
     post:
+      tags: [sessions]
       summary: Reset session
   /terminals:
     get:
+      tags: [terminals]
       summary: List terminals
     post:
+      tags: [terminals]
       summary: Create terminal
   /terminals/{id}/ws:
     get:
+      tags: [terminals]
       summary: Terminal WebSocket
   /previews:
     post:
+      tags: [previews]
       summary: Create port preview
   /browser-sessions:
     post:
+      tags: [browser]
       summary: Create browser session
   /timeline:
     get:
+      tags: [timeline]
       summary: Unified timeline
   /voice/intent:
     post:
+      tags: [voice]
       summary: Voice intent proposal
   /voice/confirm:
     post:
+      tags: [voice]
       summary: Confirm voice action
   /push/register:
     post:
+      tags: [push-webrtc]
       summary: Register device for push (FCM)
   /push/register/{device_id}:
     delete:
+      tags: [push-webrtc]
       summary: Unregister push device
   /webrtc/config:
     get:
+      tags: [push-webrtc]
       summary: ICE servers and WebRTC availability
   /sessions/{id}/webrtc/offer:
     post:
+      tags: [push-webrtc]
       summary: WebRTC SDP offer → answer
   /sessions/{id}/webrtc/candidate:
     post:
+      tags: [push-webrtc]
       summary: Trickle ICE candidate
   /browser-sessions/{id}/webrtc/offer:
     post:
+      tags: [browser]
       summary: WebRTC browser screencast offer
   /browser-sessions/{id}/webrtc/candidate:
     post:
+      tags: [browser]
       summary: Browser WebRTC ICE candidate
   /browser-sessions/{id}/webrtc/stop:
     post:
+      tags: [browser]
       summary: Stop browser WebRTC stream
   /secrets/status:
     get:
+      tags: [secrets]
       summary: Vault status (owner only)
   /secrets/init:
     post:
+      tags: [secrets]
       summary: Create encrypted vault (owner only)
   /secrets/unlock:
     post:
+      tags: [secrets]
       summary: Unlock vault (owner only)
   /secrets/lock:
     post:
+      tags: [secrets]
       summary: Lock vault (owner only)
   /secrets:
     get:
+      tags: [secrets]
       summary: List secret metadata (owner only)
     post:
+      tags: [secrets]
       summary: Create or update secret (owner only)
   /secrets/{name}:
     delete:
+      tags: [secrets]
       summary: Remove secret (owner only)
   /secrets/{name}/reveal:
     get:
+      tags: [secrets]
       summary: Reveal secret value (owner only)
 components:
   securitySchemes:

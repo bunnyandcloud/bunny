@@ -1,4 +1,5 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+import apiSidebar from './docs/api/sidebar';
 
 const sidebars: SidebarsConfig = {
   docsSidebar: [
@@ -39,7 +40,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Reference',
-      items: ['reference/cli', 'api/index'],
+      items: ['reference/cli', ...apiSidebar],
     },
     {
       type: 'category',

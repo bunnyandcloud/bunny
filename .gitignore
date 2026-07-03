@@ -35,6 +35,7 @@ secrets.enc
 config/discord-bridge.local.yaml
 .discord/.env
 .discord/bridge.yaml
+.pnpm-store/
 
 # IDE & OS
 .idea/

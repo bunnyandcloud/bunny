@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"status":{"type":"string","enum":["missing","locked","unlocked"]},"path":{"type":"string"},"ref_count":{"type":"integer"}},"title":"VaultStatusResponse"},"schemaType":"response"}
