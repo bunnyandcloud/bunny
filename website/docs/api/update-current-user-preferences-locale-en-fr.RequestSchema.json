@@ -1,1 +1,1 @@
-{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"locale":{"type":"string","enum":["en","fr"]}}}}}}}
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"locale":{"type":"string","enum":["en","fr"]},"git_name":{"type":"string"},"git_email":{"type":"string"}},"title":"PatchMeRequest"}}}}}

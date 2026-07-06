@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["passphrase","confirm_passphrase"],"properties":{"passphrase":{"type":"string"},"confirm_passphrase":{"type":"string"}},"title":"SecretsInitRequest"}}}}}

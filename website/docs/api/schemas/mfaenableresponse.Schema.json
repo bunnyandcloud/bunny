@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"recovery_codes":{"type":"array","items":{"type":"string"}}},"title":"MfaEnableResponse"},"schemaType":"response"}

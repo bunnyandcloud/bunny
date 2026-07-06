@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["user_id","email","session_token","expires_at"],"properties":{"user_id":{"type":"string"},"email":{"type":"string"},"session_token":{"type":"string"},"expires_at":{"type":"string","format":"date-time"}},"title":"LoginSessionResponse"},"schemaType":"response"}

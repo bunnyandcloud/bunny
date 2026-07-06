@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"enabled":{"type":"boolean"},"recovery_remaining":{"type":"integer","format":"int64"}},"title":"MfaStatusResponse"},"schemaType":"response"}

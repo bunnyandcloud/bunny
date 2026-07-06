@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["action","command"],"properties":{"action":{"type":"string","enum":["insert","run","cancel"]},"command":{"type":"string"},"terminal_id":{"type":"string"}},"title":"VoiceConfirmRequest"}}}}}

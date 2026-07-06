@@ -5,7 +5,7 @@ description: "Create browser session"
 sidebar_label: "Create browser session"
 hide_title: true
 hide_table_of_contents: true
-api: eJx1UTFOxDAQ/Eo0teGgoEl3okIUnDioThFykuVikcTG3gSiyH9Ha0KOQ6LdmZ3dmZnB+hiQH1B6+xHIo1CoKVTeODa2R45bT5opW/AsUAgCKHTEja2Rw9nAUHCaG+TYLMyLhRmgEMiP5OXOjMG3wtLObMZrxELQavCGpwRX1r4Z2g6idSiimlGS9uTXya+FfdVQRwH5+doMnhwhh3bmniYoGDHyTYFCrztBy6Hvp5cfP1GdHVo1GmYnDtIp2UokxCiqrzYxDberYLbd3UFB7Kb8ri5v/ib6SJ1lymoaNzWVwzHTR+o5LUaV0ux0L8LLo/82cCa7fsz0yRvXapNMpbjnpZy15lM5hUIj/eUHzHOpAz37NkYZvw/kpZNCYdTe6FJMSiWn5ncP+yfE+AWnOsgw
+api: eJzVVUtz2jAQ/iuePSsl6ePiG+3kkOmhGZKeGIaR5QWU2JKyWkMYxv+9s7J5BtJDewkXQPvS9327qw2wnkfIx1CQX0UkmCggfGkw8ndfriHfpL+WsIScqUEFxjtGx2LSIVTWaLbeDZ6id3IWzQJrLb94HRBy8MUTGgZ1kGgMEWO03k1tKRUD+YDEFmPKsLfts0Qm6+bQKmBNc+RpQ9UZs9gtV3L0g1Azfu9wjTpM0LbiQhiDd7Er9/n6Wr5KjIZsECyQQx+W9XfJTEpWZp4ywiZiCf9AxDHcCzAjE+p6GjQvztpxiY7jZfsKC2Iz9bMZ0iWvA7Z2PHXM9ER9PcfNnVvqypZZ3yf/jwkk8vR3N+NLPAu5xhj1/JytPYQ6DPY2VdpivHmLcdjwAh33SLJt64r+todvCEtx0VX8+BR8eUvBCA06zvR7TMRmNrPGil9Aqm0alg9OR6tOiOgWSVYcrwSQ7LzwJeQQfBqDbspg0Hte9Z7CR0RaIsmm3UDaXDDQwQ6WN9BOxGoasrxOZuP9s0VpQMjHk1ZtoEBNSLuTg4AH4XHLwT5sh1YH+xPXoMAKkM4FFDhdi7VonFtPt3hadVRol2PBHARBKiVRySktD5FztH8tbl91HSo83eFbzo9X94FK1s18KtjLke6VDe/vQIGwlmS4/vTtVJgR1p4xK3E5KLFo5pmeSydKYKuSKLVO7dbjvSjkUdodcMZXHoRK28RN/950Gu/ey73GEwULaYN8DJtNoSP+pqpt5filQRJpJwqWmqwuBKQoCwvUJVJS/RnXcsNubK4e5QbiXjWdjCcjJF3RRQyNwcDv+k4OOvX+18MjKCj6t71OgwOkV/I+6xXkAAp8YiJ1VTrbQKXdvEmDBF1O+fwBIZrjdw==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Create browser session
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Create browser session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./create-browser-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

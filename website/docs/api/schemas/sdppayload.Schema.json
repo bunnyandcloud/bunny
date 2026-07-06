@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["type","sdp"],"properties":{"type":{"type":"string","description":"SDP type (e.g. offer","answer)":null},"sdp":{"type":"string"}},"title":"SdpPayload"},"schemaType":"response"}

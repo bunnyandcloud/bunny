@@ -5,7 +5,7 @@ description: "Stop browser WebRTC stream"
 sidebar_label: "Stop browser WebRTC stream"
 hide_title: true
 hide_table_of_contents: true
-api: eJx9kjFPwzAQhf9K9GZDYGDJVjEhBqq2iKGKkJMcjUUSG/vSUkX+7+hMFCgDq+/eu3v3eQLrQ0CxR+XtKZBHqdBQqL1xbOyAAlu2Lpur2QtVm919FtiT7qHQE7e2QQFnA0PBaW5RIJ/7rwKFYOwQ8sk0MT9R5bnOA1sHhUD+SF6GTxh9JzLtTH68RSylWo/e8DmVa2vfDa1GMd+XUU2oSHvyy8svwbZuqaeA4lI2gc+OUEA780hnKBhJ990ChUH3Uq3GYTi/zmsjqotBi0fLnBKkUaJKTYhRXN9s6jTcLYbZav0ABYmbjnpzfff3zBvqLVPW0DFvqBoPmT7QwEkYVTpvrwcxnhf9F8uF9bI10yfnrtMmBUsnn2ZiC/+FGBQK00DhG5qkFWylQiuoiz2mqdKBnn0Xozx/jOSFVqlw1N7oSuILrJ9Psn7a7hDjFzcA13U=
+api: eJzdVM1u2zAMfhWBpw3Q5nTrLr4Fww7DDivSDTsUwSDLTKzWllSKThcYeveBtpOlTdGdt5NtiqS+H9IDsNkmKG+govCQkGCtgTDF4BMmKAd4t7iUR43JkovsgocSrntrMSX14LhRPqhDhapCvYes4XJxcV617LlBz84aCSjC+94R1iqQcn5nWlcrS1hLimkTaLDBM3qWTibGdi4sbpO0GyDZBjsjb7yPCCWE6hYtg4ZIISKxmyggUaC/p9lQ40lWYnJ+K2Q6TMlsnzvLOWtgx60El9F9Gm+awpeL9+cSrNCiZ2VeUiL1m42zTvIiUudScsH/B3I8M0crTKEni8oHVpvQ+/rfppn100XhENW8WuoHVqtvH1ViQtMJEEOmQ0aSBRzAm04aOtHASXE03ICs4zQdUDL1qM8FmHFp2ATqDEMJfe9qyHktLLgJtTQLaSQvPUsoZkxvEk7jVQyuzsUDVsS2SBwiaEhIuwO4nlopM9EVuwuQzgltT47347EN4c6hLDiUN+usB6jQENIxclJwLfgP4v8pO9Ix0X3B/UGEKQX0QZ6q937/c4YtPp1edOzRMI8MxqukakwCMcj5TRgzZwPHhmp59Rk0CN3RuMXbD0+tXGEXGFWNu6LGqt8qs5UVlcKsR3k7Mw7oDPRF6x+1PqJm/MVFbI0biY2SD7Njxx/00THQUI6zMpkmbMW2tYZGrC5vYBgqk/A7tTlL+L5HErfWGnaGnKmE/s0AtUvyXkO5MW3CM3DHfYRXq3kUXyvQz4M+eOjFwJ1pe/kCDXe4n2Y7r7OGBk2NNN4+HSytxcgnJWeb/2iYr75ef4OcfwNmYlU3
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Stop browser WebRTC stream
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./stop-browser-web-rtc-stream.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Stop browser WebRTC stream
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./stop-browser-web-rtc-stream.StatusCodes.json")}
+>
   
 </StatusCodes>
 

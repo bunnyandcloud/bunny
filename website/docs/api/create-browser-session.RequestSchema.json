@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"target_url":{"type":"string"}},"title":"CreateBrowserRequest"}}}}}

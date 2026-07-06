@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"locale":{"type":"string","enum":["en","fr"]},"git_name":{"type":"string"},"git_email":{"type":"string"}},"title":"PatchMeRequest"},"schemaType":"response"}

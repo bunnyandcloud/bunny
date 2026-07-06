@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"project_path":{"type":"string"},"status":{"type":"string"}},"title":"SessionListItem"},"schemaType":"response"}

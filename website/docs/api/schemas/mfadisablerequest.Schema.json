@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string","description":"Current TOTP code"},"password":{"type":"string","description":"Re-enter password if session is not recent"}},"title":"MfaDisableRequest"},"schemaType":"response"}

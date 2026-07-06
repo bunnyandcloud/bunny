@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["mfa_required","mfa_challenge_token","user_id","email"],"properties":{"mfa_required":{"type":"boolean","const":true},"mfa_challenge_token":{"type":"string"},"user_id":{"type":"string"},"email":{"type":"string"}},"title":"LoginMfaChallengeResponse"},"schemaType":"response"}

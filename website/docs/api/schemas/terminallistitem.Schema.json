@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"status":{"type":"string"},"cwd":{"type":"string","nullable":true},"git_project":{"type":"string","nullable":true},"git_branch":{"type":"string","nullable":true}},"title":"TerminalListItem"},"schemaType":"response"}

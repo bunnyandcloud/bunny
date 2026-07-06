@@ -5,7 +5,7 @@ description: "Trickle ICE candidate"
 sidebar_label: "Trickle ICE candidate"
 hide_title: true
 hide_table_of_contents: true
-api: eJx1UstOwzAQ/JVozobAgUtuFeJQcaCi5RRFyImXxmpiG9sJRJH/HdkNfSBx3d2Z3ZnZGZ7vHYoSZnDtzRfV1jeoGAS5xkrjpVYosLOyOXSUrR+fsoYrIQX3BIaefKsFChjtPBgM9y0K5I6ck1q5fJYi5EfW/BLoyI5k4+IZg+0ihhuZj/cIVew2g5V+Su1G64Ok1RCZyyqwGTVxS/ZUuQBsm5Z6ciiuYTP8ZAgFuJHPNIFBRlXHETAo3sduPSg1vS+3I7CrRSeO1nsTFaRVEZWGEEJk/dBpUvruRJitNmswRLnJzLvbh7/2vlKvPWWCxlxQPewzviflEzCw5G3PVSReDv0vjivW08Gevn1uOi6TpuT2vCRV4jcpMBRSgGF5AYYzccXQxnyLEvNcc0dvtgshlj8HsjGlimHkVvI6yo4hnT9j87LdIYQfUKrR7w==
+api: eJzVVT1v2zAQ/SvCTS3A1E6bLtrcIEPQoYGTToZRnMizxUQiGZKyYwj678VRkj/iNB061Ysl8t59vHt3aiHiOkC+ANeE8mJLhY8SlgI8PTcU4jerdpC36VV7UpBH35AAaU0kE/kKnau0xKitmTwGa/gsyJJq5Ke4cwQ52OKRZARx5GgBEo3SCiNxQOetIx81BYYdrvK26wREHSv2cyvpery6w11lUUHXsYWn4KwJPfzz9Ir/FAXptePUIIf7RkoKIdvqWGbGZiMiK7jITsDV9PIcNWtiSSYOFWZj/pn1mTYbrLTKpCfFJlgF+AdqThkg763/u5m0io6sQvTarLmYmkLA9Vt33TGhM6dvUqT++Gr65ZyCOUkyMcP3mAjNaqWlZjtHvtYhaGv+czo68YqIB6/lU0XZ7fVNdlCoAIcea4rkeZJaMFizL61AgGacw1ieaL8forPah5QErKyvMUIOTaNZ4EsuIJZWsTMbUt3sM4dJoJ7qSatVN+kHeHKcXCC/GTNrfMUYdHqyuQR2G0g2XsddupbWPmlixUO+WHaihYLQk9+fHAHuOfmR9ANsXws6/Z12IwO9CYiRm6IxZvdryJ37cxxo76OM0cHAU0IlI+DGsH7mhx1184K1q+it1aHNyiafQ4tT6Gx2dwsCmJjU2umnr6+bPafaRsoUbSaKimad4ZrVzcBOpC7UmCQ8lPQncZx43ZcW6SVOXIU6VZ/60g49XcDYUxCQJxUNe1mcrsySlZAvoG0LDPTTV13Hx88Nee7nUsAGvcaCy160oHTgZwX5CqtAZ5ntJxU+zAelfsxAvJ3x2GXDLd5g1fAbCHiiXS/9btkJKAkV+RS9v7juY1w8MPwAPNsMrL0eMZOSXHzX9ng67n7cP4CAYvhu1WkfgMctzx9u+yRtqjlpN521UKFZN2k/QO+Tf78B9Ot2AQ==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Trickle ICE candidate
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./trickle-ice-candidate.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Trickle ICE candidate
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./trickle-ice-candidate.StatusCodes.json")}
+>
   
 </StatusCodes>
 

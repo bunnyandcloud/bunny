@@ -5,7 +5,7 @@ description: "Terminal WebSocket"
 sidebar_label: "Terminal WebSocket"
 hide_title: true
 hide_table_of_contents: true
-api: eJxtUT1PwzAQ/SvVmy0CA0u2DgghFkSLGKoIOcmRWE3iYF9SIsv/HZ2pAkWM9vu4e/cCWDce+QFMrjeD7jwKhZp85czIxg7IsT9Dm1cqd7Y6EkOhJ25tjRxNeo6aW+TIVpssmDpmJw8FT24mJ1MCJtcJTY8mm28QC0GryRleElxZezS0ncTsUEQVUJJ25NafX4Jd1VJPHvmlLICXkZBDj+aRFigYCfFNgcKge0HLaRiWN0/eS8ioLgatHi3zKAnSKFElEmIU13ebmIa71XCzfXqAgsRNt7u+uv17zWfqLdOmpjmrqZyajW5o4CSMCqP13OtBjM+L/nv9C8t1W6ZPzsZOmxQonTqcm/ldsEJuaiicUtet9Sx4CKX29OK6GOX7YyInnRQKs3ZGlxJSKvlp/v5ujxi/AJoRxMk=
+api: eJzdVUtr3DAQ/itiTi2YbkK3Pfi2h1BCDw15UEpYgmyPbWVtSZFGm5rF/72Mdu04eJvHsT0ZSzPzffNpHjsgWXlIb4HQtUrLxsM6ASudbJHQ8dUOtGwRUiidae9MWXokSEBpSOEhoOsgAZ/X2EpId0CdZVulCSt0kEBpXCtpf/R1CX0CBfrcKUvKcIhLtI3sxMX1L2EC2UCCcQTVyousIxQHxD4ZiWhDmBmzeZVFZkyDUs9Br4K1Dr2PsG7P4LFGLYJXuhIDgMgak2+8uDmfwqtiALaSakjA4UNQDgtIyQU8wsOTU7qaihGCKqDv1+zsrdEePdufnpzy5znZn5hdmXyDJIKtnCxQlMaJ4cHE+eIHJ7g85roKVKMmlUs+EANRYZxQeisbVYjcYcEm/PQJ5EYTauJI0trm4Li49xxuN8/MZPeYczlYZyw6Uvs80DnjXjfLTYFzmfoEWvReVsfu+r5PgBQ1fLiy6iwi7Y+XJ5/nElxijpqEfEkJH8pS5YrtLMvqvTL6P5BjeUwOb4LLkWtclCbo4t9Oc9ba10NfjG0DHJlqU0AKVfyNfZvCYhx6i50q+sUjP7lHtx0GX3ANm0mrFttT4G71mAenqIvXuTEbhdxjkN6ueUJkKB268WTicMUaDvk/uY2ZSqu+YzcMlr0JJMPIyYLW3Z3HWJgs1RRojFET2WEMRq9oBKyR0qWJlgcNY0CxujiHBDjdqN3Jpy/z6dwaQlHgdlFgFiohK+4SduwTsMZTK2ONHIgeVf9ZyJEt4W9a2EaqmFCUend4mek6SiCNA/cxbqbaeOL73S6THm9c0/d8vN8A/CaF8jJreBaXsvE4Ax9L/c2LJzlOeIPdbCduZRPYMm6LtzN5/zZ6kdNkPT4RWvOPU8zonTp9uDzMyo/ib7hDDetuijnw4U237hOoURboIvr+YpXnaKe6zYYP0x5799vZNfT9H/iqAQo=
 sidebar_class_name: "get api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Terminal WebSocket
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./terminal-web-socket.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Terminal WebSocket
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./terminal-web-socket.StatusCodes.json")}
+>
   
 </StatusCodes>
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"otpauth_uri":{"type":"string","description":"otpauth:// URI for QR code"},"secret_base32":{"type":"string","description":"Manual entry secret (base32)"}},"title":"MfaSetupResponse"},"schemaType":"response"}

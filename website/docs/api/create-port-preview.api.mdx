@@ -5,7 +5,7 @@ description: "Create port preview"
 sidebar_label: "Create port preview"
 hide_title: true
 hide_table_of_contents: true
-api: eJxtUTFOxDAQ/Eo0tUWgoEl3okIUnDioThFykuViXRIbexOIIv8drTkFgmh3dmZ3ZhawPgUURzhPk6GPgFKhoVB749jYAQXuPGmmzFnP2WULCj1xaxsUcDYwFJzmFgXyVUchkJ/Ii/qC0XeCamfy6QaxFLQeveE5wbW1Z0O7UTSOZVQLKtKe/Dr5RTjULfUUUGxpC3h2hALamQeaoWDk++8VKAy6F7Qah2F+DRSCuItqc2jVaJmdOEinhJWWEKOovtm0abhbBbPd/h4KYjeFdn11+zfGJ+otU9bQlDdUjadMn2jgRIwqpdjrQYQvj/4f+0ZzfZfpk3PXaZMcpayXSyPbZlspqzhiWSod6MV3Mcr4fSQvRZQKk/ZGV+JMevipef94eEaMXy3Hv7k=
+api: eJzVVUtv2zAM/isGz9qS7nHxLRt6KHZYkXanIAhkmXXU2pJK0dkCw/99oOw8m3XAsEtzSBzxpe/7SLoD1lWEfAGBcGPxZ4SlAsLnFiN/8eUW8i79tYQl5EwtKjDeMToWkw6htkaz9W7yGL2Ts2jW2Gh54m1AyMEXj2gY1FGiBUSM0Xq3siUoqL3R9Sp4YikfyAckthhTuoPjIWVksq6C/iT0YLaOsUKCvlfAlms5+0qoGW8HmPMBIfS9uBDG4F0c6n2YTuWnxGjIBkEGOYxhGbfOYZ2ZlEtu/s9cnIL8A7jQFrU1q6B5fcF+BG4PawAy4vp0CcqN2+jaltko8v/DgESe/u5mfIkXwTYYo64u2fpjqLNgr1OlHcarlxhnLa/R8Ygk2/Vd5imzI3xDWIqLruPbp+DjSwrmaNBxpl9jIrYPD9ZY8QtIjU2D9sbp6NUZEcPcZ7IhsnHJgaTmtS8hh+DTDAwjBpP9GlQQkTZIshw7aKkWqw52srmCfilW05LlbTIb758sStdBvlj2qoMCNSHtT44C7oS8HfBD2B6iDvYbbkGBldsPLqDA6UasRevcdjXuROHouNA+x5o5CIJUSqKSU9oYouH8sN+vf+km1Hi+aHdEn+7XaS+3evCp0kh+ulA2u70BBUJXIn36/vO5DHNsPGNW4mZSYtFWma6k7yRQFp2P3OjUXCPQy7Kd5NzDZfzFk1BrmxhJWnWjoqcvtrWInS+g6wod8QfVfS/Hzy2SCLlUsNFkdSHIREdYoy6RksZPuJVrDZPx7l4qi3vdDqKdTYn0wBAxMwYDv+q7POrH2+9396CgGN+9TZoNIC3o5TsHUOATA6mH0lkHtXZVm2YFhpzy+Q0W2b/u
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Create port preview
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Create port preview
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./create-port-preview.StatusCodes.json")}
+>
   
 </StatusCodes>
 

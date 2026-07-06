@@ -1,0 +1,1 @@
+{"parameters":[{"name":"session_id","in":"query","required":true,"schema":{"type":"string"}},{"name":"since","in":"query","schema":{"type":"integer","format":"int64"},"description":"Return events after this sequence number"},{"name":"limit","in":"query","schema":{"type":"integer","format":"int64","default":100}}]}

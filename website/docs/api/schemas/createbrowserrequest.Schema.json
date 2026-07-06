@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["session_id"],"properties":{"session_id":{"type":"string"},"target_url":{"type":"string"}},"title":"CreateBrowserRequest"},"schemaType":"response"}

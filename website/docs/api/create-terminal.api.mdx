@@ -5,7 +5,7 @@ description: "Create terminal"
 sidebar_label: "Create terminal"
 hide_title: true
 hide_table_of_contents: true
-api: eJxlUUFOwzAQ/Eo0Z4vAgUtuFSfEgYrCqYqQkyyN1SQ29iYiivx3tKaktFx3dmZ3ZhawPgQUezD53gy6CygVGgq1N46NHVDgwZNmyn43oNATt7ZBAWcDQ8FpblEgP4soBPITedFeMPpOYO1MPt0hloLWozc8J7i29mhoM4rIvoxqQUXak18nfwi7uqWeAopL2gKeHaGAduaJZigYef1nBQqD7gWtxmGY3wOFINaiuji0arTMThykU8JKS4hRVD9s2jTcrYLZZvsIBbGbEru9ub/O8IV6y5Q1NOUNVeMh0wcaOBGjSjH2ehDh06P/M7/QW19l+uLcddokNynn5VTHVaetVFXssSyVDvTmuxhl/DmSlxZKhUl7oyuxJSWcS94+714R4zcLZ72x
+api: eJzVVslu2zAQ/RVhzmztdLno5hY5BD00cNKTYQQ0NZGYSCQzpOwagv69GGqx4qgpWvQSX2zNRr43b0ZuIMjcQ7qBgFRpI0sPWwGETzX68MVmR0ib+KgJM0gD1ShAWRPQBHZJ50qtZNDWLB68NWzzqsBK8q9wdAgp2N0DqgBiUmgDHr3X1tzpDAQYWSEf7Mg6pKDRx0KnkFMxH0ibHNo+ac6hbFVJM5+kDr+x29JPHNoEzJHYQ/Yw62kFBB1Ktn0llAFvewrXHXvQthxD6J01vkP0Ybnkrwy9Iu2YNUhhyEtULMN8/DPDzwn8W+IO/q6mcsY1wXpC2eHqYX6aQ3Zl9rLUWdLr6f8BQyJLfw5TNpsHWqH3Mp/ztVOsK6cv40kDxouXGFd1KNCEHkkySDyxlOgeviLMOISn681T8PElBWtUaEIiX2PC1/f3WmmOc6ygONlvnI5WnBHR7YFk2KXAZUNhM0jB2ah/J0MBKSxO61aAR9oj8RZuII4fLKTTi/0FtFv2qpp0OEa3svZRI0sO0s22FQ3sUBLSaJkk3DBzA+pT2ohPOv0NjyBA89W7kGEVp7CrjTne9RuYCZoeNNYoQnCMIB7FWTEo7gtu4Pr0Hrn8KStX4vlaH1gezx2fxyU+MR2eP8aVvRw29LJlKPc2Xq9vV0SRrK6vQABzHNu0fP/5vHFrrGzAJMP9IsNdnScyZ6VyYiti7yoZ5djf8mWjn9Ub+Qn4MyxcKXWksN+tnQbOXrkF6yPdQNPspMcfVLYtm59qJG79VsBekpY7hsWdhwJlhhRV8YhHvlM3SO9u+WgOL+uuzWdDxarpMlZKoQuvxm4nEr7+fnMLAnb9v4IqjhKQPPCbXR4gBRBgIwVRddHWQClNXsfRgq4mf34BUJDw6Q==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Create terminal
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Create terminal
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./create-terminal.StatusCodes.json")}
+>
   
 </StatusCodes>
 

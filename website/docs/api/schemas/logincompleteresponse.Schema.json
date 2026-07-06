@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["user_id","email","session_token","expires_at","mfa_required"],"properties":{"user_id":{"type":"string"},"email":{"type":"string"},"session_token":{"type":"string"},"expires_at":{"type":"string","format":"date-time"},"mfa_required":{"type":"boolean","const":false}},"title":"LoginCompleteResponse"},"schemaType":"response"}

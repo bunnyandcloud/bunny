@@ -5,7 +5,7 @@ description: "Regenerate recovery codes (recent auth + TOTP code)"
 sidebar_label: "Regenerate recovery codes (recent auth + TOTP code)"
 hide_title: true
 hide_table_of_contents: true
-api: eJydUrFOwzAQ/RXrTSAsAgOLt46IoRUtUxQhJ7k2FkkcbCciivzv6EwJVGxs1t177+7e84KgTx4qhx5Dg0KiJl85MwRjeyg804l6cjqQcFTZidwsKluTF1eOKuqDYJ64EYftYZc615DoKDS2hsJgfYDEoEMDhYyxWXfU2bdW5lZ9SHhyEzneZsHo2sQYTDbdIxbcrUZnwpzalbVvhja8s8qLKBeUpB25tfKLsK8a6shDXdIWhHkgKOjBPNEMCcMXf0Eg0euOu+XY9/OrJ+/ZkSgvBq0aTQgDX5BGMSuBECOrHm1CmtCugmKze4QEn5uMvrt9+Gt9ZwOJmqaspnI8CX1iv5kYZXK20z0Lnxf9X1QXM9dzAn2EbGi1SRenLJZziuefItEdNSS+R6XnmmUh0XD0KseylNrTi2tj5PL7yGCVFxKTdkaX7Akn+PNpdtv9ATF+AqVq4wE=
+api: eJzdVk1vGjEQ/SvWnFLVCaQfh+6NtqlUVWmihJ4Qiox3YJ3s2s7YC0Fo/3s1XmAhRInURqrUvexiz4ffmzdjVhDVLEA2AlXHAsYSCO9rDPGzy5eQrdJPQ5hDFqlGCdrZiDbylvK+NFpF42zvNjjLa0EXWCn+ikuPkIGb3KKOIHcCjUC7HDmXJ+eRosHAHmm18wyRjJ2BhByDJuM5D2TwpSZCG8XwYngpkksjwasQFo7yl92v8BhtRBIbF2GmImAIxllhgrAuCkLNEJtGQjSx5GjnU/XVBDUp8arlB5qG9wmDdza0AN71+/zaT/gTFxzQzZGW6bxBHIXCLaxwVuMb+AtK9+nbJLlJSXbsFZFaggQTsQqHDDWPcJ7ZFmYLbI3zQ//0ENqgjgXauD6w2FRYOBLGzlVpcqEJczZRZXg9pEjk6GWzp/XUSKgwBDV7am+Pi4E3ZynThoL3hxRcJakI9RwToZ5OjTZs55Eqk7T2H9Dx6Sk6gqtJowhRRRTa2WlpdBRHeDI7EeffBkKVhCpfCkwqy19R//+ChuZwvMzQIjH4x01PnVTE2258MQMVxsLlkIF3IZ1YxQIy6LFtr5qq3iZWj7bxQUJAmiPx9F5BTWXy8KY3P4VmzLu6JhOXaVs7d2eQGxay0biRK5igIqTtyo7DNRO+Iatz6+aJNz8wDRRG3JqABKsq3p3U1i5v1hOVed1NtI1RxOgZQUrFXskojVyu+1V3CZ09qMqX2JWum+zd1N8po7FTlxKt65XOIwaX30ECs5Xq1D/5eFi5ykUUOc57OU7qmVAzLhc78gXjQqxU0uMa559Vei/nlo2ID7HnS2USYamUq7UI1hezhGqq0i3apkqfWymMJRSsnGwEq9VEBfxFZdPw8n3NxtloLGGuyHDPtQKAAlWOlMRxh0u+WNs2PB7ymdi8rNtqP2pJFk/rMdAafXzWdrwj7suL6yFImKz/WVRtNUktGIxaQAYgwSVu2guN11ZQKjurU2NCG5Of32nTCCU=
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Regenerate recovery codes (recent auth + TOTP code)
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Regenerate recovery codes (recent auth + TOTP code)
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./regenerate-recovery-codes-recent-auth-totp-code.StatusCodes.json")}
+>
   
 </StatusCodes>
 

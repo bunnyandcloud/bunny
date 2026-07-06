@@ -5,7 +5,7 @@ description: "Browser WebRTC ICE candidate"
 sidebar_label: "Browser WebRTC ICE candidate"
 hide_title: true
 hide_table_of_contents: true
-api: eJyFUrFOwzAQ/ZXozYbAwOKtVAyIgaotYqgiZCdHY5HYwXZSqsj/juxGacvCenfv3b33boQXewe+g7Tm4MiiYKjIlVZ1XhkNjsdTI3snud4us+flU1YKXalKeAJDS742FTg64zwYOuFrcOQT340j55TRLh9VFfIDSevL/JLAkR3IxhtG9LaJWNGpfLhHKGK37K3yx9QujflStOjjhl0R2AhJwpKdKxeATVlTSw78GjbCHzsCh+jUCx3BoKLI0wgYtGhjV/ZaHz+m2xHY1aKZo/a+iwrSqohKQwghsn6aNKl8MxNmi9UzGKLc5O3d7cNft9fUGk9ZRUNekez3mdiT9gkYWPK4FToST4f+k84V+Xy3px+fd41QSVoyfZyCmx9hDg4MXFVgOGUHhvOCgqGOsfMdxlEKR2+2CSGWv3uyMbSCYRBWCRldiJmdH2b1utkihF+5sNtb
+api: eJzdVT1v2zAQ/SvETS3A1k6bLtoSI0PQoYGTooNhFCfybDORSIak7BiC/ntxlPyROEiGTq0XS+S9+3jv7tRCwmWEYgZlcJtIAeYSAj02FNOl01so2vxqAmkoUmhIgnI2kU18hd5XRmEyzo7uo7N8FtWKauSntPUEBbjynlQCeeRoBgqtNhoTcUAfnKeQDEWGHa6KtuskJJMq9nOtaLK7usFt5VBD17FFoOidjT38y/ic/zRFFYzn1KCA20YpilFsTFoJ68QOIUouspNwPj47RV00aUU2DRWKXf7CBWHsGiujhQqk2QSrCH9BzXMGKAQX3jdTTtORVUzB2CUXU1OMuHztrjsm9MKbqxypPz4ffz2lYEqKbBL4FhOxWSyMMmznKdQmRuPsf0DHK300peiaoEhYl8TCNVb/22V28kWBl/0aEL+onN5NxPXkShzmUYLHgDUlCrwzWrBYs0vDLBiGe0yrZ5Per4wTCobMJCxcqDFBAU1jeJznXEdaOc3OXMzls88CRsOG+hSpb7BRa3Q32lAZkhodJxkprHcZNqFiLHozWp8Bu4+kmmDSNl8r5x4M8ZxDMZt3soWSMFDYnxwBbrmInQYH2L4m9OY7bXdM9CYgdxyVjbXb30PuLNdxoL2PVUoeBr4yKhsB68TtND1s5qsnrH1Fry1MYxcu+xwUz6HFxc01SGBistLjz99eaj+l2iUSmtYjTWWzFLjkmWZgJ7MaNeaOHkp6p1eeOd9XmOgpjXyFJpOQ5WkHifcfob3EIKHIzdWrzLN2/N1YcYMUM2jbEiP9DFXX8fFjQ4HlnUtYYzBYMguzFrSJ/KyhWGAV6STD/RzDh+nQwB8FyNcz34luWfE1Vg2/gYQH2vYT0c07CStCTSFH7y8mfYxPdww/AE/2Brdij7hQinx60/Z4aG5+3N6BhHL4eNd5W0DADY8lbvokXa45t3I+a6FCu2zy9oDeJ//+AGE9z+8=
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Browser WebRTC ICE candidate
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./browser-web-rtc-ice-candidate.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Browser WebRTC ICE candidate
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./browser-web-rtc-ice-candidate.StatusCodes.json")}
+>
   
 </StatusCodes>
 

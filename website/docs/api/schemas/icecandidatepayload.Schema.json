@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["candidate"],"properties":{"candidate":{}},"title":"IceCandidatePayload"},"schemaType":"response"}

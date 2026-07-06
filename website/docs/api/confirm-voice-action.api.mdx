@@ -5,7 +5,7 @@ description: "Confirm voice action"
 sidebar_label: "Confirm voice action"
 hide_title: true
 hide_table_of_contents: true
-api: eJx1UUFOwzAQ/Eo0Z4vAgUtuFSfEgYrCqYqQk2wbi8Q2thMRWf47WrcNFInr7szszkxEkEePao/ZqJZQC3TkW6dsUEajwoPRB+XGIq8L2eaxwEihNx0qWOMDBKwMPSqUGVa2JxIEPLmZHB+ImNzAEGlVOd8h1bxtJ6fCktetMR+KNhML7eskIhqSjtw6+UXYtT2N5FFd0yLCYgkVpFVPtEBAsYcTBAJajrxtJq2Xd0/es5kkrg6tGn0Ilh3kU8zKIKTEqgeTkSoMq2Cx2T5CgO3m6G5v7v+G+UKjCVR0NJcdNdOxkEfSIROTyFGOUrPw+dF/wr8SXf8N9BVKO0iVLeWw47mXS7sCl2ZqgZ6bq/aIsZGe3tyQEo8/J3JcSC0wS6dkww65j5/Ot8+7V6T0DYq4wqU=
+api: eJzVVU1zGjEM/Ss7Orsl6cdlb7STQ6aHZEjaC8NkhFeAw67t2F4SZmf/e0faBRZC00N7CRdAfpKl9yS5gYTLCPkUNs5ogpmCQE81xfTNFVvIG/lrAhWQp1CTAu1sIpv4CL0vjcZknB09RmfZFvWKKuRfaesJcnDzR9IJ1CDQFFCzE3C0qkJb8L0+OE8hGYoSu0Mc4sQUjF2CArJ1xTGMjRQkcC2R0GoqYdYegr5ybhUkCpWxWD6Yc+cMMKlk0y/m47uzCxOqSUcJtC0jAkXvbOzy/HRxwV8FRR2M73KGsSSfCT9UwD+QdkyKWw8wc+dKQnuU9M160ifX5/rlXHrXdoOlKbJe6f+XH4Xgwt9h2hV0VpyKYsTlubN2WOXYmyu5aVfj5RkJ6rQim/pKsl3zZS5kpi9fByoYgmV8/xR8fk3BhDTZlOFbTMR6sTDaMM7zZMRonH3ndLTqhIh+ijNZcdl+91SUVq6AHLyTIfCYVpDDSGAj3TmBgkhhQ4GXZAN1KBmC3ow2l9DO+FTXwaStHGvn1oa49yCfzlrVwJwwUNhbBg53TOGu/IPbvlD05gdtQYHhGjoIKLBYyfTX1m4fIolgzNTwon2MVUqeK5Cr2EtAsjJYyclh1V+9YOVLGq7ew4bdL9TDFj7aowPBjF04SaBXRvLMxrfXoIBZlMgXH7+eajShyiXKCtqMCprXywyX3JTs2CpRqELpvL7+P2h6FHRPQ6KXNPIlGmFKNGx6uXcPn3S8CD5TsOKGyKfQNHOM9DOUbcvmp5oC6zxTsMFgcM4VssywIiwoSAusadulx+Pz4Z4TYHhZd5qejBK3SOcx1pp8ehM7G/Ts7c3dPSiY9690JQMEAZ/5QcRnyAEUOCFCWkxsDZRol7UMFHQx+fMbhW3JRA==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Confirm voice action
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Confirm voice action
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./confirm-voice-action.StatusCodes.json")}
+>
   
 </StatusCodes>
 

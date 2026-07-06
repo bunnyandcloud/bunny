@@ -5,7 +5,7 @@ description: "Stop session"
 sidebar_label: "Stop session"
 hide_title: true
 hide_table_of_contents: true
-api: eJxdUUFOwzAQ/Eo1Z4vAgYtvPSIOVBROVYScZGksktjYm4go8t/Rmja0ve7szO7MLGBzjNAHRIrRuiGiVGgo1sF6tm6Axp6d35xgKPTErWug4V1kKHjDLTSKs0Cx2CYVkZ2HQqQwUZADC8bQyZ7xtpgekEpB6zFYnjNcO/dlaTuK2qFMakFFJlBYJxeEfd1STxH6mraAZ0/QMN4+0wwFKwb+VqAwmF7QahyG+ePsKKmrQ6tGy5wd5FPCyktISVQ/Xd603K2Cm+3uCQpiN+d2f/d4m+Qr9Y5p09BUNFSNx4050sCZmFTOszeDCJ8evUn+Smz9k+mHC98Zm63kkJdTKRetKmjbiB3ppVRopTx9wLJUJtJ76FKS8fdIQeooFSYTrKnEn7TxX/vuZf+GlH4BSGnCMw==
+api: eJzVVD2P2zAM/SsGpxYQ6lw/Fm8ZOhQdekjaKQgK2mJi3dmSTqKDBob+e0HFzuWSQ7t06WRbeiQfHx89AuM+QrWBSDEaZyNsFQSK3tlIEaoR3i8W8tAUm2A8G2ehgvUJXUR23pMGBY2zTJYFit53pkGBlg9R8CPEpqUe5Y2PnqACVz9Qw6DAB+cpsDlVmxM+A2vnOkILKSlgw52crdn5icJq4gopCeLj4u6W7XLglixPnIpAT4MJpAsXCmMP2BldNIG0QLCL/64ZCsGFv8Map+kCFTkYu4ekoKcYcf/aXbpUY+nN51xpluDDrQQrashygX9SIg67nWmM4DyF3kyG+K/lSOrauex8MZldSmPAnpiCLMEIFntJYcTRRuAeuQXZiJNQUHEYSN22PDFRsHOhR4YKhsFoSGkrvLl1WpK5mNuVnBWU88qVo9GpFOeDgkjhMLMZQic49KY83IGkitQMwfAxXzfOPRoSc0O12SY1Qk0YKJxPLgLWQnjW9znszB+9+UrHuesTBNSsRz1Ye/w5q5bUi0LnHC1z7iCXkqgMyotr7M5l5DSjnLBY3n8BBdJuns3i3afraa2od0yFpkOpqR72Be7FnhKYVNazx+zBiejVdF8kO/Nk+sWl79DkVrLI4zSUi/+ggirbIM9lq6CV4VUbGMcaI/0IXUpy/DRQkHFsFRwwGKylv80I2kR511DtsIt0w+W8U/BmNZnrbQHqdY7zkKxM6IDdIF+g4JGOJ7embVLQEmoKufrpYtk05Pki5GZ7X9jz/tv6O6T0GwxRGoY=
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Stop session
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./stop-session.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Stop session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./stop-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

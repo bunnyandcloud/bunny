@@ -5,7 +5,7 @@ description: "Unlock vault (owner only)"
 sidebar_label: "Unlock vault (owner only)"
 hide_title: true
 hide_table_of_contents: true
-api: eJx9UbtOxDAQ/JVoKpAsAgVNuisRBSeOq04RcnLLxbrENn4Eosj/jtZEgaOg3Z2Z3ZmZEeTJozrAU+soeNQCR/KtUzYoo1Fhr3vTnotRxj4UV+ZDkyuM7qdrCAwUOnNEBWt8gICVoUOFchErY+ZCwJMbyfGhGdH1jJFWleMdUs3bNjoVprxujTkr2kRWOtRJzGhIOnLr5Bdh13Y0kEd1SZsRJkuoIK16pAkCip18QyCg5cDbJmo9vXrynp0mcXFo1ehCsOwgn2JWBiElVn0zGalCvwoWm+0DBNhuDvD25v5vpM80mEDFkcbySE08FfJEOmRiEjnLQWoWXh79r4IL5fXpQJ+htL1U2VdOfF7a+alaYOmnFui4wOqAeW6kp73rU+LxeyTHtdQCo3RKNuyTW/mpfvu0e0FKX9qIx7I=
+api: eJzdVktv2zAM/isCTx3gNe0eh/mWDR1QDEOLtN0lCApGZmI1sqRKcloj8H8fKLuJ0xTdYbt0vsQR398nkt5AxGWAfAqBpKcYYJaBp/uaQvxqiwbyTfqrPBWQR19TBtKaSCayCJ3TSmJU1ozugjV8FmRJFfJbbBxBDnZ+RzJCNnA0BYchuNJjII7ovHXko6LAdgPZzkuIXpkltBkECkFZc6uKQ3EGBQXpleOUIIcJaYuFCCVpHYQyIpYqiN6DwEUkL2qjrVxB22YQVdTs7aoD43KbyKSDBNqW1TwFZ03osv1wcsI/+3F/Ya1j75kK+AvQ9qGxq4HO3FpNaPYyv1hN+uT6XD+9lN65WaNWheiZ/nf5kffW/1lN2uJlbisKAZcvydphlWOnzlKkpxpPD2sc17EkE/tKxNPlE9YL1ZcvPRWsgjq8fQg+HkIwIUkmCnwNiVAvFkoq1nPkK5U64z+A48tLcARbe0kiRIwkpDULrWQUR3S8PBY/v48Fak9YNIIMzjUV7942DO3zaXiT5pFYp+F0ZB8MeWGNbrjOimJpC8jB2TQQHMYSchj1e2HUT0kev35NnnfGBmqvWQedGq1PoZ2xVNZexSaJpbUrRdyIkE9nbbaBOaEnvz0ZGFwxkE8g7My25aJTP6iBDBRX0qlABgarNAprY5rbfq4zXsNAWx9ljI4rSKHYKiml+cl8TnZ77+wRK6fp+TbarZnhEhrQpMzCpoA9HykvMb48hwwYtcTDyfHnwz1V2UiioPWooHm9FLjkjmTDNkuUVJjuW1/va0zued7WHukxjpxGleBJxG16knfLP4Oe5lkGJd+DfAqbzRwD3Xjdtnx8X5NndmcZrNEr7pOOXCgJC/KJ+BU1kMO3rnXeX3MGrK7rjslnbcQXo7MYS0kuvqo7G1zVy4ura8hg3n+oVKl5wOMDf2zgA+QAGdiERLpY6WwDGs2yTs0EnU9+fgPuvCfL
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Unlock vault (owner only)
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Unlock vault (owner only)
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./unlock-vault-owner-only.StatusCodes.json")}
+>
   
 </StatusCodes>
 

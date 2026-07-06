@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"id":{"type":"string"},"stream_path":{"type":"string"},"events_path":{"type":"string"},"webrtc_offer_path":{"type":"string"}},"title":"BrowserResponse"},"schemaType":"response"}

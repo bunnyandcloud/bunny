@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"username":{"type":"string"},"credential":{"type":"string"}},"title":"IceServerConfig"},"schemaType":"response"}

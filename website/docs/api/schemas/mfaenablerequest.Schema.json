@@ -1,1 +1,1 @@
-{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string"},"password":{"type":"string"}},"title":"MfaEnableRequest"},"schemaType":"response"}
+{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string","description":"First TOTP code from authenticator app"},"password":{"type":"string","description":"Re-enter password if session is not recent"}},"title":"MfaEnableRequest"},"schemaType":"response"}

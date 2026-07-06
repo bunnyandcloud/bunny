@@ -5,7 +5,7 @@ description: "Reset session"
 sidebar_label: "Reset session"
 hide_title: true
 hide_table_of_contents: true
-api: eJxlUUFOwzAQ/Eo0Z4vAgYtvPSIOVLScqgg5ydJYJLGxnYjI8t/Rum1o4bqzM7szExHU0UMe4Ml7bUaPSqAl3zhtgzYjJF7JUyjOOAQGCp1pIWGNDxCwKnSQKC8KZdRtKh2zIODJzeT4RMTkel5UVpfzA1LFaDM5HZYMN8Z8atpMLHeokoioSTly6+SKsGs6GshD3tIiwmIJEsrqZ1ogoNnCaQUCoxoYradxXN4vlpK4ObRqdCFYdpBPMSsvISVW/TB5U4d+FSw22ycIsN2c3P3d4/8sBxOoaGkuW6qnY6GONIZMTCIHOqiRhc+P/s3+Rm19NNB3KG2vdPaSU47nWq6KFZC6hcCpmUqg4/7kATHWytOb61Pi8ddEjgupBGbltKrZIffx2/z2ZbdHSj9yW8On
+api: eJzVVDtv2zAQ/ivCTS1AVE4fizYPHYIODZx2MoyCFs8WE4lkjiejhsD/XhwluU6VtkuXTpbF7473PU4DsD5GqLYQMUbrXYSdAsIYvIsYoRrg7WolPwZjTTaw9Q4quB/RBWFELiJrYjSgoPaO0bEU6BBaW2spKB+iVA0Q6wY7LU98DggV+P0D1gwKAvmAxHa8M7dl645X0L33LWoHSc2z3pqr48gkeAUHT51mqKDvrYGUFLDlViAb6TpNvpkoQkoCeb+6WZJc99yg44lEQfjUW0JTeCqsO+nWmqImNALRbfx37JHI099htTe4FCAp6DBGfXzpLF3LsQ72Y75pluDdUoIN1ui40H9SIvaHg62t4AJSZ6cc/ddyJLUQIgd9DI/crUl3yEiyPAM43UkPKztgBR80NyCbNCoFFVOPasn5t7HdyeDceCPNfMx8pWcF5byq5WBNKvOugCwFneZxemoFqIMtTzcgvSLWPVk+5+Pa+0eLEm+otrukBtijJqTLm6uCe5l4Vvhn2YWADvYTnmfaIwTULMi+d+78bZYtqWcXXXo0zAEmcXJVBuXdte7gM3JyKTcs1ne3oEDoZndWbz4s/eo8Y2HwVBrc98dCHyWgUphUFrTTOYXToL/6+6zbZVDG71yGVtvMJas8TLZcfUEVVDkIozM7BY34V21hGPY64ldqU5LXTz2SGLJTcNJk9V4YbgcwNsqzgeqg24iLYS57Ba82U75eF6BeHnK2yYlHJ9328g8UPOJ5DGzaJQUNaoOUbx8P1nWNga9KFhv8LKF3n++/QEo/ABKYLwQ=
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Reset session
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./reset-session.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Reset session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./reset-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

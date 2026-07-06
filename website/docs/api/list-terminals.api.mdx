@@ -5,7 +5,7 @@ description: "List terminals"
 sidebar_label: "List terminals"
 hide_title: true
 hide_table_of_contents: true
-api: eJxlUU1PhTAQ/Ctkzo3owQu3dzDG6MH4cXohpsAKjUBruxAJ6X83W194H153dmZ3ZlawbgOKPZj8YEbdB5QKDYXaG8fGjijwZAJnR1xhIO5sgwItMRSc5g4F8tOVQH4mL8orJt8LrJ3J5xvEUtB68oaXBNfWfhnaTSKyL6NaUZH25LfJCeG17miggOKctoIXRyignXmkBQpGHv9bgcKoB0GraRyXj0AhiLGozg5tGh2zEwfplLDSEmIU1U+bNg33m2C2e36AgthNeV1f3V4m+EKDZcoamvOGqqnNdEsjJ2JUcDbwoEcRPjz6L/Ezue1Tph/OXa9NMpNiXg9tXBTa2cAyXNdKB3r3fYwy/p7ISwmlwqy90ZW4kg6OFd/fvSHGX+qevDs=
+api: eJzVVU1v2zAM/SsGz8LS7uPiWw7dUGyHoetORVEoMhOztSWVorMFhv/7QCVx08Rbi93qi2HxkeJ7pp56ELtKUN6AILfkbZPg1kC0bFsUZA314G2LUELClCj4O6rAAHko4bFD3oCB5GpsLZQ9yCZmqDD5FQwGKkyOKQoFTfhMjSAX42bFMnBhi11lGG4NMKYYfMKk5d6fnenreZHrXXbRUBIw4IIX9KJAG2NDzipwdp8U3Z82Z5mtdk2CbTpYD4t7dFowcojIQtseqJokthVlIpDESpcmQ+7XRC0Dvmsau2gQSuEOBwMrkrvIIbfzWvyCrXf1K+CDASHRz1HJb5TkUrCFQR8DH6dkv/Rr21BVMD52+F/C/0VgZA78MsyFalrwFlOyq6nYcEh2Huki77TneH7Kcd5JjV52TDJVYqyKwAXt6DvGSiF6VN68BB9OJbhCh14K+y8lUrdckiPFRR2hfHrfuBwnXqWH4smpQKtKHSooYYW5Fys1lDA7hCTk9d41O240bCPN1ufZ2hK6jkk2OexCeCDUgYPy5nYwPSzQMvK4cpDwQ3Xbc35Ke3K0SF9xs3flLQT2FgWLzvvN3eix5tlGY41aJO6tPGdlEKgu5JchI3e65YLF/PslGFC6Wa+zd5+OFbzCNggWFa5nFS66VWFXOjKaOBiIIUlr81zsGj1R/Fm5sVPB3zKLjaVMJsvc7/7G0T1WhyS62PcLm/AnN8Ogy9trS39CRUmdsYJyaZuEJzuO8/zSzWWmm3vAzfHFubZNp8A8EWvLtLVmHQGo0VbIubNt5tw5jHKQdXKqtMo4mF8urmEY/gBDRbmg
 sidebar_class_name: "get api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 List terminals
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./list-terminals.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ List terminals
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./list-terminals.StatusCodes.json")}
+>
   
 </StatusCodes>
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["device_id","platform","provider","token"],"properties":{"device_id":{"type":"string"},"platform":{"type":"string"},"provider":{"type":"string"},"token":{"type":"string"}},"title":"PushRegisterRequest"},"schemaType":"response"}

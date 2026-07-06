@@ -5,7 +5,7 @@ description: "Confirm MFA with first TOTP code; returns recovery codes once"
 sidebar_label: "Confirm MFA with first TOTP code; returns recovery codes once"
 hide_title: true
 hide_table_of_contents: true
-api: eJylUsFKxDAQ/ZXwzsHqwUs9LYIgIrvoelqKpO10G2yTmkyrpeTfJXGprlevM2/emzdvFrA6euQHqJFbFBI1+crpgbU1yHFrTaNdLx7vNuJDcysa7TyL/Xa/E5Wt6UY44tEZLxxVdiI3p7IX1lQEiZ64tTVyDNYzJAbFLXJkUS3rG5WRUWUXkZ7cRC6usmB0XQINOpuuEIrYrUaneU7tyto3TZu4cH4oglxQknLk1sqvgeeqpZ488vOxBTwPhBxq0A80Q0JHu98QSBjVx245GjO/evI+niPIM6GVo2UeooMkFacSCCFE1sYmpOZuJRSb3T0kot105cuL6793f6LeMomapqymcjwKdSTDaTDIdMxemUh8WvS/OZ2pr8aYPjkbOqWT95TKcorw9DASfaMgcYqxkGhj0PkBy1IqTy+uCyGW30dyMb1CYlJOJ3QK7+dFdtvnPUL4Ah954B4=
+api: eJzdVk1v2zAM/SsCTxugNd3XYd4pG1pgGIYVbXcqgkGR6VirLWkUnTQI/N8Hyk6TNN122C6bL3FEUtR7j6S8ATaLBMUNmI5rmGkg/N5h4nehXEOxyX8dYQkFU4cabPCMnsVkYmycNeyCn3xLwctasjW2Rt54HREKCPNvaBn03kY3YEOJkitSiEjsMElEXt1FJibnF6ChxGTJRckDBZw7SqyuP19fKAlQFYVWyeHRs5wmkDIxQq8hmpRWgcrf73mJz9AzktqGKFephCm54JVLygdWhFZw970GdtzIbp8qc+bNvMHLgTPoezETphh8GkC9OD2Vn8N8n86nCnNk+VY2DkukdYaTVKrDyqvgLcIfsH3I7DbF15xiz98QmTVocIxtOuap/wnaAd8I99Xp82OE050gwuFWfBVIOb80jSuVJSzFxTTp7yFFokC/d3u81HoNLaZkFo/ZDriYRneWM20peHlMwWUumP3SPGYidVXlrBO/iNS6XHH/AR1vHqMjhY4sqsSGUdngq8ZZVk/wZHGipCNMQ2jK9bYznv7bNPQPh8z74CtHbYa6clyr6nCSySTgjnx6OBHGWdAi16GEAmJI+eyGayhgIgU2aSszGXgDDQlpiSRTfQMdNdkpusnyOfQzsdqOHK+z2YZw61C6FYqbWa83MEdDSPcrewFXwvaWqV3YbphE9xHzNBG4gwto8KYV67zzfv11HKpC6n6i+z1q5igIciqJyk556orol7vL6ezOtLHBnW674b4b/HsaOl+FnGgUK59HTS8+gAZhK4t0evL6+G5oA6MqcTkpcd4tlFlIu0qg3DEhcWtyMY44/1Tmg+z3vDDe8SQ2xmXqsqibsQLGq1tDWxnQMFbBTEMtdVLcwGYzNwm/UNP3svy9QxLxZxqWhlz2ztpDjaZEynVxi+sBi7Tfs2s5hLg33SD0g1aUuhkiptZi5F/6zvZK+eLz1TVomI8fG+0gJJmVfDCYFRQAGkImY7jIZG0DjfGLLjckDHvK8wOw1w9J
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Confirm MFA with first TOTP code; returns recovery codes once
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Confirm MFA with first TOTP code; returns recovery codes once
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./confirm-mfa-with-first-totp-code-returns-recovery-codes-once.StatusCodes.json")}
+>
   
 </StatusCodes>
 

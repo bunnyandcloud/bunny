@@ -5,7 +5,7 @@ description: "WebRTC browser screencast offer"
 sidebar_label: "WebRTC browser screencast offer"
 hide_title: true
 hide_table_of_contents: true
-api: eJyFUrFOwzAQ/ZXozYbAwOINMSEGqraIoYqQnVwbi8Q2tpNSRf53ZDcEysJ6d+/dvfduQhAHD76DdOboyaFiaMjXTtmgjAbHK8n19qGY+4WvHZGuhQ+F2e/JgaGn0JoGHNb4AAYrQguOcoZcefJeGe3LSTWxPJJ0oS6/wZ7cSC6dMGFwXcIJq8rxFrFK3XpwKpxyuzbmXdH9kNh3VWQTJAlHbqn8Amzqlnry4JewCeFkCRzCqic6gUEljecRMGjRp64ctD69zXcjsotFC0cbgk0K8qqEykOIMbHuTZ5UoVsIi/vVIxiS3GztzfXdX7PX1JtARUNj2ZAcDoU4kA4ZGFn2txc6Ec+H/h/OBf9yeqDPUNpOqKwu+z7NuS2vsOQGBq4aMJyjA8OZvGJoU+J8h2mSwtOL62JM5Y+BXMqsYhiFU0ImE1JkP7+yet5sEeMXSQbcIw==
+api: eJzdVjtv2zAQ/ivETQ3Axulr0ZY+hqJDAydFB8MoKPJks5VI9kjZNQT99+KoR5zYaIdOjRdLvPd33x3VQVKbCMUKSvL7iARrCYQ/W4zprTcHKLr8agkNFIlalKC9S+gSi1QItdUqWe8W36N3fBb1FhvFT+kQEArw5XfUCeSRo9UgkxBN4IiBfEBKFuO93WwfE1m3AQkGoyYbOBoUcPv+RrCGeIaXm0vhqwoJJCgX90gXULi2rvshwomvvpeQbKr56NaEG3WovTLQ9ywgjMG7OOTy8uqK/05DD3FE5UmM0ImoCdFpFbnYp47S66sXp8Bct2mLLo3FiqkU4UlYt1O1NUITGlZRdfwXlB5igUSe/q6mvTkDWS+hwRjV5pysPwbhOtgPOdIEwatTCJao0SWh/oREbKvKast6AamxMVrvngAcr8/BEX1LGoXzSVS+deb/LrN/PGBfsVzevTuzA+ZZC4pUgwmJ92wHTjXs1TIQlj0ElbYP5n5YsycozBNeeWpUggLa1vI4rrmUtPWGnfm8fbLPAhZjWs8jDhxbdNb0iz2WlPRiSjAi7absWqrZTgW72L0Adh1Rt2TTIYu19z8s8phDsVr3soMSFSHNJ0cGt1zA1IJ7s7keFewnPEwoDCogJ3zK1rnDtzFv7tZxoNnHNqUAI1bZKivlzcVsWt7fZB9+qSbUZzdmXn5HvLCu8llvJEBORVzffAQJDFRu/NXlm8dUWGLjEwqDu4XBst0IteERZ8Ne5s40KhN8LPHv1Hngf0484a+0CLWyGZfcsW7s+HyPzx0HCUXm2tB0kDA4X0vYMleKFXRdqSJ+obrv+fhni8TdXkvYKbKqZBBWHRgb+dlAUak64kl281TDs+XI5QsB8nzWEwccE2Cn6pbfQMIPPAzD0a97CVtUBilHHwTvhhjP74aLcTI82SLMzMHiWmsM6Y+6x/Nz8/n2DiSU47dPk3cHkNrzhKr9kKTPNWdm57MOauU2bd4lMPjk328UMjwc
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 WebRTC browser screencast offer
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./web-rtc-browser-screencast-offer.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ WebRTC browser screencast offer
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./web-rtc-browser-screencast-offer.StatusCodes.json")}
+>
   
 </StatusCodes>
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"id":{"type":"string"},"source":{"type":"string"},"event_type":{"type":"string"},"payload":{},"sequence":{"type":"integer","format":"int64"},"ts":{"type":"string"}},"title":"TimelineItem"},"schemaType":"response"}

@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["session_id","name"],"properties":{"session_id":{"type":"string"},"name":{"type":"string"},"command":{"type":"string"},"cwd":{"type":"string"},"cols":{"type":"integer"},"rows":{"type":"integer"}},"title":"CreateTerminalRequest"}}}}}

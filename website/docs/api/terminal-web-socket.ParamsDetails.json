@@ -1,0 +1,1 @@
+{"parameters":[{"name":"from_offset","in":"query","schema":{"type":"integer","format":"int64"},"description":"Replay PTY output from this byte offset"},{"name":"notebook","in":"query","schema":{"type":"boolean"},"description":"Suppress PTY replay when using notebook blocks UI"},{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]}

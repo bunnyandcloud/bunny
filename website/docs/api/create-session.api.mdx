@@ -5,7 +5,7 @@ description: "Create session"
 sidebar_label: "Create session"
 hide_title: true
 hide_table_of_contents: true
-api: eJxlUTFOxDAQ/Eo0tUWgoEl3okIUnDioThFykuViXRIbexMRRf47WnMEAu3OzuzOzALWp4DiiEAhGDsElAoNhdobx8YOKHDnSTNllwUo9MStbVDA2cBQcJpbFMhXCYVAfiIvwgtG3wmqncmnG8RS0Hr0hucE19aeDe1G0TiWUS2oSHvy6+QX4VC31FNAsaUt4NkRCmhnHmiGgpHHv1agMOhe0Gochvn120dUm0OrRsvsxEE6Jay0hBhF9c2mTcPdKpjt9vdQELspr+ur278JPlFvmbKGpryhajxl+kQDJ2JUKcVeDyJ8efRf4hu59VOmD85dp00yk2JeLmVs+2ylp+KIZal0oBffxSjj95G8dFAqTNobXYkpqeCn4f3j4RkxfgJURbv5
+api: eJzVVclu2zAQ/RVhzmzldLno5gY5FD00sNOTYRgjaiwxkUiGpNwYgv69GEpWvCFFgVyqgyXM/t4s7iBg6SFbgSfvldEe1gIcPbfkwzdT7CHrQBodSAf+RGtrJTEoo9NHbzTLvKyoQf4Ke0uQgckfSQYQYJ2x5IIiz1rrDMs3FkN1ZO2DU7qEXoDGhq4oegFBhZpFt44w0HIodTFUCX3PJo68NdoPqT7NZvwqyEunLFcLGYxuiYxBChDvBUwV/wJHQG1KpTetq69qsQ3VhjugHB0Hzo2pCfUJHxMTA/aRii+zm0v08zZUpMOIMTkkSIxLlN5hrQompmATrP37kUPOGfd3M2mK62Q15D2WV+fimIm5VXcx04GCz5cULEiSDgm+xYRvt1slFdtZco0al+K/pqMXZ0QMa5SMKw8cNVSmgAys8bGYuKKQTkdBgCe3I8enooM4upCiVenuBvo1a2XrVNhHtTTmSREPHGSrdS86yAkduUly5LBk3g6YX90mdGjVD9qDAMWFDyZw2C3IW633mwOOXpwkmmJUIVhGEFOxVzSKi8TtW7xeu7sXbGxNl9fqwPKU+bUjSm9NTDZSH2tK5vffQQAzFimfffx63oQFNSZQUtAuLShvywRLnjp27EVsRINxtMaMF007CTeBDfQSUlujinyMR2YAcXrkK251toKuy9HTL1f3PYufW3LcxrWAHTqFOYPiLkJFWJCLHX6iPVc0rMSHB87M5nU7tOxsPXgCBo+5lGTDm7bro2m8/7l8AAH5+D/UxKUAh79BxN8MQICJDMQJirIOatRlG5cEhpj8/AFx22lY
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Create session
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Create session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./create-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

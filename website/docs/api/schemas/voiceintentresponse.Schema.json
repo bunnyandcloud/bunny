@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"proposal":{"type":"string"},"risk":{"type":"string","enum":["safe","medium","dangerous"]},"requires_confirmation":{"type":"boolean"},"actions":{"type":"array","items":{"type":"string"}}},"title":"VoiceIntentResponse"},"schemaType":"response"}

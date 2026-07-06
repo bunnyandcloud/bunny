@@ -5,7 +5,7 @@ description: "Create encrypted vault (owner only)"
 sidebar_label: "Create encrypted vault (owner only)"
 hide_title: true
 hide_table_of_contents: true
-api: eJyNUrFOwzAQ/ZXoTSBZBAaWbBUTYqCiMFUVcpKjsUhsY18CUeR/R2eqljKx3r177969W8B6H1FtEakJxBE7hZZiE4xn4ywq3AXSTAXZJsyeqS0mPfZcXLhPS6Fwtp8voTAQd65FBe8iQ8Fr7lChPNCWxhopRwoTBRFcMIZeENqbcrpB2km3GYPhObcb594NrUbh2e6SWlCTDhSOlV8Dm6ajgSKq87EFPHtCBe3NA81QMOLoBwIFqwfp1qO182ukGMVxUmdCR46O2YuDLCVTGYSUhPXNZaTh/khYrNb3UBC7+ZDXV7d/T/tEg2MqWprKlupxX+g9Wc6DSeVLDtoK8WHR/0VxpnFcn+mLS99rkx3m2y+HlE7hixXD8gOdxFhtsSy1jvQS+pSk/DFSkHh2CpMORtfiV9I5PcD6cfOMlL4BWwbNrg==
+api: eJzdVU1v2zAM/SsCTx3gNek+DvMtGzagGIYWabdLEBSKzMZqZEmV6LRG4P8+UHYSNw26AdtlyyUJ9cSP90hqAySXEfIZRFQBKcI8g4D3NUb66IoG8k36qwMWkFOoMQPlLKElPpLeG60kaWdHd9FZtkVVYiX5FzUeIQe3uENFkA0czcDLGH0ZZERIHm91qG4GxnkGPjiPgTRGdjY427uOFLRdQnvUxXNYmwFpMmy66so9t5qmXbnQtgwIGL2zsQv6ZjzmrwKjCtpzmZDDD1kbEiqgJCzgD/h4WqBbDTAL5wxK+yTli9W0z61P9d347Hl2k5pKtNRnIbacCxeEtmtpdMGpFwyRJv699DEEF34NU644LmCFMcrlUdWGJEy8/pwibSl4+5yCKSq0JORLTMT69lYrzTiPodIxamf/Azo+HKMjujooFJEkoeBJMVqROMHT5an49mUipAkoi0aglQuDxat/m4Y2OyDgUxpVgVaFxhMWYp0m+MQ9WAzCWdNwxRVS6QrIwbuYMpRUQg6jfjGOtNVsjhjWGHhlbqAOhhHS69H6DNo5n6o6aGrSsXJupZEHEvLZvM02sEAZMOwsgwtXTOiWjP21XdnS66/YQAaaK+ogkIGVVVoXtbXNTcTUxczbMNDOR0nkuYIUim8lUNoxrOt0v/Y/P8rKGzzcu1vyj6/bgWza3roUuNcn5Scml+eQAbOXdBmfvj9UaoqVIxQFrkcFLuqlkEueUL7YZkmYSqb+6+v+PWWfxNixQfhII2+kToQlKTe96PvXkEvRxK9RyV2Rz2CzWciI34NpWzbf1xhY7XkGaxk0z08nNpQoCwypEVbYcLLdSL2+5vgMN3Wn7MF4caN0NyZKoacXsfNB415eXF1DBov+3a7SUEGQD/z2ygfIATJwiYfUaMm2ASPtsk5DBp1P/vwE1VTUfA==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Create encrypted vault (owner only)
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Create encrypted vault (owner only)
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./create-encrypted-vault-owner-only.StatusCodes.json")}
+>
   
 </StatusCodes>
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"joined":{"type":"boolean"},"sessionId":{"type":"string","format":"uuid"}},"title":"JoinSessionResponse"},"schemaType":"response"}

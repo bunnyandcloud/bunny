@@ -1,0 +1,1 @@
+{"responses":{"200":{"description":"Session cleared (removes `bunny_session` and `bunny_mfa_challenge` cookies)"},"401":{"description":"Authentication required or invalid credentials","content":{"application/json":{"schema":{"type":"object","properties":{"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}}}},"title":"ApiError"}}}}}}

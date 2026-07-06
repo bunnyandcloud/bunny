@@ -5,7 +5,7 @@ description: "Unregister push device"
 sidebar_label: "Unregister push device"
 hide_title: true
 hide_table_of_contents: true
-api: eJx1UstOxDAM/JVqzoHCgUtvK7EHBAcE7GlVrdLWtBF9hMQtVFX+HTm7FBaJqz0z9ni8gHXtke1hR99cfFDhuESuUJEvnbFshh4Zdr2j2ngmlwguqWgyJUGhI26GChkqaomlYjU3yJAKLv1mpcuRcTBVgIInN5GTsQtG1wpcW5NO1wi5dMvRGZ5juxyGN0ObUUT3eVALCtKO3Fr5RXguG+rIIzunLeDZEjJoa+5phoIRT0cIFHrdSbcY+34+ePJePAd1NmjVaJitOIijhBVBCEFUX4eINNyugsnm8Q4KYjee8ury5u9xn6gbmOSmaUXFWCe6pp4jMSjYwXOnexE+LfpvGGey68ZMn5zaVptoKp57OaV0TB0K34JQyNak5A2awbPglqXQnnauDUHK7yM5ySdXmLQzuhDDEs/PQ9xuH7YvW4TwBWYI0VQ=
+api: eJyFU8Fu2zAM/RWDpw3Q5nboLr4FWA7Ddhja9VQEhSyxsVpHUik6XWDo3wfKsdcsHXayTPE9PvJRI7DeJmjuIA6p+/CCLbGBjQLCFINPmKAZ4dPFlXwsJkMusgseGrgZjMGUqhfHXeVDNSOqNtgDZAVXF5fnqNXAHXp2RkugInweHKGtAlXO73XvbGUIraToPoECEzyjZ2HSMfZHYP2YhG6EZDrcaTnxISI0ENpHNAwKIoWIxG5qAYkC/T/NBIuvshKT81tpZocp6e1bdzlnBey4l+AqunWplKf4afO3nnDrEiNVMu7K4t4ZFBGa9A4ZSawYweudkE3X986CAif4qLkD8WYaGjRMA6rzGSzSNiKcu2ALW488FeMOGqhFQj0LqselWgYFCWk/qxmol3QdXb2/BOFMaAZyfCjXJoQnh+IrNHebrEZoURPSEnkFuBGl86T/wBbhOrpveJjbnVJAzfNoB+8P9wlTknFmdVJo4eiYIxyHUlAlCcQN5x9CyTy6VQir1Y+voEDaLS5dfPz8t2/XuAuMYldtsR22ld6i5wLMCmJIvNNlG49C/+nzCe2imPEX17HXrjRVxj0eXZreZfF8IgQFzZ+92CjoQmLJG8dWJ7ylPmcJPw9I4s9GwV6T0600fDeCdUnOFpoH3Sc8k7Q8N3h3fVyz9xWot6XOrnmxbK/7Qf5AwRMeTtY3b7KCDrVFKiKm+5UxGPkV8ux9n+zvl/X39c815Pwbldaegw==
 sidebar_class_name: "delete api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Unregister push device
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./unregister-push-device.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Unregister push device
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./unregister-push-device.StatusCodes.json")}
+>
   
 </StatusCodes>
 

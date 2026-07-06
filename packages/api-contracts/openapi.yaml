@@ -51,6 +51,14 @@ paths:
       responses:
         '200':
           description: Owner created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /auth/login:
     post:
       tags: [auth]
@@ -64,7 +72,17 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Session created, or MFA challenge issued
+          description: >-
+            Session created (`mfa_required: false`, sets `bunny_session` cookie),
+            or MFA challenge issued (`mfa_required: true`, sets `bunny_mfa_challenge` cookie)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginCompleteResponse'
+                  - $ref: '#/components/schemas/LoginMfaChallengeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /auth/mfa/verify:
     post:
       tags: [auth]
@@ -78,37 +96,143 @@ paths:
               $ref: '#/components/schemas/MfaVerifyRequest'
       responses:
         '200':
-          description: Session created
+          description: Session created (sets `bunny_session` cookie, clears MFA challenge cookie)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginSessionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '429':
-          description: Challenge locked (too many failures)
+          $ref: '#/components/responses/TooManyRequests'
   /auth/mfa/status:
     get:
       tags: [auth]
       summary: MFA status for current user
+      responses:
+        '200':
+          description: MFA enrollment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /auth/mfa/setup:
     post:
       tags: [auth]
       summary: Start MFA enrollment (returns otpauth URI and manual secret)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecentAuthRequest'
+      responses:
+        '200':
+          description: TOTP enrollment material (scan QR or enter secret manually)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaSetupResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /auth/mfa/enable:
     post:
       tags: [auth]
       summary: Confirm MFA with first TOTP code; returns recovery codes once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaEnableRequest'
+      responses:
+        '200':
+          description: MFA enabled; recovery codes shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaEnableResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /auth/mfa/disable:
     post:
       tags: [auth]
       summary: Disable MFA (recent auth + TOTP code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaDisableRequest'
+      responses:
+        '200':
+          description: MFA disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /auth/mfa/recovery/regenerate:
     post:
       tags: [auth]
       summary: Regenerate recovery codes (recent auth + TOTP code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaDisableRequest'
+      responses:
+        '200':
+          description: New recovery codes (shown once)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaEnableResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /auth/logout:
     post:
       tags: [auth]
       summary: Logout
+      responses:
+        '200':
+          description: Session cleared (removes `bunny_session` and `bunny_mfa_challenge` cookies)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /auth/me:
     get:
       tags: [auth]
       summary: Current user (includes locale en|fr)
+      responses:
+        '200':
+          description: Current user profile and permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     patch:
       tags: [auth]
       summary: Update current user preferences (locale en|fr)
@@ -116,131 +240,650 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                locale:
-                  type: string
-                  enum: [en, fr]
+              $ref: '#/components/schemas/PatchMeRequest'
       responses:
         '200':
           description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /sessions:
     get:
       tags: [sessions]
       summary: List sessions
+      responses:
+        '200':
+          description: Sessions visible to the current user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionListItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       tags: [sessions]
       summary: Create session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /sessions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     get:
       tags: [sessions]
       summary: Get session
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /sessions/{id}/join:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     post:
       tags: [sessions]
       summary: Join session
+      responses:
+        '200':
+          description: Join acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinSessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /sessions/{id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     post:
       tags: [sessions]
       summary: Stop session
+      responses:
+        '200':
+          description: Session stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopSessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /sessions/{id}/reset:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     post:
       tags: [sessions]
       summary: Reset session
+      responses:
+        '200':
+          description: Session reset started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetSessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /terminals:
     get:
       tags: [terminals]
       summary: List terminals
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+          description: Filter terminals for a session
+      responses:
+        '200':
+          description: Terminal list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TerminalListItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [terminals]
       summary: Create terminal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTerminalRequest'
+      responses:
+        '200':
+          description: Terminal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /terminals/{id}/ws:
+    parameters:
+      - $ref: '#/components/parameters/TerminalId'
     get:
       tags: [terminals]
       summary: Terminal WebSocket
+      parameters:
+        - name: from_offset
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Replay PTY output from this byte offset
+        - name: notebook
+          in: query
+          schema:
+            type: boolean
+          description: Suppress PTY replay when using notebook blocks UI
+      responses:
+        '101':
+          description: WebSocket upgrade for terminal I/O
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /previews:
     post:
       tags: [previews]
       summary: Create port preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePreviewRequest'
+      responses:
+        '200':
+          description: Preview tunnel created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /browser-sessions:
     post:
       tags: [browser]
       summary: Create browser session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBrowserRequest'
+      responses:
+        '200':
+          description: Browser session created or reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /timeline:
     get:
       tags: [timeline]
       summary: Unified timeline
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Return events after this sequence number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 100
+      responses:
+        '200':
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimelineItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /voice/intent:
     post:
       tags: [voice]
       summary: Voice intent proposal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceIntentRequest'
+      responses:
+        '200':
+          description: Proposed command with risk classification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceIntentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /voice/confirm:
     post:
       tags: [voice]
       summary: Confirm voice action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoiceConfirmRequest'
+      responses:
+        '200':
+          description: Action applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /push/register:
     post:
       tags: [push-webrtc]
       summary: Register device for push (FCM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushRegisterRequest'
+      responses:
+        '200':
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushRegisterResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /push/register/{device_id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
     delete:
       tags: [push-webrtc]
       summary: Unregister push device
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /webrtc/config:
     get:
       tags: [push-webrtc]
       summary: ICE servers and WebRTC availability
+      responses:
+        '200':
+          description: WebRTC sidecar configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebRtcConfigResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /sessions/{id}/webrtc/offer:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     post:
       tags: [push-webrtc]
       summary: WebRTC SDP offer → answer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SdpPayload'
+      responses:
+        '200':
+          description: SDP answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SdpPayload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /sessions/{id}/webrtc/candidate:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
     post:
       tags: [push-webrtc]
       summary: Trickle ICE candidate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IceCandidatePayload'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /browser-sessions/{id}/webrtc/offer:
+    parameters:
+      - $ref: '#/components/parameters/BrowserSessionId'
     post:
       tags: [browser]
       summary: WebRTC browser screencast offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SdpPayload'
+      responses:
+        '200':
+          description: SDP answer for browser screencast
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SdpPayload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /browser-sessions/{id}/webrtc/candidate:
+    parameters:
+      - $ref: '#/components/parameters/BrowserSessionId'
     post:
       tags: [browser]
       summary: Browser WebRTC ICE candidate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IceCandidatePayload'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /browser-sessions/{id}/webrtc/stop:
+    parameters:
+      - $ref: '#/components/parameters/BrowserSessionId'
     post:
       tags: [browser]
       summary: Stop browser WebRTC stream
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /secrets/status:
     get:
       tags: [secrets]
       summary: Vault status (owner only)
+      responses:
+        '200':
+          description: Vault status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /secrets/init:
     post:
       tags: [secrets]
       summary: Create encrypted vault (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecretsInitRequest'
+      responses:
+        '200':
+          description: Vault created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /secrets/unlock:
     post:
       tags: [secrets]
       summary: Unlock vault (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecretsPassphraseRequest'
+      responses:
+        '200':
+          description: Vault unlocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /secrets/lock:
     post:
       tags: [secrets]
       summary: Lock vault (owner only)
+      responses:
+        '200':
+          description: Vault locked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /secrets:
     get:
       tags: [secrets]
       summary: List secret metadata (owner only)
+      responses:
+        '200':
+          description: Secret metadata list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SecretMetaResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [secrets]
       summary: Create or update secret (owner only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecretUpsertRequest'
+      responses:
+        '200':
+          description: Secret saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretMetaResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /secrets/{name}:
+    parameters:
+      - $ref: '#/components/parameters/SecretName'
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [system, session]
+      - name: session_id
+        in: query
+        schema:
+          type: string
+        description: Required when scope is `session`
     delete:
       tags: [secrets]
       summary: Remove secret (owner only)
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /secrets/{name}/reveal:
+    parameters:
+      - $ref: '#/components/parameters/SecretName'
+      - name: scope
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [system, session]
+      - name: session_id
+        in: query
+        schema:
+          type: string
+        description: Required when scope is `session`
     get:
       tags: [secrets]
       summary: Reveal secret value (owner only)
+      responses:
+        '200':
+          description: Decrypted secret value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretRevealResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 components:
   securitySchemes:
     cookieAuth:
@@ -250,6 +893,79 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+  responses:
+    ValidationError:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Authentication required or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Recent authentication required or insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: Resource state conflict (e.g. MFA already enabled)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Challenge locked (too many failures)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NoContent:
+      description: Success with no response body
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TerminalId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BrowserSessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+    SecretName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
     BootstrapRequest:
       type: object
@@ -257,6 +973,11 @@ components:
       properties:
         email: { type: string, format: email }
         password: { type: string, minLength: 8 }
+    BootstrapResponse:
+      type: object
+      properties:
+        user_id: { type: string }
+        message: { type: string }
     LoginRequest:
       type: object
       required: [email, password]
@@ -264,35 +985,291 @@ components:
         email: { type: string }
         password: { type: string }
         device_id: { type: string }
+    LoginCompleteResponse:
+      type: object
+      required: [user_id, email, session_token, expires_at, mfa_required]
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        session_token: { type: string }
+        expires_at: { type: string, format: date-time }
+        mfa_required: { type: boolean, const: false }
+    LoginMfaChallengeResponse:
+      type: object
+      required: [mfa_required, mfa_challenge_token, user_id, email]
+      properties:
+        mfa_required: { type: boolean, const: true }
+        mfa_challenge_token: { type: string }
+        user_id: { type: string }
+        email: { type: string }
+    LoginSessionResponse:
+      type: object
+      required: [user_id, email, session_token, expires_at]
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        session_token: { type: string }
+        expires_at: { type: string, format: date-time }
     MfaVerifyRequest:
       type: object
       required: [code]
       properties:
-        code: { type: string }
-        mfa_challenge_token: { type: string }
+        code: { type: string, description: TOTP or recovery code }
+        mfa_challenge_token: { type: string, description: Optional if `bunny_mfa_challenge` cookie is set }
         device_id: { type: string }
     RecentAuthRequest:
       type: object
       properties:
-        password: { type: string }
+        password: { type: string, description: Re-enter password if session is not recent }
     MfaEnableRequest:
       type: object
       required: [code]
       properties:
-        code: { type: string }
-        password: { type: string }
+        code: { type: string, description: First TOTP code from authenticator app }
+        password: { type: string, description: Re-enter password if session is not recent }
+    MfaDisableRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: Current TOTP code }
+        password: { type: string, description: Re-enter password if session is not recent }
+    MfaStatusResponse:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        recovery_remaining: { type: integer, format: int64 }
+    MfaSetupResponse:
+      type: object
+      properties:
+        otpauth_uri: { type: string, description: otpauth:// URI for QR code }
+        secret_base32: { type: string, description: Manual entry secret (base32) }
+    MfaEnableResponse:
+      type: object
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+    DiscordAccountStatus:
+      type: object
+      properties:
+        bridge_configured: { type: boolean }
+        oauth_configured: { type: boolean }
+        linked: { type: boolean }
+        discord_user_id: { type: string, nullable: true }
+        username: { type: string, nullable: true }
+    MeResponse:
+      type: object
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        created_at: { type: string, format: date-time }
+        is_owner: { type: boolean }
+        mfa_enabled: { type: boolean }
+        can_install_claude: { type: boolean }
+        can_manage_vault: { type: boolean }
+        can_create_sessions: { type: boolean }
+        default_session_role: { type: string }
+        locale: { type: string, enum: [en, fr] }
+        discord:
+          $ref: '#/components/schemas/DiscordAccountStatus'
+        git_name: { type: string, nullable: true }
+        git_email: { type: string, nullable: true }
+        git_configured: { type: boolean }
+    PatchMeRequest:
+      type: object
+      properties:
+        locale: { type: string, enum: [en, fr] }
+        git_name: { type: string }
+        git_email: { type: string }
     SessionResponse:
       type: object
       properties:
         id: { type: string }
+        name: { type: string }
         login_url: { type: string }
         auth_required: { type: boolean }
+    CreateSessionRequest:
+      type: object
+      properties:
+        project_path: { type: string }
+        name: { type: string }
+    SessionListItem:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        project_path: { type: string }
+        status: { type: string }
+    JoinSessionResponse:
+      type: object
+      properties:
+        joined: { type: boolean }
+        sessionId: { type: string, format: uuid }
+    StopSessionResponse:
+      type: object
+      properties:
+        stopped: { type: boolean }
+    ResetSessionResponse:
+      type: object
+      properties:
+        resetting: { type: boolean }
+        sessionId: { type: string, format: uuid }
+    CreateTerminalRequest:
+      type: object
+      required: [session_id, name]
+      properties:
+        session_id: { type: string }
+        name: { type: string }
+        command: { type: string }
+        cwd: { type: string }
+        cols: { type: integer }
+        rows: { type: integer }
     TerminalResponse:
       type: object
       properties:
         id: { type: string }
         name: { type: string }
         ws_url: { type: string }
+    TerminalListItem:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string }
+        cwd: { type: string, nullable: true }
+        git_project: { type: string, nullable: true }
+        git_branch: { type: string, nullable: true }
+    CreatePreviewRequest:
+      type: object
+      required: [session_id, local_port]
+      properties:
+        session_id: { type: string }
+        local_port: { type: integer }
+    PreviewResponse:
+      type: object
+      properties:
+        id: { type: string }
+        public_path: { type: string }
+    CreateBrowserRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id: { type: string }
+        target_url: { type: string }
+    BrowserResponse:
+      type: object
+      properties:
+        id: { type: string }
+        stream_path: { type: string }
+        events_path: { type: string }
+        webrtc_offer_path: { type: string }
+    TimelineItem:
+      type: object
+      properties:
+        id: { type: string }
+        source: { type: string }
+        event_type: { type: string }
+        payload: {}
+        sequence: { type: integer, format: int64 }
+        ts: { type: string }
+    VoiceIntentRequest:
+      type: object
+      required: [transcript]
+      properties:
+        transcript: { type: string }
+        target: { type: string }
+    VoiceIntentResponse:
+      type: object
+      properties:
+        proposal: { type: string }
+        risk: { type: string, enum: [safe, medium, dangerous] }
+        requires_confirmation: { type: boolean }
+        actions:
+          type: array
+          items: { type: string }
+    VoiceConfirmRequest:
+      type: object
+      required: [action, command]
+      properties:
+        action: { type: string, enum: [insert, run, cancel] }
+        command: { type: string }
+        terminal_id: { type: string }
+    PushRegisterRequest:
+      type: object
+      required: [device_id, platform, provider, token]
+      properties:
+        device_id: { type: string }
+        platform: { type: string }
+        provider: { type: string }
+        token: { type: string }
+    PushRegisterResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        fcm_configured: { type: boolean }
+    WebRtcConfigResponse:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        ice_servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/IceServerConfig'
+        sidecar_port: { type: integer }
+    IceServerConfig:
+      type: object
+      properties:
+        urls:
+          type: array
+          items: { type: string }
+        username: { type: string }
+        credential: { type: string }
+    SdpPayload:
+      type: object
+      required: [type, sdp]
+      properties:
+        type: { type: string, description: SDP type (e.g. offer, answer) }
+        sdp: { type: string }
+    IceCandidatePayload:
+      type: object
+      required: [candidate]
+      properties:
+        candidate: {}
+    SecretsInitRequest:
+      type: object
+      required: [passphrase, confirm_passphrase]
+      properties:
+        passphrase: { type: string }
+        confirm_passphrase: { type: string }
+    SecretsPassphraseRequest:
+      type: object
+      required: [passphrase]
+      properties:
+        passphrase: { type: string }
+        session_id: { type: string, description: Reload shells in this session after unlock }
+    SecretUpsertRequest:
+      type: object
+      required: [name, scope, value]
+      properties:
+        name: { type: string }
+        scope: { type: string, enum: [system, session] }
+        session_id: { type: string }
+        value: { type: string }
+    SecretMetaResponse:
+      type: object
+      properties:
+        name: { type: string }
+        scope: { type: string }
+        session_id: { type: string, nullable: true }
+        env_var: { type: string }
+    SecretRevealResponse:
+      type: object
+      properties:
+        value: { type: string }
     ApiError:
       type: object
       properties:
@@ -307,10 +1284,3 @@ components:
         status: { type: string, enum: [missing, locked, unlocked] }
         path: { type: string }
         ref_count: { type: integer }
-    SecretMeta:
-      type: object
-      properties:
-        name: { type: string }
-        scope: { type: string }
-        session_id: { type: string, nullable: true }
-        env_var: { type: string }

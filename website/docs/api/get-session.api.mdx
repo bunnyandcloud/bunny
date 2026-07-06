@@ -5,7 +5,7 @@ description: "Get session"
 sidebar_label: "Get session"
 hide_title: true
 hide_table_of_contents: true
-api: eJxdUU1PhTAQ/Ctkzo3owQu3dzAvxovx4/RCTIEVGoHWdiES0v9utr6H4nVnZ3ZnZgXrNqA4IVAIxo4BpUJDofbGsbEjChyJszMKhYG4sw0KtMRQcJo7FMgv9Hw1TYRCID+TF+UVk+9lRTuTzzeIpaD15A0vCa6t/TB0mEToVEa1oiLtyW+TP4TnuqOBAoo9bQUvjlBAO/NACxSMfP6zAoVRD4JW0zgubxcvUe0ObRodsxMH6ZSw0hJiFNV3mzYN95tgdni8h4LYTYFdX93+j/CJBsuUNTTnDVVTm+mWRk7EqOBs4EGPInx+dB/5Tmt7k+mLc9drk5ykjNdzHX/aVChMI512NrAg61rpQK++j1HGnxN5qaFUmLU3uhJf0sJv0ce7F8T4DQeDvBA=
+api: eJzVVT1v2zAQ/SvCTS1A1E6bLto8BEHQDoXTToER0OLZvkQiGfJo1BD434ujJceOjXbpksmy7t3He/ehHlivI9QPEDFGcjbCQkHA6J2NGKHu4fN0Kj8GYxPIMzkLNdzv0ZVB1tRGUNA4y2hZoNr7lhot0MlTFHwPsdlgp+WJdx6hBrd8woZBgQ/OY2DaZyNzhIkcyK4hK7C6w4sGH5zEefSaNxcBkTWneMGUFTBxi69svlPkO8YOchbr9fTqnPgs8QYtD/SqgC+JAprKhYrsVrdkqiagEYj+n7pgCC78G9Y4c1mnDmPU60u2fKzEzNNNyTRK8OVcgjk2aLnSf1MiptWKGhKcx9DRMFvvXo7rS3JEl0KDlXVcrVyy5n3TzOoNwVvkargOklkH3SFjkKvRD4spa6uABF0WUU7Ifhyg5pBQnTMeClGwcqHTDDWkRAZyXkjZvHEGalhjIVt2GybjiZr0ZDIoiBi2Yx0ptALRnibbK5AgEZsUiHfF3Dj3TCjLC/XDIqselqgDhsObI4d7KXUU9tXtULn29A13I989BMYTBctk7e5x1Curk0SHGBtmD4MqxauAylEiu3IFOTSnBKxmP+5AgdAtTZl++vq2TXPsHGNlcDsxuEzrSq9l/cRR7qSL3OkyfEOhp209iXUok/E3T3yrqTApGvdDO46+GApqMvLd2LjIYun7pY74K7Q5y+uXhEHasFCw1YH0Ung99GAoyrOBeqXbiGdFHJYIPsyHcfpYgbpc3NgcK53Z6jbJP1DwjLv9fOZFVrBBbTCU7HvDrGnQ85HL2bqeDOTtzU/I+Q/JhX4G
 sidebar_class_name: "get api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Get session
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./get-session.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Get session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./get-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

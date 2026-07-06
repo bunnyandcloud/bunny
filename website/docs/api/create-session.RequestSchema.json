@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"content":{"application/json":{"schema":{"type":"object","properties":{"project_path":{"type":"string"},"name":{"type":"string"}},"title":"CreateSessionRequest"}}}}}

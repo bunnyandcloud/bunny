@@ -5,7 +5,7 @@ description: "Join session"
 sidebar_label: "Join session"
 hide_title: true
 hide_table_of_contents: true
-api: eJxdUUFOwzAQ/Eo0Z4vAgYtvPQIHKgqnKkJOsjSGxDa2ExFF/jta04a2192Z2Z2ZBVEdAuQegULQ1gRUAi2FxmsXtTWQeLTaFMc1BAaKnW0h4WyIEHAqdpAoTwLlottUflrN4EB+Is8HFoy+Z5xyupzukCreNqPXcc7rxtovTZuR1fZVEgtqUp78Ojkj7JqOBgqQl7QFcXYECeX0E80Q0GzgDwIBowbe1qMx8/vJURIXh1aNLkbHDvIpZmUQUmLVD5uROvarYLHZPkCA7ebcbm/ur5N8ocFGKlqaypbq8VCoA5mYiUnkPAdlWPj46FXyF2Lrn5F+Yul6pbOVHPJyLOWsVQGpWwjkXiqBjsuTeyxLrQK9+T4lHn+P5LmOSmBSXqua/XEb/7Vvn3evSOkX3c7B2w==
+api: eJzVVD1v2zAQ/SvCTS1AVE4/Fm0eMqQdGjjtZBjFSTxbl0gkQ1JuDYH/vThacp04bZcunSyL747vvXunESLuAlRrCBQCWxNgo8BTcNYEClCN8HaxkB9NofHsIlsDFXy0bApsHoz93pHekQYFjTWRTBQwOtdxgwIu74NUjBCalnqUp3hwBBXY+p6aCAqct4585ON995YN6TNcbW1HaCCpmeTN+XGIns0OFGyt7zFCBcPAGlJSEDl2NLG9O5auJmmQkiDeL64uxS2H2JKJk4DC0+PAnnRhfcFmjx3rovGkBYJd+HfKyXvr/w5rrKZL/UlBTyHg7qWzdO7G0vF1vmm24N2lBStqyMQC/+REGLZbblhwjnzPU37+azuSeinoU+zkavTYUyQvOzOCwV5asMSfBe4wtiALdDQKqugHUpeSfxvajfCOrdXSzIYsV3pWUM4bWo6sUylrArIRfj+zGXwnOHRc7q9AWgVqBs/xkI8bax+YJNxQrTdJjVATevKnN2cFd0J49vdX2Yk/Ov5Eh1n1EQJq9qMejDl8m11L6slFpx5tjA4mb3JVBuXFZbO1GTnNKDcslrc3oEDk5tks3nx4Pq0V9TZSoWlfaqqHXYE7iacUJpX97DFncCL6bLpPmp14RvoRS9chZynZ5HEaytlnU0GVY5DnslHQyvCqNYxjjYG++i4lef04kJdxbBTs0TPWom89guYgzxqqLXaBLricdgperaZwvS5AvcxxHpKRCe2xG+QfKHigwzGtaZMUtISafL79eLBsGnLxrORie5/E8/bz3RdI6ScXYynD
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,7 +39,17 @@ import Translate from "@docusaurus/Translate";
 
 Join session
 
-<ParamsDetails>
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails
+  {...require("./join-session.ParamsDetails.json")}
+>
   
 </ParamsDetails>
 
@@ -49,7 +59,9 @@ Join session
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./join-session.StatusCodes.json")}
+>
   
 </StatusCodes>
 

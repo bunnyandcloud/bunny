@@ -1,1 +1,1 @@
-{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string"},"mfa_challenge_token":{"type":"string"},"device_id":{"type":"string"}},"title":"MfaVerifyRequest"},"schemaType":"response"}
+{"schema":{"type":"object","required":["code"],"properties":{"code":{"type":"string","description":"TOTP or recovery code"},"mfa_challenge_token":{"type":"string","description":"Optional if `bunny_mfa_challenge` cookie is set"},"device_id":{"type":"string"}},"title":"MfaVerifyRequest"},"schemaType":"response"}

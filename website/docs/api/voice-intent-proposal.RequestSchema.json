@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["transcript"],"properties":{"transcript":{"type":"string"},"target":{"type":"string"}},"title":"VoiceIntentRequest"}}}}}

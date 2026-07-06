@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"project_path":{"type":"string"},"name":{"type":"string"}},"title":"CreateSessionRequest"},"schemaType":"response"}

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","required":["session_id","local_port"],"properties":{"session_id":{"type":"string"},"local_port":{"type":"integer"}},"title":"CreatePreviewRequest"},"schemaType":"response"}

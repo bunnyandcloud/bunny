@@ -1,1 +1,1 @@
-{"title":"Body"}
+{"title":"Body","body":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["passphrase"],"properties":{"passphrase":{"type":"string"},"session_id":{"type":"string","description":"Reload shells in this session after unlock"}},"title":"SecretsPassphraseRequest"}}}}}

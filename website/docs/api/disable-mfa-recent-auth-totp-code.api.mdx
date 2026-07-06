@@ -5,7 +5,7 @@ description: "Disable MFA (recent auth + TOTP code)"
 sidebar_label: "Disable MFA (recent auth + TOTP code)"
 hide_title: true
 hide_table_of_contents: true
-api: eJyNUk1LxDAU/CthTorB6sFLbgsiiMgu7npaiqTt222wHzFJi0vJf5cXS3U9ec2bmZeZeROCPnqoPfQQauQSFfnSGRtM30Hh3nhdNCSeH1biwlFJXRCMFFdit95tRNlXdAmJlkLdV1CwvQ+QsDrUUMgYm7UHnVXfQpDw5EZyvHPC4JqEsiYbbxFznpaDM+GUxmXfvxta8c/UPo9yQkHakVtefhG2ZU0teahz2oRwsgQFbc0TnSBh2Nc3BBKdbnlaDF13evPkPfuO8mzRolGHYNlBWsWsBEKMrHroE9KEZhEUq80jJNhuivPm+u5vwC/U9oFERWNWUTEchT5yxkyMMqXZ6o6F54/+t5CzLYuBQJ8hs402yWNKf5q7mi9Aoj1o5s995RI1V6r2mKZCe3p1TYz8/DGQ45pyiVE7k9CppZ9j2Ky3O8T4BfKpzLo=
+api: eJzdVU1v2zAM/SsCTxumNuk+DvMt2zpgGIoWaXYKgkGx6ViNLamUnDYw/N8Hyk6ctEU7YLtsuSSR+ETyPX40ENTKQzIHVYcCFhIIb2v04ZPNtpA08a8mzCAJVKOE1JqAJvCVcq7UqQramtGNt4bPfFpgpfhX2DqEBOzyBtMA8uChOaQ2Q/blyDqkoNEzIp4OSB9ImxVIyNCnpB37gQQ+10Rogphdzq5EhLQSnPL+zlL2MnyKJ2gCkthBhM6FR++1NUJ7YWwQhCmn2LYSgg4lv3aRqy/aq2WJ044faFu+J/TOGt8l8HY85q9jhxdfJyLroBn8AX/HXNn1gc3S2hKVOQr4cj3tQ+sjfT8+exzcpA4FmtBHIXYaCUtCm40qdSZSwoxNVOn/XvhIZOlls6cropVQofdq9dRde0jCxOnz6GlHwbvHFEyj2EI9x4Sv81ynmu0cUqVjtfwHdHx8ig5va0pR+KACitSavNRpEK/wdHUquJhVSaiyrUATa/r1v01D+3BA9G0eU31FQ3GIN8PI4ZwrDIXNIAFnfYxRhQISGLHtqMrVqG96kOCRNkg8ZRuoqYxWTo82Z9Au+DatSYdtvE6tXWvktoRkvmhlA0tUhLQ/OQBcM607SgbYPnnl9HfcggTNeXUmIMGoKg6N2pjtz37yMXuHjvZvFCE4ziC6YlQ0ipOG1Z0Oy+L8XlWuxEGgYQIP0/lALG1yGx31qsR4xOTqG0hgtqIa49MPjwd4ZQOKDDejDJf1SqgVS8RAXgTWh0rFquvz/F09j7zs8w94H0auVDpSFMVreqn7lSmhyhXje7kXEgquiGQOTbNUHn9Q2bZ8fFsjscoLCRtFOlpHkaFAlSHFAljjlpdc11AnM46Czcu6U/RBc3GBdIhJmqILz9ouDor26vJ6BhKW/ZavOsVI3fGmVneQAEiwkY1YYPGsgVKZVR1bDLo3+fMLkS/a7g==
 sidebar_class_name: "post api-method"
 info_path: api/bunny-api
 custom_edit_url: null
@@ -39,6 +39,14 @@ import Translate from "@docusaurus/Translate";
 
 Disable MFA (recent auth + TOTP code)
 
+<Heading
+  id={"request"}
+  as={"h2"}
+  className={"openapi-tabs__heading"}
+>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
 <ParamsDetails>
   
 </ParamsDetails>
@@ -49,7 +57,9 @@ Disable MFA (recent auth + TOTP code)
   
 </RequestSchema>
 
-<StatusCodes>
+<StatusCodes
+  {...require("./disable-mfa-recent-auth-totp-code.StatusCodes.json")}
+>
   
 </StatusCodes>
 

@@ -1,0 +1,1 @@
+{"schema":{"type":"object","properties":{"bridge_configured":{"type":"boolean"},"oauth_configured":{"type":"boolean"},"linked":{"type":"boolean"},"discord_user_id":{"type":"string","nullable":true},"username":{"type":"string","nullable":true}},"title":"DiscordAccountStatus"},"schemaType":"response"}
