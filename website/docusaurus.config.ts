@@ -5,7 +5,7 @@ import type * as Plugin from '@docusaurus/types/src/plugin';
 import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
 
 const config: Config = {
-  title: 'bunny',
+  title: 'bunny and cloud',
   tagline: 'Coding in multiplayer mode with AI agents',
 
   favicon: 'img/logo.png',
@@ -97,9 +97,9 @@ const config: Config = {
       respectPrefersColorScheme: false,
     },
     navbar: {
-      title: 'bunny',
+      title: 'bunny and cloud',
       logo: {
-        alt: 'bunny',
+        alt: 'bunny and cloud',
         src: 'img/logo.png',
         href: '/',
         width: 56,
