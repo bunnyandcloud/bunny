@@ -20,6 +20,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Remove once docs.bunnyandcloud.com custom domain + DNS are live.
+      GITHUB_PAGES_PROJECT_SITE: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

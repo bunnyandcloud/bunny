@@ -6,6 +6,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY apps apps
 COPY crates crates
+COPY packages packages
 RUN cargo build --release -p bunny-server -p bunny-discord-bridge
 
 # --- Web UI ---
