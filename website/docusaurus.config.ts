@@ -101,7 +101,7 @@ const config: Config = {
       logo: {
         alt: 'bunny',
         src: 'img/logo.png',
-        href: '/home',
+        href: '/',
         width: 56,
         height: 50,
       },
