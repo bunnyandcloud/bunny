@@ -7,20 +7,14 @@ import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
 const organizationName = 'bunnyandcloud';
 const projectName = 'bunny';
 
-// GitHub project Pages serves at /bunny/ until a custom domain is active.
-// Remove GITHUB_PAGES_PROJECT_SITE once docs.bunnyandcloud.com DNS is live.
-const useGithubProjectSite = process.env.GITHUB_PAGES_PROJECT_SITE === 'true';
-
 const config: Config = {
   title: 'bunny and cloud',
   tagline: 'Coding in multiplayer mode with AI agents',
 
   favicon: 'img/logo.png',
 
-  url: useGithubProjectSite
-    ? `https://${organizationName}.github.io`
-    : 'https://docs.bunnyandcloud.com',
-  baseUrl: useGithubProjectSite ? `/${projectName}/` : '/',
+  url: 'https://docs.bunnyandcloud.com',
+  baseUrl: '/',
   trailingSlash: false,
 
   organizationName,
