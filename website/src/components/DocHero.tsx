@@ -21,8 +21,10 @@ export default function DocHero(): JSX.Element {
             <Link className="bunny-btn bunny-btn--secondary" to="/getting-started/first-run">
               First-run checklist
             </Link>
-            <Link className="bunny-btn bunny-btn--secondary" to="/team-chats/discord/setup">
-              Connect Discord
+            <Link
+              className="bunny-btn bunny-btn--secondary"
+              href="https://discord.gg/tG2Fu6AF8P">
+              Join Discord Server
             </Link>
           </div>
         </div>
