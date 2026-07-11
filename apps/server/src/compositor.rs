@@ -180,11 +180,15 @@ async fn cdp_screenshot_png(cdp_port: u16) -> Result<Vec<u8>> {
             }
         })
         .ok_or_else(|| anyhow!("screenshot.js missing"))?;
-    let output = tokio::process::Command::new("node")
-        .arg(&script)
-        .env("BUNNY_CDP_PORT", cdp_port.to_string())
-        .output()
-        .await?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new("node")
+            .arg(&script)
+            .env("BUNNY_CDP_PORT", cdp_port.to_string())
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow!("cdp screenshot timed out"))??;
     if output.status.success() && output.stdout.len() > 100 {
         return Ok(output.stdout);
     }

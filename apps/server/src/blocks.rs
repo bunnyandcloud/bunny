@@ -435,6 +435,7 @@ pub fn blocks_snapshot_text(state: &AppState, terminal_id: Uuid) -> String {
 
 fn format_blocks_snapshot_text(blocks: &[TerminalBlock]) -> String {
     let mut out = String::new();
+    let mut command_blocks = 0usize;
 
     for block in blocks.iter().filter(|b| is_visible_snapshot_block(b)) {
         match block.kind {
@@ -444,17 +445,24 @@ fn format_blocks_snapshot_text(blocks: &[TerminalBlock]) -> String {
                     .as_deref()
                     .filter(|c| !c.trim().is_empty())
                     .unwrap_or(block.content.as_str());
+                if crate::terminals::is_discord_internal_rappel_command(command) {
+                    continue;
+                }
+                if command_blocks > 0 {
+                    out.push_str("\n────────\n\n");
+                }
+                command_blocks += 1;
+                let label = crate::terminals::summarize_discord_command_for_snapshot(command);
                 if !out.is_empty() && !out.ends_with('\n') {
                     out.push('\n');
                 }
                 out.push_str("$ ");
-                out.push_str(command.trim());
+                out.push_str(label.trim());
                 out.push('\n');
 
                 if let Some(output) = output_block_for_command(blocks, block.id) {
-                    let command = command.trim();
-                    let content = crate::terminals::curate_discord_shell_output(
-                        command,
+                    let content = crate::terminals::format_snapshot_block_output(
+                        command.trim(),
                         &output.content,
                     );
                     if content != "(no output)" {
@@ -481,7 +489,7 @@ fn format_blocks_snapshot_text(blocks: &[TerminalBlock]) -> String {
         }
     }
 
-    out
+    crate::terminals::polish_discord_snapshot_display(&out)
 }
 
 pub fn stop_running_processes(state: &AppState, terminal_id: Uuid) -> Result<()> {
@@ -590,7 +598,7 @@ pub fn record_discord_transcript_blocks(
                 exit_code.or(Some(0)),
             )
         };
-        let mut content = crate::terminals::curate_discord_shell_output(command, output);
+        let mut content = crate::terminals::sanitize_discord_transcript_output(command, output);
         if crate::terminals::discord_display_output_is_empty(&content) {
             let cap =
                 crate::terminals::capture_pane_visible_for_terminal(state, term_id).unwrap_or_default();
@@ -2204,5 +2212,32 @@ mod snapshot_text_tests {
         )];
         let text = format_blocks_snapshot_text(&blocks);
         assert!(text.contains("Discord created a new shell"));
+    }
+
+    #[test]
+    fn summarizes_claude_json_output_for_snapshot() {
+        let cmd_id = Uuid::new_v4();
+        let raw = concat!(
+            "Image sketch.png (postée par alice) : /tmp/sketch.png\n\n",
+            "Consignes pièces jointes :\n",
+            "- analyse l'image\n\n",
+            r#"{"type":"result","result":"Page HTML créée.","is_error":false}"#
+        );
+        let cmd = "claude -p --output-format json --permission-mode acceptEdits 'build page'";
+        let blocks = vec![
+            sample_block(cmd_id, BlockKind::DiscordCommand, Some(cmd), "", None),
+            sample_block(
+                Uuid::new_v4(),
+                BlockKind::Output,
+                None,
+                raw,
+                Some(cmd_id),
+            ),
+        ];
+        let text = format_blocks_snapshot_text(&blocks);
+        assert!(text.contains("claude · build page"));
+        assert!(text.contains("Page HTML créée."));
+        assert!(!text.contains("\"type\":\"result\""));
+        assert!(!text.contains("Consignes pièces jointes"));
     }
 }

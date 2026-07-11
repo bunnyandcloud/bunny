@@ -152,10 +152,11 @@ impl BunnyClient {
         Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "raw": text })))
     }
 
-    async fn post_snapshot(&self, body: &serde_json::Value) -> Result<SnapshotPayload> {
+    async fn post_snapshot(&self, body: &serde_json::Value, timeout: Duration) -> Result<SnapshotPayload> {
         let res = self
             .http
             .post(format!("{}/api/v1/internal/discord/snapshot", self.base))
+            .timeout(timeout)
             .bearer_auth(&self.token)
             .json(body)
             .send()
@@ -705,6 +706,34 @@ impl EventHandler for Handler {
                 tokio::spawn(async move {
                     let bridge_ctx = ctx_from_interaction_resolved(&http, &cmd).await;
                     let locale = user_locale(&bunny, &bridge_ctx).await;
+                    if cmd.data.name == "bunny" {
+                        if let Ok((sub, sub_opts)) = subcommand_opts(&cmd) {
+                            if sub == "full_snapshot" {
+                                if let Err(e) = run_full_snapshot(
+                                    &bunny,
+                                    &cmd,
+                                    &http,
+                                    &bridge_ctx,
+                                    &sub_opts,
+                                    locale,
+                                )
+                                .await
+                                {
+                                    tracing::error!("full_snapshot failed: {e}");
+                                    let _ = cmd
+                                        .edit_response(
+                                            &http,
+                                            EditInteractionResponse::new().content(format_discord_error(
+                                                locale,
+                                                &e,
+                                            )),
+                                        )
+                                        .await;
+                                }
+                                return;
+                            }
+                        }
+                    }
                     let response = match handle_command(&bunny, &cmd, &bridge_ctx).await {
                         Ok(reply) => reply,
                         Err(e) => text_reply(format_discord_error(locale, &e)),
@@ -871,7 +900,12 @@ async fn run_snapshot(
     if let Some(url) = opt_str(sub_opts, "url") {
         body["browser_url"] = serde_json::json!(url);
     }
-    match bunny.post_snapshot(&body).await? {
+    let timeout = if ensure_browser {
+        Duration::from_secs(120)
+    } else {
+        Duration::from_secs(30)
+    };
+    match bunny.post_snapshot(&body, timeout).await? {
         SnapshotPayload::Text { caption, text } => Ok(format_shell_snapshot_reply(&caption, &text)),
         SnapshotPayload::ShellTextAndBrowser {
             caption,
@@ -895,6 +929,87 @@ async fn run_snapshot(
             png: bytes,
             filename,
         }),
+    }
+}
+
+/// `/bunny full_snapshot`: shell text first (fast), browser PNG in a follow-up message.
+async fn run_full_snapshot(
+    bunny: &BunnyClient,
+    cmd: &serenity::model::application::CommandInteraction,
+    http: &serenity::http::Http,
+    bridge_ctx: &serde_json::Value,
+    sub_opts: &[serenity::all::CommandDataOption],
+    locale: Locale,
+) -> Result<()> {
+    let shell_reply = run_snapshot(bunny, bridge_ctx, sub_opts, "shell", false).await?;
+    deliver_command_reply(cmd, http, shell_reply).await?;
+
+    let mut body = bridge_ctx.clone();
+    body["target"] = serde_json::json!("browser");
+    body["ensure_browser"] = serde_json::json!(true);
+    if let Some(shell) = opt_str(sub_opts, "shell") {
+        body["shell_name"] = serde_json::json!(shell);
+    }
+    if let Some(url) = opt_str(sub_opts, "url") {
+        body["browser_url"] = serde_json::json!(url);
+    }
+
+    match bunny
+        .post_snapshot(&body, Duration::from_secs(90))
+        .await
+    {
+        Ok(SnapshotPayload::Image {
+            caption,
+            bytes,
+            filename,
+        }) => {
+            cmd.channel_id
+                .send_message(
+                    http,
+                    CreateMessage::new()
+                        .content(format!(
+                            "{caption}\nBrowser screenshot attached (not stored on disk)."
+                        ))
+                        .add_file(CreateAttachment::bytes(bytes, filename)),
+                )
+                .await?;
+            return Ok(());
+        }
+        Ok(SnapshotPayload::Text { caption, .. }) => {
+            cmd.create_followup(
+                http,
+                CreateInteractionResponseFollowup::new()
+                    .content(format!("{caption}\n_(browser returned text instead of image)_")),
+            )
+            .await?;
+            return Ok(());
+        }
+        Ok(SnapshotPayload::ShellTextAndBrowser {
+            browser_unavailable,
+            caption,
+            ..
+        }) => {
+            let note = browser_unavailable
+                .map(|e| format!("{caption}\nBrowser unavailable: {e}"))
+                .unwrap_or(caption);
+            cmd.create_followup(
+                http,
+                CreateInteractionResponseFollowup::new().content(note),
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(e) => {
+            cmd.create_followup(
+                http,
+                CreateInteractionResponseFollowup::new().content(format!(
+                    "Browser unavailable: {}",
+                    format_discord_error(locale, &e)
+                )),
+            )
+            .await?;
+            return Ok(());
+        }
     }
 }
 
@@ -1541,21 +1656,14 @@ fn format_full_snapshot_reply(
     }
 }
 
-/// `/bunny snapshot`: header + fenced scrollback tail (paginated for Discord limits).
+/// `/bunny snapshot`: header + scrollback tail (paginated for Discord limits).
 fn format_shell_snapshot_reply(caption: &str, text: &str) -> CommandReply {
     let body = if text.trim().is_empty() {
         "(empty shell)".to_string()
     } else {
-        let mut page = String::new();
-        page.push_str("```\n");
-        page.push_str(text);
-        if !text.ends_with('\n') {
-            page.push('\n');
-        }
-        page.push_str("```");
-        page
+        text.trim_end().to_string()
     };
-    let page = format!("{caption}\n{body}");
+    let page = format!("**{caption}**\n\n{body}");
     CommandReply::Text(paginate_plain(&page))
 }
 

@@ -822,6 +822,27 @@ fn discord_snapshot_caption(
     }
 }
 
+async fn discord_full_snapshot_browser_png(
+    state: Arc<AppState>,
+    session_id: Uuid,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    crate::browser_ops::find_or_create_browser(Arc::clone(&state), session_id, url)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        capture_browser_snapshot(state.as_ref(), session_id),
+    )
+    .await
+    {
+        Ok(Ok(snap)) => Ok(snap.png),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("browser capture timed out".into()),
+    }
+}
+
 async fn internal_snapshot(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -838,15 +859,6 @@ async fn internal_snapshot(
 
     let needs_browser = body.ensure_browser
         || matches!(target, SnapshotTarget::Browser | SnapshotTarget::All);
-    if needs_browser {
-        let url = body
-            .browser_url
-            .clone()
-            .unwrap_or_else(|| default_browser_url(&state, link.session_id));
-        crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
-        // Let Chromium paint before CDP screenshot.
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    }
 
     let shell_label = resolve_shell_label(
         &state,
@@ -903,20 +915,36 @@ async fn internal_snapshot(
             body.shell_name.as_deref(),
         )?;
         let lines = crate::terminals::DISCORD_SNAPSHOT_MAX_LINES;
+        let session_id = link.session_id;
+        let browser_url = body
+            .browser_url
+            .clone()
+            .unwrap_or_else(|| default_browser_url(&state, session_id));
+
         let state_shell = Arc::clone(&state);
-        let shell_text = tokio::task::spawn_blocking(move || {
+        let shell_handle = tokio::task::spawn_blocking(move || {
             crate::terminals::discord_shell_snapshot_text(&state_shell, term_id, lines)
-        })
-        .await
-        .map_err(|e| ApiError::validation(&e.to_string()))?;
+        });
+
+        let state_browser = Arc::clone(&state);
+        let needs_browser_capture = needs_browser;
+        let browser_url_capture = browser_url.clone();
+        let browser_handle = async move {
+            if !needs_browser_capture {
+                return Err("browser not requested".into());
+            }
+            discord_full_snapshot_browser_png(state_browser, session_id, &browser_url_capture).await
+        };
+
+        let (shell_text, browser_result) = tokio::join!(shell_handle, browser_handle);
+        let shell_text = shell_text.map_err(|e| ApiError::validation(&e.to_string()))?;
         let shell_caption = format!("Shell — {shell_label} (last {lines} lines)");
 
-        let browser = capture_browser_snapshot(&state, link.session_id).await;
-        let (browser_png_base64, browser_unavailable) = match browser {
-            Ok(snap) => (BASE64.encode(&snap.png), None),
+        let (browser_png_base64, browser_unavailable) = match browser_result {
+            Ok(png) => (BASE64.encode(&png), None),
             Err(e) => {
                 tracing::warn!("full_snapshot browser capture failed: {e}");
-                (String::new(), Some(e.to_string()))
+                (String::new(), Some(e))
             }
         };
 
@@ -946,6 +974,15 @@ async fn internal_snapshot(
             "browser_unavailable": browser_unavailable,
         }))
         .into_response());
+    }
+
+    if needs_browser && matches!(target, SnapshotTarget::Browser) {
+        let url = body
+            .browser_url
+            .clone()
+            .unwrap_or_else(|| default_browser_url(&state, link.session_id));
+        crate::browser_ops::find_or_create_browser(Arc::clone(&state), link.session_id, &url).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
 
     let snap = capture_snapshot(

@@ -2638,7 +2638,8 @@ pub fn notebook_parse_captured_output(raw: &str) -> (String, Option<i32>) {
 
 fn finalize_discord_run_excerpt(command: &str, raw: &str) -> String {
     let sanitized = sanitize_discord_terminal_excerpt(raw);
-    curate_discord_install_output(command, &sanitized)
+    let install = curate_discord_install_output(command, &sanitized);
+    sanitize_discord_transcript_output(command, &install)
 }
 
 /// Keep pip/npm install replies short in Discord — progress bars are noisy in chat.
@@ -3410,7 +3411,7 @@ mod discord_run_tests {
         let raw = r#"{"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"git add test.md"}}]}"#;
         let cmd = "claude -p --output-format json '…'";
         let out = super::sanitize_discord_transcript_output(cmd, raw);
-        assert!(out.contains("autorisation shell"));
+        assert!(out.contains("autorisation"));
         assert!(out.contains("git add test.md"));
     }
 
@@ -3418,6 +3419,63 @@ mod discord_run_tests {
     fn transcript_leaves_ordinary_command_output() {
         let out = super::sanitize_discord_transcript_output("git log -1", "abc1234 fix\n");
         assert_eq!(out, "abc1234 fix");
+    }
+
+    #[test]
+    fn shell_quote_parser_handles_french_apostrophes() {
+        let cmd = "claude -p --output-format json 'utilise l'\\''outil Read sur le chemin.'";
+        let prompt = super::claude_prompt_from_command(
+            cmd.strip_prefix("claude -p ").unwrap(),
+        );
+        assert_eq!(prompt, "utilise l'outil Read sur le chemin.");
+        let label = super::summarize_discord_command(cmd);
+        assert!(label.contains("l'outil Read"));
+        assert!(!label.contains("'utilisateur.'"));
+    }
+
+    #[test]
+    fn thread_claude_label_uses_last_user_line() {
+        let prompt = "# Agent mode (Discord thread)\n\n# Goal\nBuild page\n\n# Instruction\nContraintes…\n\nfxcao: refais la page d'accueil";
+        let cmd = format!(
+            "claude -p --output-format json --permission-mode acceptEdits {}",
+            super::shell_single_quote(&prompt)
+        );
+        let label = super::summarize_discord_command(&cmd);
+        assert!(label.contains("refais la page d'accueil"));
+        assert!(!label.contains("Goal"));
+    }
+
+    #[test]
+    fn polish_flattens_markdown_tables_and_fences() {
+        let raw = "HTTP/1.0 200 OK\n\n| URL | http://localhost:3000/ |\n|---|---|\n| Racine | /root |\n\n```\ncurl -s\n```";
+        let out = super::polish_discord_snapshot_display(raw);
+        assert!(out.contains("URL: http://localhost:3000/"));
+        assert!(out.contains("Racine: /root"));
+        assert!(!out.contains("```"));
+        assert!(!out.contains("|---|"));
+    }
+
+    #[test]
+    fn polish_compacts_permission_block() {
+        let raw = "Vérification OK.\n\n🔐 **Claude demande l'autorisation d'exécuter une commande shell** — utilisez les boutons ci-dessous.\n```\ncurl -s http://localhost:3000/ | head -20\n```";
+        let out = super::polish_discord_snapshot_display(raw);
+        assert!(out.contains("Vérification OK."));
+        assert!(out.contains("⏳ autorisation shell : `curl -s http://localhost:3000/ | head -20`"));
+        assert!(!out.contains("boutons ci-dessous"));
+    }
+
+    #[test]
+    fn snapshot_label_handles_empty_double_quoted_claude_prompt() {
+        let cmd = "claude -p --output-format json \"\"";
+        let label = super::summarize_discord_command_for_snapshot(cmd);
+        assert_eq!(label, "claude · agent");
+    }
+
+    #[test]
+    fn polish_drops_orphan_fence_lines() {
+        let raw = "HTTP/1.0 200 OK\n```\n```";
+        let out = super::polish_discord_snapshot_display(raw);
+        assert_eq!(out, "HTTP/1.0 200 OK");
     }
 
     #[test]
@@ -4404,51 +4462,6 @@ fn is_claude_print_discord_command(command: &str) -> bool {
     c.starts_with("claude -p") || c.starts_with("claude --print")
 }
 
-fn bash_command_from_claude_denial(d: &serde_json::Value) -> Option<String> {
-    d.get("tool_input")
-        .and_then(|i| i.get("command"))
-        .and_then(|c| c.as_str())
-        .map(str::to_string)
-        .or_else(|| d.get("command").and_then(|c| c.as_str()).map(str::to_string))
-}
-
-/// Human-readable shell transcript for `claude -p --output-format json` (not the raw JSON blob).
-fn summarize_claude_print_json_for_transcript(raw: &str) -> String {
-    let trimmed = raw.trim();
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-        return trimmed.to_string();
-    };
-    if let Some(denials) = v.get("permission_denials").and_then(|d| d.as_array()) {
-        for d in denials {
-            if d.get("tool_name").and_then(|t| t.as_str()) == Some("Bash") {
-                let cmd = bash_command_from_claude_denial(d).unwrap_or_else(|| "?".into());
-                return format!("[claude] autorisation shell requise:\n{cmd}");
-            }
-        }
-    }
-    if v.get("ask_user_question").is_some() {
-        return "[claude] question en attente (voir Discord)".to_string();
-    }
-    let is_error = v.get("is_error").and_then(|b| b.as_bool()) == Some(true)
-        || v
-            .get("subtype")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s.starts_with("error_"));
-    if is_error {
-        return v
-            .get("result")
-            .and_then(|r| r.as_str())
-            .map(|s| format!("[claude erreur] {s}"))
-            .unwrap_or_else(|| "[claude erreur]".to_string());
-    }
-    match v.get("result") {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(other) if other.is_string() => other.as_str().unwrap_or("").to_string(),
-        Some(_) => "[claude] réponse structurée (voir Discord)".to_string(),
-        None => "[claude] (pas de résultat texte)".to_string(),
-    }
-}
-
 fn cap_discord_transcript_output(text: &str) -> String {
     let n = text.chars().count();
     if n <= DISCORD_TRANSCRIPT_OUTPUT_MAX_CHARS {
@@ -4461,38 +4474,321 @@ fn cap_discord_transcript_output(text: &str) -> String {
     format!("{truncated}\n… [sortie tronquée]")
 }
 
-fn sanitize_discord_transcript_output(command: &str, output: &str) -> String {
+pub(crate) fn sanitize_discord_transcript_output(command: &str, output: &str) -> String {
     let output = curate_discord_shell_output(command, output);
     if output == "(no output)" {
         return output;
     }
+    let cleaned = crate::discord_claude::strip_discord_attachment_instructions(&output);
     let summarized = if is_claude_print_discord_command(command) {
-        summarize_claude_print_json_for_transcript(&output)
+        crate::discord_claude::parse_claude_json_for_discord(&cleaned).display_text
     } else {
-        output
+        cleaned
     };
+    if summarized.trim().is_empty() {
+        return "(no output)".to_string();
+    }
     cap_discord_transcript_output(&summarized)
+}
+
+pub(crate) fn summarize_discord_command_for_snapshot(command: &str) -> String {
+    for prefix in ["claude -p ", "claude --print "] {
+        if let Some(rest) = command.strip_prefix(prefix) {
+            let prompt = claude_prompt_from_command(rest);
+            let preview = non_empty_claude_preview(claude_prompt_snapshot_preview(&prompt));
+            return format!("claude · {preview}");
+        }
+    }
+    let n: String = command.chars().take(100).collect();
+    if command.chars().count() > 100 {
+        format!("{n}…")
+    } else {
+        n
+    }
+}
+
+/// Parse a shell single-quoted segment starting at `start` (must point to `'`).
+fn parse_shell_single_quoted(s: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = s.as_bytes();
+    if bytes.get(start)? != &b'\'' {
+        return None;
+    }
+    let mut out = String::new();
+    let mut i = start + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            // Shell escape for embedded `'`: '\''
+            if i + 3 < bytes.len()
+                && bytes[i + 1] == b'\\'
+                && bytes[i + 2] == b'\''
+                && bytes[i + 3] == b'\''
+            {
+                out.push('\'');
+                i += 4;
+                continue;
+            }
+            return Some((out, i + 1));
+        }
+        out.push(char::from(bytes[i]));
+        i += 1;
+    }
+    None
+}
+
+/// Last shell single-quoted argument (handles `'\''` escapes from [`shell_single_quote`]).
+fn last_shell_single_quoted_argument(s: &str) -> Option<String> {
+    let s = s.trim();
+    let mut last = None;
+    let mut i = 0;
+    while i < s.len() {
+        if s.as_bytes()[i] == b'\'' {
+            if let Some((content, next)) = parse_shell_single_quoted(s, i) {
+                last = Some(content);
+                i = next;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    last
+}
+
+/// Last shell double-quoted argument (handles `\"` escapes).
+fn last_shell_double_quoted_argument(s: &str) -> Option<String> {
+    let s = s.trim();
+    let mut last = None;
+    let mut i = 0;
+    while i < s.len() {
+        if s.as_bytes()[i] == b'"' {
+            if let Some((content, next)) = parse_shell_double_quoted(s, i) {
+                last = Some(content);
+                i = next;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    last
+}
+
+/// Parse a shell double-quoted segment starting at `start` (must point to `"`).
+fn parse_shell_double_quoted(s: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = s.as_bytes();
+    if bytes.get(start)? != &b'"' {
+        return None;
+    }
+    let mut out = String::new();
+    let mut i = start + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if i + 1 < bytes.len() => {
+                out.push(char::from(bytes[i + 1]));
+                i += 2;
+            }
+            b'"' => return Some((out, i + 1)),
+            b => {
+                out.push(char::from(b));
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+fn claude_prompt_from_command(rest: &str) -> String {
+    last_shell_single_quoted_argument(rest)
+        .or_else(|| last_shell_double_quoted_argument(rest))
+        .unwrap_or_else(|| rest.trim().to_string())
+}
+
+fn claude_prompt_snapshot_preview(prompt: &str) -> String {
+    if prompt.contains("# Rappel : commande déjà exécutée") {
+        return "rappel · commande déjà autorisée".into();
+    }
+    if prompt.contains("# Agent mode (Discord thread)") {
+        if let Some(line) = prompt.lines().rev().find(|l| {
+            let t = l.trim();
+            !t.is_empty()
+                && !t.starts_with('#')
+                && !t.starts_with("Contraintes Discord")
+                && !t.starts_with('-')
+        }) {
+            let preview: String = line.chars().take(80).collect();
+            let suffix = if line.chars().count() > 80 { "…" } else { "" };
+            return format!("{preview}{suffix}");
+        }
+        return "thread agent".into();
+    }
+    let one_line = prompt
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or(prompt);
+    let preview: String = one_line.chars().take(72).collect();
+    let suffix = if one_line.chars().count() > 72 {
+        "…"
+    } else {
+        ""
+    };
+    format!("{preview}{suffix}")
+}
+
+fn non_empty_claude_preview(preview: String) -> String {
+    let t = preview.trim().trim_matches('"').trim_matches('\'');
+    if t.is_empty() {
+        "agent".into()
+    } else {
+        preview
+    }
+}
+
+/// Plain-text cleanup for Discord `/bunny snapshot` scrollback (no nested markdown fences).
+pub(crate) fn polish_discord_snapshot_display(text: &str) -> String {
+    let text = compact_claude_permission_for_snapshot(text);
+    let mut out = String::new();
+    let mut prev_blank = false;
+    for line in text.lines() {
+        if is_snapshot_table_noise_line(line) {
+            continue;
+        }
+        let mut line = flatten_snapshot_table_row(line);
+        line = line.replace("**", "");
+        line = line.replace("```", "───");
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() || is_orphan_snapshot_fence_line(trimmed) {
+            if !prev_blank && !out.is_empty() {
+                out.push('\n');
+                prev_blank = true;
+            }
+            continue;
+        }
+        prev_blank = false;
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(trimmed);
+    }
+    out.trim_end().to_string()
+}
+
+fn is_snapshot_table_noise_line(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty()
+        || t == "|"
+        || t.starts_with("||")
+        || (t.starts_with('|')
+            && t.chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace()))
+}
+
+fn is_orphan_snapshot_fence_line(line: &str) -> bool {
+    let t = line.trim();
+    t.contains('─') && t.chars().all(|c| c == '─' || c.is_whitespace())
+}
+
+fn flatten_snapshot_table_row(line: &str) -> String {
+    let t = line.trim();
+    if !t.starts_with('|') {
+        return line.to_string();
+    }
+    let cells: Vec<&str> = t.split('|').map(str::trim).filter(|c| !c.is_empty()).collect();
+    if cells.len() == 2 {
+        return format!("{}: {}", cells[0], cells[1]);
+    }
+    line.to_string()
+}
+
+fn compact_claude_permission_for_snapshot(text: &str) -> String {
+    let Some(idx) = text
+        .find("Claude demande l'autorisation")
+        .or_else(|| text.find('🔐'))
+    else {
+        return text.to_string();
+    };
+    let head = text[..idx].trim_end();
+    let tail = &text[idx..];
+    let cmd = shell_command_in_permission_tail(tail).unwrap_or_else(|| "?".into());
+    let mut out = head.to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("⏳ autorisation shell : `{cmd}`"));
+    out
+}
+
+fn shell_command_in_permission_tail(tail: &str) -> Option<String> {
+    if let Some(open) = tail.find("```") {
+        let inner = tail[open + 3..].trim_start_matches('\n');
+        if let Some(close) = inner.find("```") {
+            let cmd = inner[..close].lines().next()?.trim();
+            if !cmd.is_empty() {
+                return Some(cmd.to_string());
+            }
+        }
+    }
+    tail.lines()
+        .map(str::trim)
+        .find(|t| {
+            !t.is_empty()
+                && !t.starts_with('🔐')
+                && !t.contains("boutons ci-dessous")
+                && !t.starts_with("```")
+                && !t.contains("Claude demande")
+        })
+        .map(str::to_string)
+}
+
+fn truncate_html_in_snapshot(text: &str, max_html_lines: usize) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_html = false;
+    let mut html_lines = 0usize;
+    for line in text.lines() {
+        let t = line.trim();
+        if !in_html
+            && (t.starts_with("<!")
+                || t.eq_ignore_ascii_case("<html>")
+                || t.starts_with("<html")
+                || t.starts_with("<head")
+                || t.starts_with("<body"))
+        {
+            in_html = true;
+            html_lines = 0;
+            out.push("[HTML]".into());
+        }
+        if in_html {
+            html_lines += 1;
+            if html_lines <= max_html_lines {
+                out.push(line.to_string());
+            } else if html_lines == max_html_lines + 1 {
+                out.push("… [HTML tronqué]".into());
+            }
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    out.join("\n")
+}
+
+pub(crate) fn format_snapshot_block_output(command: &str, content: &str) -> String {
+    let mut content = sanitize_discord_transcript_output(command, content);
+    if content == "(no output)" {
+        return content;
+    }
+    if command.contains("curl") && content.contains('<') {
+        content = truncate_html_in_snapshot(&content, 8);
+    }
+    polish_discord_snapshot_display(&content)
+}
+
+pub(crate) fn is_discord_internal_rappel_command(command: &str) -> bool {
+    command.contains("# Rappel : commande déjà exécutée")
 }
 
 fn summarize_discord_command(command: &str) -> String {
     for prefix in ["claude -p ", "claude --print "] {
         if let Some(rest) = command.strip_prefix(prefix) {
-            let rest = rest.trim();
-            let unquoted = rest
-                .strip_prefix('\'')
-                .and_then(|s| s.strip_suffix('\''))
-                .or_else(|| {
-                    rest.strip_prefix('"')
-                        .and_then(|s| s.strip_suffix('"'))
-                })
-                .unwrap_or(rest);
-            let preview: String = unquoted.chars().take(72).collect();
-            let suffix = if unquoted.chars().count() > 72 {
-                "…"
-            } else {
-                ""
-            };
-            return format!("claude -p '{preview}{suffix}'");
+            let prompt = claude_prompt_from_command(rest);
+            let preview = non_empty_claude_preview(claude_prompt_snapshot_preview(&prompt));
+            return format!("claude -p '{preview}'");
         }
     }
     let n: String = command.chars().take(120).collect();
@@ -4676,14 +4972,20 @@ fn live_tmux_pane_text(state: &AppState, term_id: Uuid) -> String {
 /// Best-effort view of what is **currently** in the shell (live tmux pane + attach buffer).
 /// Persisted disk scrollback is only used when the shell is not running / has no live capture.
 pub fn terminal_display_text(state: &AppState, term_id: Uuid) -> String {
-    let _ = prepare_terminal_connection(state, term_id);
-
     if state.config.terminal.notebook_shells {
+        let needs_live = crate::blocks::terminal_has_interactive_session(state, term_id)
+            || crate::blocks::terminal_input_locked(state, term_id);
         let mut text = crate::blocks::blocks_snapshot_text(state, term_id);
-        if crate::blocks::terminal_has_interactive_session(state, term_id)
-            || crate::blocks::terminal_input_locked(state, term_id)
-        {
+        if needs_live {
             let live = live_tmux_pane_text(state, term_id);
+            if live.trim().is_empty() {
+                let _ = prepare_terminal_connection(state, term_id);
+            }
+            let live = if live.trim().is_empty() {
+                live_tmux_pane_text(state, term_id)
+            } else {
+                live
+            };
             if !live.trim().is_empty() {
                 if !text.is_empty() && !text.ends_with('\n') {
                     text.push('\n');
@@ -4695,6 +4997,8 @@ pub fn terminal_display_text(state: &AppState, term_id: Uuid) -> String {
             return text;
         }
     }
+
+    let _ = prepare_terminal_connection(state, term_id);
 
     let mut live_parts: Vec<String> = Vec::new();
 
@@ -4753,7 +5057,7 @@ pub fn discord_shell_snapshot_text(state: &AppState, term_id: Uuid, max_lines: u
             "discord snapshot: content lost during normalization"
         );
     }
-    excerpt
+    polish_discord_snapshot_display(&excerpt)
 }
 
 fn tail_logical_lines(text: &str, max_lines: usize) -> String {

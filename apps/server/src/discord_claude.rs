@@ -961,6 +961,38 @@ pub fn append_discord_attachments_to_message(
     out
 }
 
+/// Strip Discord thread attachment preamble from captured shell output (not useful in snapshots).
+pub fn strip_discord_attachment_instructions(text: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if let Some(json_start) = t
+        .find("\n{\"type\"")
+        .or_else(|| t.find("\n{\"session_id\""))
+        .or_else(|| {
+            t.char_indices()
+                .find(|(_, c)| *c == '{')
+                .map(|(i, _)| i)
+        })
+    {
+        let head = t[..json_start].trim();
+        if head.contains("Pièces jointes Discord")
+            || head.contains("Consignes pièces jointes")
+            || head.contains("postée par")
+        {
+            return t[json_start..].trim_start().to_string();
+        }
+    }
+    if (t.contains("# Pièces jointes Discord") || t.contains("Consignes pièces jointes"))
+        && !t.contains("\"type\"")
+        && !t.contains("\"result\"")
+    {
+        return String::new();
+    }
+    t.to_string()
+}
+
 pub struct ThreadClaudeResult {
     pub output: String,
     #[allow(dead_code)]
