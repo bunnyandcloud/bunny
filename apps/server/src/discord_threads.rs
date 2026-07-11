@@ -35,7 +35,7 @@ pub struct ThreadBindRequest {
     pub shell_name: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ThreadClaudeApiFields {
     pub response_text: String,
     pub needs_approval: bool,
@@ -48,6 +48,75 @@ pub struct ThreadClaudeApiFields {
     pub pending_permission_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_command: Option<String>,
+}
+
+fn thread_claude_busy(state: &AppState, thread_id: &str) -> Option<ApiError> {
+    if state.thread_claude_pids.lock().contains_key(thread_id) {
+        Some(ApiError::validation_i18n(
+            "discord.thread.claude_busy",
+            &[],
+        ))
+    } else {
+        None
+    }
+}
+
+fn store_thread_claude_delivery(
+    state: &AppState,
+    thread_id: &str,
+    run: &crate::discord_claude::ThreadClaudeResult,
+) {
+    state
+        .thread_claude_delivery
+        .lock()
+        .insert(thread_id.to_string(), thread_response_from_run(run));
+}
+
+fn peek_thread_claude_delivery(
+    state: &AppState,
+    thread_id: &str,
+) -> Option<ThreadClaudeApiFields> {
+    state
+        .thread_claude_delivery
+        .lock()
+        .get(thread_id)
+        .cloned()
+}
+
+fn take_thread_claude_delivery(
+    state: &AppState,
+    thread_id: &str,
+) -> Option<ThreadClaudeApiFields> {
+    state.thread_claude_delivery.lock().remove(thread_id)
+}
+
+fn empty_claude_api_fields() -> ThreadClaudeApiFields {
+    ThreadClaudeApiFields {
+        response_text: String::new(),
+        needs_approval: false,
+        approval_summary: None,
+        pending_question_id: None,
+        pending_questions: None,
+        pending_permission_id: None,
+        permission_command: None,
+    }
+}
+
+fn store_thread_claude_error(state: &AppState, thread_id: &str, message: String) {
+    store_thread_claude_delivery(
+        state,
+        thread_id,
+        &crate::discord_claude::ThreadClaudeResult {
+            output: message,
+            exit_code: 1,
+            needs_approval: false,
+            approval_summary: None,
+            pending_question_id: None,
+            pending_questions: None,
+            pending_permission_id: None,
+            permission_command: None,
+        },
+    );
 }
 
 fn thread_response_from_run(run: &crate::discord_claude::ThreadClaudeResult) -> ThreadClaudeApiFields {
@@ -71,12 +140,15 @@ pub struct ThreadBindResponse {
     pub git_enabled: bool,
     pub thread_branch: Option<String>,
     pub base_branch: Option<String>,
+    /// Claude runs asynchronously — poll `/thread/claude-poll` until `ready`.
+    pub claude_pending: bool,
     #[serde(flatten)]
     pub claude: ThreadClaudeApiFields,
 }
 
 #[derive(Serialize)]
 pub struct ThreadInputResponse {
+    pub claude_pending: bool,
     #[serde(flatten)]
     pub claude: ThreadClaudeApiFields,
 }
@@ -116,6 +188,8 @@ pub struct ThreadAnswerResponse {
     pub complete: bool,
     pub answered_count: usize,
     pub total: usize,
+    #[serde(default)]
+    pub claude_pending: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_questions: Option<Vec<AskUserQuestionItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,6 +210,7 @@ pub struct ThreadPermissionRequest {
 #[derive(Serialize)]
 pub struct ThreadPermissionResponse {
     pub approved: bool,
+    pub claude_pending: bool,
     #[serde(flatten)]
     pub claude: ThreadClaudeApiFields,
 }
@@ -350,16 +425,42 @@ pub async fn internal_thread_bind(
         &body.goal_text,
     )?;
 
-    let run = execute_thread_claude(
-        &state,
-        &binding,
-        &body.goal_text,
-        "User",
-        &[],
-    )
-    .await?;
-
-    record_thread_claude_output(&state, &body.thread_id, &run)?;
+    let state_bg = state.clone();
+    let binding_bg = binding.clone();
+    let goal_text = body.goal_text.clone();
+    let thread_id_bg = body.thread_id.clone();
+    tokio::task::spawn(async move {
+        let run = execute_thread_claude(
+            &state_bg,
+            &binding_bg,
+            &goal_text,
+            "User",
+            &[],
+        )
+        .await;
+        match run {
+            Ok(run) => {
+                let _ = record_thread_claude_output(&state_bg, &thread_id_bg, &run);
+                store_thread_claude_delivery(&state_bg, &thread_id_bg, &run);
+            }
+            Err(e) => {
+                store_thread_claude_delivery(
+                    &state_bg,
+                    &thread_id_bg,
+                    &crate::discord_claude::ThreadClaudeResult {
+                        output: format!("❌ {e}"),
+                        exit_code: 1,
+                        needs_approval: false,
+                        approval_summary: None,
+                        pending_question_id: None,
+                        pending_questions: None,
+                        pending_permission_id: None,
+                        permission_command: None,
+                    },
+                );
+            }
+        }
+    });
 
     audit(
         &state,
@@ -381,7 +482,8 @@ pub async fn internal_thread_bind(
         git_enabled: binding.git_enabled,
         thread_branch,
         base_branch,
-        claude: thread_response_from_run(&run),
+        claude_pending: true,
+        claude: empty_claude_api_fields(),
     }))
 }
 
@@ -530,6 +632,10 @@ pub async fn internal_thread_input(
         ));
     }
 
+    if let Some(err) = thread_claude_busy(&state, &body.thread_id) {
+        return Err(err);
+    }
+
     let author_label = body
         .author_name
         .as_deref()
@@ -574,25 +680,38 @@ pub async fn internal_thread_input(
         }
     }
 
-    let run = execute_thread_claude(
-        &state,
-        &binding,
-        &body.text,
-        &author_label,
-        &discussion_msgs,
-    )
-    .await?;
-
-    record_thread_claude_output(&state, &body.thread_id, &run)?;
-
-    state
-        .discord
-        .lock()
-        .set_thread_last_input_message(&body.thread_id, body.discord_message_id.as_deref())
-        .map_err(|e| ApiError::validation(&e.to_string()))?;
+    let state_bg = state.clone();
+    let binding_bg = binding.clone();
+    let text = body.text.clone();
+    let author_label_bg = author_label.clone();
+    let discussion_msgs_bg = discussion_msgs.clone();
+    let thread_id_bg = body.thread_id.clone();
+    let discord_msg_id = body.discord_message_id.clone();
+    tokio::task::spawn(async move {
+        let run = execute_thread_claude(
+            &state_bg,
+            &binding_bg,
+            &text,
+            &author_label_bg,
+            &discussion_msgs_bg,
+        )
+        .await;
+        match run {
+            Ok(run) => {
+                let _ = record_thread_claude_output(&state_bg, &thread_id_bg, &run);
+                store_thread_claude_delivery(&state_bg, &thread_id_bg, &run);
+                let _ = state_bg
+                    .discord
+                    .lock()
+                    .set_thread_last_input_message(&thread_id_bg, discord_msg_id.as_deref());
+            }
+            Err(e) => store_thread_claude_error(&state_bg, &thread_id_bg, format!("❌ {e}")),
+        }
+    });
 
     Ok(Json(ThreadInputResponse {
-        claude: thread_response_from_run(&run),
+        claude_pending: true,
+        claude: empty_claude_api_fields(),
     }))
 }
 
@@ -656,6 +775,7 @@ pub async fn internal_thread_answer(
             complete: false,
             answered_count,
             total,
+            claude_pending: false,
             pending_questions: Some(pending.questions.clone()),
             next_question_index: Some(next_index),
             claude: None,
@@ -690,25 +810,40 @@ pub async fn internal_thread_answer(
         &format!("(choix Discord)\n{answer_note}"),
     )?;
 
+    if let Some(err) = thread_claude_busy(&state, &body.thread_id) {
+        return Err(err);
+    }
+
     let session_id = binding.session_id;
     let term_id = binding.term_id;
-    let thread_id = binding.thread_id.clone();
+    let thread_id_bg = binding.thread_id.clone();
     let state_bg = state.clone();
-    let run = tokio::task::spawn_blocking(move || {
-        run_thread_claude_with_answers(&state_bg, session_id, term_id, &thread_id, &answers)
-    })
-    .await
-    .map_err(|e| ApiError::validation(&e.to_string()))??;
-
-    record_thread_claude_output(&state, &body.thread_id, &run)?;
+    let answers_bg = answers.clone();
+    tokio::task::spawn(async move {
+        let state_record = state_bg.clone();
+        let thread_record = thread_id_bg.clone();
+        let run = tokio::task::spawn_blocking(move || {
+            run_thread_claude_with_answers(&state_bg, session_id, term_id, &thread_id_bg, &answers_bg)
+        })
+        .await;
+        match run {
+            Ok(Ok(run)) => {
+                let _ = record_thread_claude_output(&state_record, &thread_record, &run);
+                store_thread_claude_delivery(&state_record, &thread_record, &run);
+            }
+            Ok(Err(e)) => store_thread_claude_error(&state_record, &thread_record, format!("❌ {e}")),
+            Err(e) => store_thread_claude_error(&state_record, &thread_record, format!("❌ {e}")),
+        }
+    });
 
     Ok(Json(ThreadAnswerResponse {
         complete: true,
         answered_count: total,
         total,
+        claude_pending: true,
         pending_questions: None,
         next_question_index: None,
-        claude: Some(thread_response_from_run(&run)),
+        claude: None,
     }))
 }
 
@@ -766,33 +901,47 @@ pub async fn internal_thread_permission(
         &note,
     )?;
 
+    if let Some(err) = thread_claude_busy(&state, &body.thread_id) {
+        return Err(err);
+    }
+
     let session_id = binding.session_id;
     let term_id = binding.term_id;
-    let thread_id = binding.thread_id.clone();
+    let thread_id_bg = binding.thread_id.clone();
     let state_bg = state.clone();
     let approve = body.approve;
     let acting_user = Some(bunny_user);
-    let run = tokio::task::spawn_blocking(move || {
-        run_thread_claude_after_permission(
-            &state_bg,
-            session_id,
-            term_id,
-            &thread_id,
-            approve,
-            &command,
-            &allowed_tools,
-            claude_session_id.as_deref(),
-            acting_user,
-        )
-    })
-    .await
-    .map_err(|e| ApiError::validation(&e.to_string()))??;
-
-    record_thread_claude_output(&state, &body.thread_id, &run)?;
+    tokio::task::spawn(async move {
+        let state_record = state_bg.clone();
+        let thread_record = thread_id_bg.clone();
+        let run = tokio::task::spawn_blocking(move || {
+            run_thread_claude_after_permission(
+                &state_bg,
+                session_id,
+                term_id,
+                &thread_id_bg,
+                approve,
+                &command,
+                &allowed_tools,
+                claude_session_id.as_deref(),
+                acting_user,
+            )
+        })
+        .await;
+        match run {
+            Ok(Ok(run)) => {
+                let _ = record_thread_claude_output(&state_record, &thread_record, &run);
+                store_thread_claude_delivery(&state_record, &thread_record, &run);
+            }
+            Ok(Err(e)) => store_thread_claude_error(&state_record, &thread_record, format!("❌ {e}")),
+            Err(e) => store_thread_claude_error(&state_record, &thread_record, format!("❌ {e}")),
+        }
+    });
 
     Ok(Json(ThreadPermissionResponse {
         approved: body.approve,
-        claude: thread_response_from_run(&run),
+        claude_pending: true,
+        claude: empty_claude_api_fields(),
     }))
 }
 
@@ -980,6 +1129,46 @@ fn close_thread_shell(state: &AppState, term_id: Uuid, session_id: Uuid) -> Resu
         .map_err(|e| ApiError::validation(&e.to_string()))?;
     let _ = session_id;
     Ok(())
+}
+
+pub async fn internal_thread_claude_poll(
+    state: Arc<AppState>,
+    body: ThreadIdRequest,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _binding = state
+        .discord
+        .lock()
+        .get_thread_binding(&body.thread_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("thread not found"))?;
+
+    let busy = state.thread_claude_pids.lock().contains_key(&body.thread_id);
+    if let Some(claude) = peek_thread_claude_delivery(&state, &body.thread_id) {
+        let mut out = serde_json::to_value(claude).map_err(|e| ApiError::validation(&e.to_string()))?;
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert("busy".into(), serde_json::json!(false));
+            obj.insert("ready".into(), serde_json::json!(true));
+        }
+        return Ok(Json(out));
+    }
+    Ok(Json(serde_json::json!({
+        "busy": busy,
+        "ready": false,
+    })))
+}
+
+pub async fn internal_thread_claude_ack(
+    state: Arc<AppState>,
+    body: ThreadIdRequest,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _binding = state
+        .discord
+        .lock()
+        .get_thread_binding(&body.thread_id)
+        .map_err(|e| ApiError::validation(&e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("thread not found"))?;
+    let removed = take_thread_claude_delivery(&state, &body.thread_id).is_some();
+    Ok(Json(serde_json::json!({ "ok": true, "removed": removed })))
 }
 
 pub async fn internal_thread_status(

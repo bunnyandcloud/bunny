@@ -78,6 +78,8 @@ pub fn internal_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/thread/finalize", post(internal_thread_finalize_route))
         .route("/thread/merge", post(internal_thread_merge_route))
         .route("/thread/status", post(internal_thread_status_route))
+        .route("/thread/claude-poll", post(internal_thread_claude_poll_route))
+        .route("/thread/claude-ack", post(internal_thread_claude_ack_route))
         .route("/thread/attachment", post(internal_thread_attachment_route))
         .route("/project/set", post(internal_project_set_route))
         .route("/project", get(internal_project_get_route))
@@ -2512,6 +2514,24 @@ async fn internal_thread_status_route(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     verify_bridge_token(&state, &headers)?;
     crate::discord_threads::internal_thread_status(state, body).await
+}
+
+async fn internal_thread_claude_poll_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadIdRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_claude_poll(state, body).await
+}
+
+async fn internal_thread_claude_ack_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::discord_threads::ThreadIdRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    verify_bridge_token(&state, &headers)?;
+    crate::discord_threads::internal_thread_claude_ack(state, body).await
 }
 
 async fn internal_thread_attachment_route(

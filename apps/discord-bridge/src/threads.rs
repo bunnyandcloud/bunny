@@ -14,6 +14,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const THREAD_CLAUDE_TIMEOUT: Duration = Duration::from_secs(300);
+const THREAD_BIND_SETUP_TIMEOUT: Duration = Duration::from_secs(60);
+const THREAD_CLAUDE_POLL_INTERVAL: Duration = Duration::from_secs(3);
+const THREAD_CLAUDE_POLL_REQUEST: Duration = Duration::from_secs(15);
 /// Discord typing indicator expires after ~10s; refresh while Claude runs.
 const THREAD_TYPING_REFRESH: Duration = Duration::from_secs(8);
 async fn post_thread_working_message(
@@ -29,6 +32,134 @@ async fn post_thread_working_message(
         .await
         .ok()
         .map(|m| m.id)
+}
+
+fn is_retryable_poll_error(err: &anyhow::Error) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("error sending request")
+        || msg.contains("connection")
+        || msg.contains("timed out")
+        || msg.contains("timeout")
+}
+
+/// Poll until Claude finishes after async thread endpoints (short HTTP requests).
+async fn wait_thread_claude(
+    bunny: &BunnyClient,
+    poll_body: &serde_json::Value,
+    locale: Locale,
+) -> anyhow::Result<serde_json::Value> {
+    use std::time::Instant;
+    let deadline = Instant::now() + THREAD_CLAUDE_TIMEOUT;
+    while Instant::now() < deadline {
+        match bunny
+            .post_json_timeout(
+                "/thread/claude-poll",
+                poll_body,
+                THREAD_CLAUDE_POLL_REQUEST,
+                None,
+            )
+            .await
+        {
+            Ok(v) if v.get("ready").and_then(|b| b.as_bool()) == Some(true) => return Ok(v),
+            Ok(_) => tokio::time::sleep(THREAD_CLAUDE_POLL_INTERVAL).await,
+            Err(e) if is_retryable_poll_error(&e) => {
+                tracing::warn!("thread claude poll retry: {e}");
+                tokio::time::sleep(THREAD_CLAUDE_POLL_INTERVAL).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    // Last chance before giving up (work may have finished between polls).
+    if let Ok(v) = bunny
+        .post_json_timeout(
+            "/thread/claude-poll",
+            poll_body,
+            Duration::from_secs(30),
+            None,
+        )
+        .await
+    {
+        if v.get("ready").and_then(|b| b.as_bool()) == Some(true) {
+            return Ok(v);
+        }
+    }
+    anyhow::bail!(
+        "{}",
+        t(locale, "discord.thread.claude_poll_timeout", &[])
+    );
+}
+
+/// POST a thread endpoint (fast ack), then poll until Claude responds.
+async fn request_thread_claude(
+    bunny: &BunnyClient,
+    path: &str,
+    body: &serde_json::Value,
+    poll_body: &serde_json::Value,
+    locale: Locale,
+) -> anyhow::Result<serde_json::Value> {
+    let init = bunny
+        .post_json_timeout(path, body, THREAD_BIND_SETUP_TIMEOUT, Some(locale))
+        .await?;
+    if init.get("claude_pending").and_then(|v| v.as_bool()) == Some(true) {
+        wait_thread_claude(bunny, poll_body, locale).await
+    } else {
+        Ok(init)
+    }
+}
+
+/// Remove a delivered Claude result from the server queue (after Discord post succeeded).
+async fn ack_thread_claude_delivery(bunny: &BunnyClient, poll_body: &serde_json::Value) {
+    if let Err(e) = bunny
+        .post_json_timeout(
+            "/thread/claude-ack",
+            poll_body,
+            THREAD_CLAUDE_POLL_REQUEST,
+            None,
+        )
+        .await
+    {
+        tracing::warn!("thread claude ack failed: {e}");
+    }
+}
+
+/// Deliver a Claude result that completed while the bridge was disconnected.
+/// Returns true if a ready response was posted.
+async fn deliver_pending_claude_if_any(
+    http: &Http,
+    channel_id: ChannelId,
+    bunny: &BunnyClient,
+    poll_body: &serde_json::Value,
+    thread_id: &str,
+    bctx: &serde_json::Value,
+    locale: Locale,
+) -> anyhow::Result<bool> {
+    let poll = bunny
+        .post_json_timeout(
+            "/thread/claude-poll",
+            poll_body,
+            THREAD_CLAUDE_POLL_REQUEST,
+            None,
+        )
+        .await;
+    let Ok(v) = poll else {
+        return Ok(false);
+    };
+    if v.get("ready").and_then(|b| b.as_bool()) != Some(true) {
+        return Ok(false);
+    }
+    post_thread_claude_response(
+        http,
+        channel_id,
+        &v,
+        MessageId::new(0),
+        thread_id,
+        bctx,
+        bunny,
+        locale,
+        Some(poll_body),
+    )
+    .await?;
+    Ok(true)
 }
 
 fn spawn_thread_typing_refresh(http: Arc<Http>, channel_id: ChannelId) -> tokio::task::JoinHandle<()> {
@@ -184,7 +315,7 @@ pub async fn handle_message(
     let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), thread_ch.id);
 
     let bind = match bunny
-        .post_json_timeout("/thread/bind", &bind_body, THREAD_CLAUDE_TIMEOUT, None)
+        .post_json_timeout("/thread/bind", &bind_body, THREAD_BIND_SETUP_TIMEOUT, None)
         .await
     {
         Ok(v) => v,
@@ -203,6 +334,36 @@ pub async fn handle_message(
                 .await?;
             return Ok(());
         }
+    };
+
+    let poll_body = serde_json::json!({
+        "guild_id": bctx["guild_id"],
+        "channel_id": bctx["channel_id"],
+        "thread_id": thread_id,
+        "discord_user_id": bctx["discord_user_id"],
+    });
+
+    let claude_res = if bind.get("claude_pending").and_then(|v| v.as_bool()) == Some(true) {
+        match wait_thread_claude(bunny, &poll_body, locale).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(%thread_id, "thread claude poll failed: {e}");
+                clear_thread_working(&ctx.http, thread_ch.id, working_id, Some(typing_task)).await;
+                thread_ch
+                    .send_message(
+                        &ctx.http,
+                        CreateMessage::new().content(t(
+                            locale,
+                            "discord.thread.claude_poll_timeout",
+                            &[],
+                        )),
+                    )
+                    .await?;
+                return Ok(());
+            }
+        }
+    } else {
+        bind.clone()
     };
 
     clear_thread_working(&ctx.http, thread_ch.id, working_id, Some(typing_task)).await;
@@ -248,12 +409,13 @@ pub async fn handle_message(
     post_thread_claude_response(
         &ctx.http,
         thread_ch.id,
-        &bind,
+        &claude_res,
         goal_msg.id,
         &thread_id,
         &bctx,
         bunny,
         locale,
+        Some(&poll_body),
     )
     .await?;
 
@@ -295,6 +457,17 @@ async fn handle_thread_message(
     let mentions_bot = message_mentions_bot(msg, bot_id);
 
     if reply_to_bot || mentions_bot {
+        deliver_pending_claude_if_any(
+            &ctx.http,
+            msg.channel_id,
+            bunny,
+            &body,
+            thread_id,
+            bctx,
+            locale,
+        )
+        .await?;
+
         let text = strip_bot_mention(&msg.content, bot_id);
         if text.is_empty() && msg.attachments.is_empty() {
             return Ok(());
@@ -318,9 +491,14 @@ async fn handle_thread_message(
         let working_id = post_thread_working_message(&ctx.http, msg.channel_id, locale).await;
         let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), msg.channel_id);
 
-        let res = match bunny
-            .post_json_timeout("/thread/input", &input_body, THREAD_CLAUDE_TIMEOUT, None)
-            .await
+        let res = match request_thread_claude(
+            bunny,
+            "/thread/input",
+            &input_body,
+            &body,
+            locale,
+        )
+        .await
         {
             Ok(v) => v,
             Err(e) => {
@@ -332,10 +510,27 @@ async fn handle_thread_message(
                     Some(typing_task),
                 )
                 .await;
+                // Work may have finished while the bridge timed out — try once more.
+                if deliver_pending_claude_if_any(
+                    &ctx.http,
+                    msg.channel_id,
+                    bunny,
+                    &body,
+                    thread_id,
+                    bctx,
+                    locale,
+                )
+                .await?
+                {
+                    return Ok(());
+                }
                 msg.channel_id
                     .send_message(
                         &ctx.http,
-                        CreateMessage::new().content(format!("❌ Erreur Claude : {e}")),
+                        CreateMessage::new().content(format!(
+                            "❌ {}",
+                            t(locale, "discord.thread.claude_error", &[("error", &e.to_string())])
+                        )),
                     )
                     .await?;
                 return Ok(());
@@ -353,6 +548,7 @@ async fn handle_thread_message(
             bctx,
             bunny,
             locale,
+            Some(&body),
         )
         .await?;
         return Ok(());
@@ -372,6 +568,36 @@ async fn handle_thread_message(
 }
 
 async fn post_thread_claude_response(
+    http: &Http,
+    channel_id: ChannelId,
+    res: &serde_json::Value,
+    input_message_id: MessageId,
+    thread_id: &str,
+    bctx: &serde_json::Value,
+    bunny: &BunnyClient,
+    locale: Locale,
+    poll_body: Option<&serde_json::Value>,
+) -> anyhow::Result<()> {
+    let result = post_thread_claude_response_inner(
+        http,
+        channel_id,
+        res,
+        input_message_id,
+        thread_id,
+        bctx,
+        bunny,
+        locale,
+    )
+    .await;
+    if result.is_ok() {
+        if let Some(body) = poll_body {
+            ack_thread_claude_delivery(bunny, body).await;
+        }
+    }
+    result
+}
+
+async fn post_thread_claude_response_inner(
     http: &Http,
     channel_id: ChannelId,
     res: &serde_json::Value,
@@ -441,13 +667,17 @@ async fn post_thread_claude_response(
         channel_id
             .send_message(
                 http,
-                CreateMessage::new().content("_(Claude n’a renvoyé aucune réponse textuelle.)_"),
+                CreateMessage::new().content(t(
+                    locale,
+                    "discord.thread.empty_response",
+                    &[],
+                )),
             )
             .await?;
         return Ok(());
     }
 
-    for page in crate::paginate_plain(text) {
+    for page in crate::paginate_plain(&crate::format_claude_markdown_for_discord(text)) {
         channel_id
             .send_message(http, CreateMessage::new().content(page))
             .await?;
@@ -649,16 +879,26 @@ pub async fn handle_thread_permission_button(
     let working_id = post_thread_working_message(&http, comp.channel_id, locale).await;
     let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
 
-    let res = match bunny
-        .post_json_timeout("/thread/permission", &body, THREAD_CLAUDE_TIMEOUT, None)
-        .await
+    let poll_body = bctx.clone();
+
+    let res = match request_thread_claude(
+        bunny,
+        "/thread/permission",
+        &body,
+        &poll_body,
+        locale,
+    )
+    .await
     {
         Ok(v) => v,
         Err(e) => {
             clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
             comp.create_followup(
                 &http,
-                CreateInteractionResponseFollowup::new().content(format!("❌ Erreur : {e}")),
+                CreateInteractionResponseFollowup::new().content(format!(
+                    "❌ {}",
+                    t(locale, "discord.thread.claude_error", &[("error", &e.to_string())])
+                )),
             )
             .await?;
             return Ok(());
@@ -676,6 +916,7 @@ pub async fn handle_thread_permission_button(
         &bctx,
         bunny,
         locale,
+        Some(&poll_body),
     )
     .await
 }
@@ -818,8 +1059,12 @@ pub async fn handle_thread_question_button(
     let working_id = post_thread_working_message(&http, comp.channel_id, locale).await;
     let typing_task = spawn_thread_typing_refresh(http.clone(), comp.channel_id);
 
+    body["thread_id"] = serde_json::json!(thread_id);
+
+    let poll_body = bctx.clone();
+
     let res = match bunny
-        .post_json_timeout("/thread/answer", &body, THREAD_CLAUDE_TIMEOUT, None)
+        .post_json_timeout("/thread/answer", &body, THREAD_BIND_SETUP_TIMEOUT, Some(locale))
         .await
     {
         Ok(v) => v,
@@ -827,11 +1072,35 @@ pub async fn handle_thread_question_button(
             clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
             comp.create_followup(
                 &http,
-                CreateInteractionResponseFollowup::new().content(format!("❌ Erreur : {e}")),
+                CreateInteractionResponseFollowup::new().content(format!(
+                    "❌ {}",
+                    t(locale, "discord.thread.claude_error", &[("error", &e.to_string())])
+                )),
             )
             .await?;
             return Ok(());
         }
+    };
+
+    let res = if res.get("claude_pending").and_then(|v| v.as_bool()) == Some(true) {
+        match wait_thread_claude(bunny, &poll_body, locale).await {
+            Ok(v) => v,
+            Err(e) => {
+                clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
+                comp.create_followup(
+                    &http,
+                    CreateInteractionResponseFollowup::new().content(t(
+                        locale,
+                        "discord.thread.claude_poll_timeout",
+                        &[],
+                    )),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    } else {
+        res
     };
 
     clear_thread_working(&http, comp.channel_id, working_id, Some(typing_task)).await;
@@ -867,6 +1136,7 @@ pub async fn handle_thread_question_button(
         &bctx,
         bunny,
         locale,
+        Some(&poll_body),
     )
     .await?;
 

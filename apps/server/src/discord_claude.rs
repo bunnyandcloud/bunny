@@ -192,11 +192,134 @@ pub struct BashPermissionRequest {
     pub allowed_tools: Vec<String>,
 }
 
+/// Extract the last Claude `--output-format json` object from stdout (NDJSON / noise lines).
+fn extract_claude_json_value(raw: &str) -> Option<serde_json::Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return Some(v);
+    }
+    let mut last: Option<serde_json::Value> = None;
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if v.get("type").and_then(|t| t.as_str()) == Some("result") {
+                last = Some(v);
+            } else if last.is_none() {
+                last = Some(v);
+            }
+        }
+    }
+    if last.is_some() {
+        return last;
+    }
+    extract_last_balanced_json_object(trimmed)
+}
+
+fn extract_last_balanced_json_object(s: &str) -> Option<serde_json::Value> {
+    let mut best: Option<serde_json::Value> = None;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
+            continue;
+        }
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escape = false;
+        let mut matched = false;
+        for (j, &ch) in bytes[i..].iter().enumerate() {
+            if in_string {
+                if escape {
+                    escape = false;
+                } else if ch == b'\\' {
+                    escape = true;
+                } else if ch == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match ch {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let slice = &s[i..=i + j];
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(slice) {
+                            best = Some(v);
+                        }
+                        i = i + j + 1;
+                        matched = true;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !matched {
+            i += 1;
+        }
+    }
+    best
+}
+
+fn is_claude_result_json_envelope(s: &str) -> bool {
+    let t = s.trim();
+    t.starts_with('{')
+        && t.contains("\"type\"")
+        && (t.contains("\"result\"") || t.contains("\"subtype\""))
+}
+
+fn sanitize_claude_display_for_discord(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Internal shell marker — strip, never show as the Claude reply.
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .filter(|line| !line.trim().starts_with(terminals::BUNNY_BACKGROUND_PID_MARKER))
+        .collect();
+    lines.join("\n").trim().to_string()
+}
+
+fn finalize_claude_display_text(text: &str, raw_fallback: &str) -> String {
+    let sanitized = sanitize_claude_display_for_discord(text);
+    if !sanitized.is_empty() {
+        return sanitized;
+    }
+    if raw_fallback
+        .trim()
+        .starts_with(terminals::BUNNY_BACKGROUND_PID_MARKER)
+    {
+        return String::new();
+    }
+    if is_claude_result_json_envelope(raw_fallback) {
+        if let Some(v) = extract_claude_json_value(raw_fallback) {
+            if let Some(result) = claude_json_result_text(&v) {
+                let inner = sanitize_claude_display_for_discord(&result);
+                if !inner.is_empty() {
+                    return inner;
+                }
+            }
+        }
+        return "_(Réponse Claude illisible — réessayez dans le fil.)_".to_string();
+    }
+    sanitize_claude_display_for_discord(raw_fallback)
+}
+
 pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
     let trimmed = raw.trim();
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+    let Some(v) = extract_claude_json_value(trimmed) else {
         return ClaudeJsonParse {
-            display_text: trimmed.to_string(),
+            display_text: finalize_claude_display_text(trimmed, trimmed),
             session_id: None,
             ask_user_questions: None,
             bash_permission: None,
@@ -234,12 +357,13 @@ pub fn parse_claude_json_for_discord(raw: &str) -> ClaudeJsonParse {
     }
     let result = claude_json_result_text(&v).unwrap_or_else(|| trimmed.to_string());
     let bash_permission = extract_bash_permission_from_result_text(&result);
+    let display_text = if bash_permission.is_some() {
+        format_pending_permission_intro(&bash_permission.as_ref().unwrap().command)
+    } else {
+        finalize_claude_display_text(&result, trimmed)
+    };
     ClaudeJsonParse {
-        display_text: if bash_permission.is_some() {
-            format_pending_permission_intro(&bash_permission.as_ref().unwrap().command)
-        } else {
-            result
-        },
+        display_text,
         session_id,
         ask_user_questions: None,
         bash_permission,
@@ -898,19 +1022,6 @@ pub fn run_thread_claude(
         user_message,
         author_label,
     );
-    let cmd_probe = format!("claude -p {}", shell_single_quote(&prompt));
-    if bunny_discord::risk::requires_approval(&cmd_probe) {
-        return Ok(ThreadClaudeResult {
-            output: String::new(),
-            exit_code: 0,
-            needs_approval: true,
-            approval_summary: Some(cmd_probe.chars().take(200).collect()),
-            pending_question_id: None,
-            pending_questions: None,
-            pending_permission_id: None,
-            permission_command: None,
-        });
-    }
 
     let resume = state
         .discord
@@ -1081,6 +1192,8 @@ fn thread_claude_result_from_raw(
         output = format!(
             "_(Claude a quitté avec le code {effective_exit} — voir le transcript du shell `discord-*` dans la Web UI)_"
         );
+    } else if output.trim().is_empty() && effective_exit == 0 {
+        output = "✓ Modifications effectuées — dites-moi si vous voulez ajuster quelque chose.".into();
     }
 
     Ok(ThreadClaudeResult {
@@ -1718,5 +1831,39 @@ mod tests {
         let parsed = parse_claude_json_for_discord(raw);
         let bash = parsed.bash_permission.expect("bash from prose");
         assert!(bash.command.contains("git add test.md"));
+    }
+
+    #[test]
+    fn parses_success_json_without_leaking_envelope() {
+        let raw = r#"{"type":"result","subtype":"success","is_error":false,"session_id":"sess-1","result":"Build OK — gradient appliqué."}"#;
+        let parsed = parse_claude_json_for_discord(raw);
+        assert_eq!(parsed.display_text, "Build OK — gradient appliqué.");
+        assert!(!parsed.display_text.contains("\"type\""));
+    }
+
+    #[test]
+    fn parses_ndjson_stdout_using_last_result_line() {
+        let raw = concat!(
+            "{\"type\":\"progress\",\"message\":\"thinking\"}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"sess-2\",\"result\":\"Réponse finale.\"}"
+        );
+        let parsed = parse_claude_json_for_discord(raw);
+        assert_eq!(parsed.display_text, "Réponse finale.");
+    }
+
+    #[test]
+    fn strips_background_pid_marker_from_display() {
+        let parsed = parse_claude_json_for_discord("[bunny] background pid=57671");
+        assert!(parsed.display_text.is_empty());
+    }
+
+    #[test]
+    fn noisy_prefix_before_json_still_extracts_result() {
+        let raw = concat!(
+            "claude: loading config\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"Hello from Claude\"}"
+        );
+        let parsed = parse_claude_json_for_discord(raw);
+        assert_eq!(parsed.display_text, "Hello from Claude");
     }
 }

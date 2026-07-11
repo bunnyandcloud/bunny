@@ -379,6 +379,22 @@
     "en": "⏳ **Claude is working…**\n_This may take 1–5 minutes — this message disappears when done._",
     "fr": "⏳ **Claude travaille…**\n_Cela peut prendre 1 à 5 minutes — ce message disparaît à la réponse._"
   },
+  "discord.thread.claude_error": {
+    "en": "Claude error: {error}",
+    "fr": "Erreur Claude : {error}"
+  },
+  "discord.thread.claude_busy": {
+    "en": "⏳ Claude is still working on your previous message. Wait for its reply, react ⛔ on that message to stop, or start a new thread.",
+    "fr": "⏳ Claude traite encore votre message précédent. Attendez sa réponse, réagissez ⛔ sur ce message pour arrêter, ou ouvrez un nouveau thread."
+  },
+  "discord.thread.claude_poll_timeout": {
+    "en": "⏳ Claude is taking longer than expected. If nothing appears soon, react ⛔ on your message to stop or try again.",
+    "fr": "⏳ Claude met plus de temps que prévu. Si rien n’apparaît bientôt, réagissez ⛔ sur votre message pour arrêter ou réessayez."
+  },
+  "discord.thread.empty_response": {
+    "en": "✓ Done — Claude made changes without a text summary. Say @bunny if you want details or adjustments.",
+    "fr": "✓ Terminé — Claude a effectué des modifications sans résumé texte. Relancez @bunny si vous voulez des détails ou des ajustements."
+  },
   "discord.thread.question_intro": {
     "en": "❓ **Choice required** — use the buttons below.",
     "fr": "❓ **Choix requis** — utilisez les boutons ci-dessous."

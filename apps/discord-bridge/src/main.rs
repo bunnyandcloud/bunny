@@ -1914,7 +1914,7 @@ fn split_discord_text_respecting_fences(text: &str, max: usize) -> Vec<String> {
 }
 
 /// Map common Claude markdown to Discord message markdown (no wrapping code fence).
-fn format_claude_markdown_for_discord(text: &str) -> String {
+pub(crate) fn format_claude_markdown_for_discord(text: &str) -> String {
     let mut out = String::new();
     let mut in_fence = false;
     for line in text.lines() {

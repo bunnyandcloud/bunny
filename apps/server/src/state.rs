@@ -53,6 +53,8 @@ pub struct AppState {
     pub discord_bridge: tokio::sync::Mutex<Option<crate::discord_bridge::DiscordBridgeSidecar>>,
     /// Active headless Claude subprocess PIDs per Discord thread (for /thread/stop).
     pub thread_claude_pids: Mutex<HashMap<String, u32>>,
+    /// Claude results waiting for the Discord bridge to pick up (async /thread/bind).
+    pub thread_claude_delivery: Mutex<HashMap<String, crate::discord_threads::ThreadClaudeApiFields>>,
     pub integrations: ParkingMutex<IntegrationsDb>,
     pub git_workspace: GitWorkspaceManager,
     pub chat_hub: ChatBridgeHub,
@@ -170,6 +172,7 @@ impl AppState {
             discord: ParkingMutex::new(discord),
             discord_bridge: tokio::sync::Mutex::new(None),
             thread_claude_pids: Mutex::new(HashMap::new()),
+            thread_claude_delivery: Mutex::new(HashMap::new()),
             previews: RwLock::new(HashMap::new()),
             terminal_sessions: RwLock::new(HashMap::new()),
             browser_sessions: RwLock::new(HashMap::new()),

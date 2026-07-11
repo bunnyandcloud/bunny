@@ -4063,6 +4063,7 @@ pub fn exec_discord_shell_command_timed(
         (true, false) => stderr.trim_end().to_string(),
         (false, false) => format!("{stdout}{stderr}").trim_end().to_string(),
     };
+    let text = curate_discord_shell_output(command, &text);
     append_discord_transcript(
         state,
         term_id,
@@ -4255,7 +4256,7 @@ fn run_command_with_timeout(
                     let _ = child.kill();
                     let _ = child.wait();
                     anyhow::bail!(
-                        "command timed out after {}s — interactive editors (nvim, vim) are not supported from Discord",
+                        "command timed out after {}s — interactive editors (nvim, vim) are not supported from Discord. Use the Web UI terminal instead.",
                         timeout.as_secs()
                     );
                 }
