@@ -1,11 +1,12 @@
 use crate::{BunnyClient, CommandReply};
 use bunny_i18n::{Locale, t};
 use serenity::all::{
-    ChannelId, CreateActionRow, CreateButton, CreateInteractionResponse,
+    Attachment, ChannelId, CreateActionRow, CreateButton, CreateInteractionResponse,
     CreateInteractionResponseFollowup, CreateInteractionResponseMessage, CreateMessage,
-    CreateThread, EditInteractionResponse, EditMessage, Http, Message, MessageId, ReactionType,
-    UserId,
+    CreateThread, EditInteractionResponse, EditMessage, GetMessages, Http, Message, MessageId,
+    ReactionType, UserId,
 };
+use std::collections::HashSet;
 use serenity::model::application::ButtonStyle;
 use serenity::model::channel::ChannelType;
 use serenity::model::id::GuildId;
@@ -281,7 +282,8 @@ pub async fn handle_message(
     }
 
     let prompt = strip_bot_mention(&msg.content, bot_id);
-    if prompt.is_empty() {
+    let has_attachments = !msg.attachments.is_empty();
+    if prompt.is_empty() && !has_attachments {
         return Ok(());
     }
 
@@ -296,7 +298,13 @@ pub async fn handle_message(
         return Ok(());
     }
 
-    let thread_name = truncate_thread_name(&prompt);
+    let goal_text = if prompt.is_empty() {
+        t(locale, "discord.thread.attachments_only_goal", &[])
+    } else {
+        prompt.clone()
+    };
+
+    let thread_name = truncate_thread_name(&goal_text);
     let thread_ch = msg
         .channel_id
         .create_thread_from_message(
@@ -309,7 +317,10 @@ pub async fn handle_message(
     let thread_id = thread_ch.id.get().to_string();
     let mut bind_body = bctx.clone();
     bind_body["thread_id"] = serde_json::json!(thread_id);
-    bind_body["goal_text"] = serde_json::json!(prompt);
+    bind_body["goal_text"] = serde_json::json!(goal_text);
+    if has_attachments {
+        bind_body["defer_claude"] = serde_json::json!(true);
+    }
 
     let working_id = post_thread_working_message(&ctx.http, thread_ch.id, locale).await;
     let typing_task = spawn_thread_typing_refresh(ctx.http.clone(), thread_ch.id);
@@ -343,7 +354,22 @@ pub async fn handle_message(
         "discord_user_id": bctx["discord_user_id"],
     });
 
-    let claude_res = if bind.get("claude_pending").and_then(|v| v.as_bool()) == Some(true) {
+    let claude_res = if has_attachments {
+        let attachments =
+            upload_message_attachments(bunny, &bind_body, &thread_id, msg, locale).await?;
+        let input_body = serde_json::json!({
+            "guild_id": bctx["guild_id"],
+            "channel_id": bctx["channel_id"],
+            "thread_id": thread_id,
+            "discord_user_id": bctx["discord_user_id"],
+            "text": prompt,
+            "discord_message_id": msg.id.get().to_string(),
+            "author_name": msg.author.name,
+            "include_discussion_context": false,
+            "attachments": attachments_to_json(&attachments),
+        });
+        request_thread_claude(bunny, "/thread/input", &input_body, &poll_body, locale).await?
+    } else if bind.get("claude_pending").and_then(|v| v.as_bool()) == Some(true) {
         match wait_thread_claude(bunny, &poll_body, locale).await {
             Ok(v) => v,
             Err(e) => {
@@ -389,7 +415,7 @@ pub async fn handle_message(
                 locale,
                 "discord.thread.linked",
                 &[
-                    ("goal", &prompt),
+                    ("goal", &goal_text),
                     (
                         "shell",
                         bind.get("shell_name").and_then(|v| v.as_str()).unwrap_or("?"),
@@ -418,8 +444,6 @@ pub async fn handle_message(
         Some(&poll_body),
     )
     .await?;
-
-    upload_message_attachments(bunny, &bind_body, &thread_id, msg).await?;
 
     Ok(())
 }
@@ -472,20 +496,27 @@ async fn handle_thread_message(
         if text.is_empty() && msg.attachments.is_empty() {
             return Ok(());
         }
-        upload_message_attachments(bunny, &body, thread_id, msg).await?;
-        let mut prompt = text;
-        if !msg.attachments.is_empty() {
-            prompt.push_str("\n\n_(pièces jointes enregistrées sur le serveur — voir chemins dans les logs thread)_");
-        }
+        let attachments = collect_context_attachments(
+            &ctx.http,
+            msg.channel_id,
+            msg,
+            bot_id,
+            bunny,
+            &body,
+            thread_id,
+            locale,
+        )
+        .await?;
         let input_body = serde_json::json!({
             "guild_id": bctx["guild_id"],
             "channel_id": bctx["channel_id"],
             "thread_id": thread_id,
             "discord_user_id": bctx["discord_user_id"],
-            "text": prompt,
+            "text": text,
             "discord_message_id": msg.id.get().to_string(),
             "author_name": msg.author.name,
             "include_discussion_context": true,
+            "attachments": attachments_to_json(&attachments),
         });
 
         let working_id = post_thread_working_message(&ctx.http, msg.channel_id, locale).await;
@@ -554,12 +585,19 @@ async fn handle_thread_message(
         return Ok(());
     }
 
+    let mut discussion_content = msg.content.clone();
+    if !msg.attachments.is_empty() {
+        let attachments =
+            upload_attachments_from_message(bunny, bctx, thread_id, msg, locale).await?;
+        discussion_content =
+            format_discussion_content_with_attachments(&discussion_content, &attachments);
+    }
     let discussion_body = serde_json::json!({
         "guild_id": bctx["guild_id"],
         "channel_id": bctx["channel_id"],
         "thread_id": thread_id,
         "discord_user_id": bctx["discord_user_id"],
-        "content": msg.content,
+        "content": discussion_content,
         "author_name": msg.author.name,
     });
     bunny.post_json("/thread/discussion", &discussion_body, None).await?;
@@ -1359,23 +1397,196 @@ pub fn is_stop_emoji(reaction: &ReactionType) -> bool {
     }
 }
 
+const THREAD_CONTEXT_MESSAGE_LIMIT: u8 = 25;
+
+#[derive(Debug, Clone)]
+struct UploadedAttachment {
+    path: String,
+    filename: String,
+    is_image: bool,
+    author_name: Option<String>,
+}
+
+fn attachment_is_image(att: &Attachment) -> bool {
+    if let Some(ct) = &att.content_type {
+        if ct.starts_with("image/") {
+            return true;
+        }
+    }
+    if att.width.is_some() && att.height.is_some() {
+        return true;
+    }
+    let lower = att.filename.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+}
+
+fn attachments_to_json(attachments: &[UploadedAttachment]) -> Vec<serde_json::Value> {
+    attachments
+        .iter()
+        .map(|att| {
+            serde_json::json!({
+                "path": att.path,
+                "filename": att.filename,
+                "is_image": att.is_image,
+                "author_name": att.author_name,
+            })
+        })
+        .collect()
+}
+
+fn attachment_storage_name(msg: &Message, att: &Attachment) -> String {
+    format!("{}-{}", msg.id.get(), att.id.get())
+}
+
+fn format_discussion_content_with_attachments(
+    text: &str,
+    attachments: &[UploadedAttachment],
+) -> String {
+    if attachments.is_empty() {
+        return text.to_string();
+    }
+    let mut out = text.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("# Pièces jointes (discussion)\n");
+    for att in attachments {
+        if att.is_image {
+            out.push_str(&format!("- Image **{}** : `{}`\n", att.filename, att.path));
+        } else {
+            out.push_str(&format!("- Fichier **{}** : `{}`\n", att.filename, att.path));
+        }
+    }
+    out
+}
+
+fn dedupe_uploaded_attachments(attachments: Vec<UploadedAttachment>) -> Vec<UploadedAttachment> {
+    let mut seen_paths = HashSet::new();
+    attachments
+        .into_iter()
+        .filter(|att| seen_paths.insert(att.path.clone()))
+        .collect()
+}
+
+async fn upload_single_attachment(
+    bunny: &BunnyClient,
+    bctx: &serde_json::Value,
+    thread_id: &str,
+    msg: &Message,
+    att: &Attachment,
+    locale: Locale,
+) -> anyhow::Result<UploadedAttachment> {
+    let bytes = reqwest::get(&att.url).await?.bytes().await?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let mut body = bctx.clone();
+    body["thread_id"] = serde_json::json!(thread_id);
+    body["filename"] = serde_json::json!(attachment_storage_name(msg, att));
+    body["original_filename"] = serde_json::json!(att.filename);
+    body["content_base64"] = serde_json::json!(b64);
+    if let Some(ct) = &att.content_type {
+        body["content_type"] = serde_json::json!(ct);
+    }
+    let res = bunny.post_json("/thread/attachment", &body, None).await?;
+    if res.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        anyhow::bail!(
+            "{}",
+            t(
+                locale,
+                "discord.thread.attachment_upload_failed",
+                &[("filename", &att.filename)]
+            )
+        );
+    }
+    Ok(UploadedAttachment {
+        path: res
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        filename: att.filename.clone(),
+        is_image: res
+            .get("is_image")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(|| attachment_is_image(att)),
+        author_name: Some(msg.author.name.clone()),
+    })
+}
+
+async fn upload_attachments_from_message(
+    bunny: &BunnyClient,
+    bctx: &serde_json::Value,
+    thread_id: &str,
+    msg: &Message,
+    locale: Locale,
+) -> anyhow::Result<Vec<UploadedAttachment>> {
+    let mut uploaded = Vec::new();
+    for att in &msg.attachments {
+        uploaded.push(
+            upload_single_attachment(bunny, bctx, thread_id, msg, att, locale).await?,
+        );
+    }
+    Ok(uploaded)
+}
+
 async fn upload_message_attachments(
     bunny: &BunnyClient,
     bctx: &serde_json::Value,
     thread_id: &str,
     msg: &Message,
-) -> anyhow::Result<()> {
-    for att in &msg.attachments {
-        let bytes = reqwest::get(&att.url).await?.bytes().await?;
-        use base64::Engine;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let mut body = bctx.clone();
-        body["thread_id"] = serde_json::json!(thread_id);
-        body["filename"] = serde_json::json!(att.filename);
-        body["content_base64"] = serde_json::json!(b64);
-        let _ = bunny.post_json("/thread/attachment", &body, None).await;
+    locale: Locale,
+) -> anyhow::Result<Vec<UploadedAttachment>> {
+    upload_attachments_from_message(bunny, bctx, thread_id, msg, locale).await
+}
+
+async fn collect_context_attachments(
+    http: &Http,
+    channel_id: ChannelId,
+    trigger_msg: &Message,
+    bot_id: UserId,
+    bunny: &BunnyClient,
+    bctx: &serde_json::Value,
+    thread_id: &str,
+    locale: Locale,
+) -> anyhow::Result<Vec<UploadedAttachment>> {
+    let mut messages: Vec<Message> = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    let mut push_msg = |msg: Message| {
+        if seen_ids.insert(msg.id) && !msg.attachments.is_empty() {
+            messages.push(msg);
+        }
+    };
+
+    push_msg(trigger_msg.clone());
+    if let Some(replied) = trigger_msg.referenced_message.as_deref() {
+        push_msg(replied.clone());
     }
-    Ok(())
+
+    if let Ok(recent) = channel_id
+        .messages(http, GetMessages::new().limit(THREAD_CONTEXT_MESSAGE_LIMIT))
+        .await
+    {
+        for msg in recent {
+            if msg.author.id == bot_id {
+                continue;
+            }
+            push_msg(msg);
+        }
+    }
+
+    let mut uploaded = Vec::new();
+    for msg in messages {
+        uploaded.extend(
+            upload_attachments_from_message(bunny, bctx, thread_id, &msg, locale).await?,
+        );
+    }
+    Ok(dedupe_uploaded_attachments(uploaded))
 }
 
 pub async fn run_git_command(

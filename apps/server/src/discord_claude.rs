@@ -898,6 +898,69 @@ fn extract_plan_from_claude_error_json(v: &serde_json::Value) -> Option<String> 
 const THREAD_TRANSCRIPT_MAX_CHARS: usize = 10_000;
 const THREAD_TRANSCRIPT_MAX_MESSAGES: usize = 50;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DiscordThreadAttachment {
+    pub path: String,
+    pub filename: String,
+    pub is_image: bool,
+    #[serde(default)]
+    pub author_name: Option<String>,
+}
+
+pub fn discord_attachment_is_image(filename: &str, content_type: Option<&str>) -> bool {
+    if let Some(ct) = content_type {
+        if ct.starts_with("image/") {
+            return true;
+        }
+    }
+    let lower = filename.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+}
+
+pub fn append_discord_attachments_to_message(
+    text: &str,
+    attachments: &[DiscordThreadAttachment],
+) -> String {
+    if attachments.is_empty() {
+        return text.to_string();
+    }
+    let mut out = text.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("# Pièces jointes Discord\n");
+    for att in attachments {
+        let who = att
+            .author_name
+            .as_deref()
+            .map(|n| format!(" (postée par {n})"))
+            .unwrap_or_default();
+        if att.is_image {
+            out.push_str(&format!(
+                "- Image **{}**{who} : `{}`\n",
+                att.filename, att.path
+            ));
+        } else {
+            out.push_str(&format!(
+                "- Fichier **{}**{who} : `{}`\n",
+                att.filename, att.path
+            ));
+        }
+    }
+    out.push_str(
+        "\nConsignes pièces jointes :\n\
+         - Les fichiers ci-dessus incluent les pièces jointes du dernier message et celles publiées récemment dans le thread.\n\
+         - Pour les **images** listées ci-dessus, analyse-les visuellement (vision) via leurs chemins absolus.\n\
+         - Pour les **autres fichiers**, utilise l'outil Read sur le chemin si tu en as besoin.\n",
+    );
+    out
+}
+
 pub struct ThreadClaudeResult {
     pub output: String,
     #[allow(dead_code)]
@@ -1872,5 +1935,36 @@ mod tests {
         );
         let parsed = parse_claude_json_for_discord(raw);
         assert_eq!(parsed.display_text, "Hello from Claude");
+    }
+
+    #[test]
+    fn discord_attachment_is_image_detects_mime_and_extension() {
+        assert!(super::discord_attachment_is_image(
+            "shot.png",
+            Some("image/png")
+        ));
+        assert!(super::discord_attachment_is_image("photo.JPG", None));
+        assert!(!super::discord_attachment_is_image(
+            "notes.pdf",
+            Some("application/pdf")
+        ));
+    }
+
+    #[test]
+    fn append_discord_attachments_includes_image_paths() {
+        let text = super::append_discord_attachments_to_message(
+            "Regarde cette capture",
+            &[super::DiscordThreadAttachment {
+                path: "/data/discord-attachments/t1/screen.png".into(),
+                filename: "screen.png".into(),
+                is_image: true,
+                author_name: Some("alice".into()),
+            }],
+        );
+        assert!(text.contains("Regarde cette capture"));
+        assert!(text.contains("screen.png"));
+        assert!(text.contains("postée par alice"));
+        assert!(text.contains("/data/discord-attachments/t1/screen.png"));
+        assert!(text.contains("vision"));
     }
 }

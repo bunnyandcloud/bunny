@@ -419,6 +419,14 @@
     "en": "Branch merged into `{base}`.",
     "fr": "Branche fusionnée dans `{base}`."
   },
+  "discord.thread.attachments_only_goal": {
+    "en": "(attachments)",
+    "fr": "(pièces jointes)"
+  },
+  "discord.thread.attachment_upload_failed": {
+    "en": "Could not save attachment `{filename}`.",
+    "fr": "Impossible d’enregistrer la pièce jointe `{filename}`."
+  },
   "discord.link.success": {
     "en": "Linked to Bunny session `{session_id}`",
     "fr": "Lié à la session Bunny `{session_id}`"

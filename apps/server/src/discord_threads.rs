@@ -2,7 +2,8 @@
 
 use crate::api::ApiError;
 use crate::discord_claude::{
-    run_thread_claude, run_thread_claude_after_permission, run_thread_claude_with_answers,
+    append_discord_attachments_to_message, discord_attachment_is_image, run_thread_claude,
+    run_thread_claude_after_permission, run_thread_claude_with_answers, DiscordThreadAttachment,
 };
 use bunny_discord::AskUserQuestionItem;
 use crate::discord_git::{
@@ -33,6 +34,9 @@ pub struct ThreadBindRequest {
     pub thread_id: String,
     pub goal_text: String,
     pub shell_name: Option<String>,
+    /// When true, shell setup runs but Claude is deferred (e.g. until Discord attachments upload).
+    #[serde(default)]
+    pub defer_claude: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -171,6 +175,8 @@ pub struct ThreadInputRequest {
     pub author_name: Option<String>,
     #[serde(default)]
     pub include_discussion_context: bool,
+    #[serde(default)]
+    pub attachments: Vec<DiscordThreadAttachment>,
 }
 
 #[derive(Deserialize)]
@@ -430,39 +436,42 @@ pub async fn internal_thread_bind(
     let goal_text = body.goal_text.clone();
     let thread_id_bg = body.thread_id.clone();
     let acting_user_bg = Some(bunny_user);
-    tokio::task::spawn(async move {
-        let run = execute_thread_claude(
-            &state_bg,
-            &binding_bg,
-            &goal_text,
-            "User",
-            &[],
-            acting_user_bg,
-        )
-        .await;
-        match run {
-            Ok(run) => {
-                let _ = record_thread_claude_output(&state_bg, &thread_id_bg, &run);
-                store_thread_claude_delivery(&state_bg, &thread_id_bg, &run);
+    let defer_claude = body.defer_claude;
+    if !defer_claude {
+        tokio::task::spawn(async move {
+            let run = execute_thread_claude(
+                &state_bg,
+                &binding_bg,
+                &goal_text,
+                "User",
+                &[],
+                acting_user_bg,
+            )
+            .await;
+            match run {
+                Ok(run) => {
+                    let _ = record_thread_claude_output(&state_bg, &thread_id_bg, &run);
+                    store_thread_claude_delivery(&state_bg, &thread_id_bg, &run);
+                }
+                Err(e) => {
+                    store_thread_claude_delivery(
+                        &state_bg,
+                        &thread_id_bg,
+                        &crate::discord_claude::ThreadClaudeResult {
+                            output: format!("❌ {e}"),
+                            exit_code: 1,
+                            needs_approval: false,
+                            approval_summary: None,
+                            pending_question_id: None,
+                            pending_questions: None,
+                            pending_permission_id: None,
+                            permission_command: None,
+                        },
+                    );
+                }
             }
-            Err(e) => {
-                store_thread_claude_delivery(
-                    &state_bg,
-                    &thread_id_bg,
-                    &crate::discord_claude::ThreadClaudeResult {
-                        output: format!("❌ {e}"),
-                        exit_code: 1,
-                        needs_approval: false,
-                        approval_summary: None,
-                        pending_question_id: None,
-                        pending_questions: None,
-                        pending_permission_id: None,
-                        permission_command: None,
-                    },
-                );
-            }
-        }
-    });
+        });
+    }
 
     audit(
         &state,
@@ -484,7 +493,7 @@ pub async fn internal_thread_bind(
         git_enabled: binding.git_enabled,
         thread_branch,
         base_branch,
-        claude_pending: true,
+        claude_pending: !defer_claude,
         claude: empty_claude_api_fields(),
     }))
 }
@@ -646,13 +655,20 @@ pub async fn internal_thread_input(
         .map(|n| format!("User ({n})"))
         .unwrap_or_else(|| "User".into());
 
+    let base_text = if body.text.trim().is_empty() && !body.attachments.is_empty() {
+        "(pièces jointes)".to_string()
+    } else {
+        body.text.clone()
+    };
+    let full_text = append_discord_attachments_to_message(&base_text, &body.attachments);
+
     insert_thread_message(
         &state,
         &body.thread_id,
         DiscordThreadMessageRole::User,
         Some(&body.ctx.discord_user_id),
         body.author_name.as_deref(),
-        &body.text,
+        &full_text,
     )?;
 
     let _ = state
@@ -686,7 +702,7 @@ pub async fn internal_thread_input(
 
     let state_bg = state.clone();
     let binding_bg = binding.clone();
-    let text = body.text.clone();
+    let text = full_text;
     let author_label_bg = author_label.clone();
     let discussion_msgs_bg = discussion_msgs.clone();
     let thread_id_bg = body.thread_id.clone();
@@ -1346,6 +1362,14 @@ pub async fn internal_thread_attachment(
         .get("filename")
         .and_then(|v| v.as_str())
         .unwrap_or("attachment");
+    let display_filename = body
+        .get("original_filename")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(filename);
+    let content_type = body
+        .get("content_type")
+        .and_then(|v| v.as_str());
     let content_b64 = body
         .get("content_base64")
         .and_then(|v| v.as_str())
@@ -1367,10 +1391,14 @@ pub async fn internal_thread_attachment(
     let safe_name = sanitize_branch_token(filename);
     let path = dir.join(&safe_name);
     std::fs::write(&path, &bytes).map_err(|e| ApiError::validation(&e.to_string()))?;
+    let is_image = discord_attachment_is_image(display_filename, content_type);
 
     Ok(Json(serde_json::json!({
         "ok": true,
         "path": path.to_string_lossy(),
+        "filename": display_filename,
+        "is_image": is_image,
+        "size": bytes.len(),
     })))
 }
 
