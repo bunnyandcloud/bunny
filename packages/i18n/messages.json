@@ -511,21 +511,25 @@
     "en": "**Approval required** for `{command}` — this command is not wired for one-click approval via `/bunny run` yet. Use the Web UI terminal, or ask a session admin.",
     "fr": "**Approbation requise** pour `{command}` — cette commande n’est pas encore gérée via `/bunny run`. Utilisez le terminal Web UI, ou demandez à un admin de session."
   },
+  "discord.run.timeout": {
+    "en": "command timed out after {seconds}s — interactive editors (nvim, vim) are not supported from Discord. Open the [Web UI terminal]({url}) to continue.",
+    "fr": "commande expirée après {seconds}s — les éditeurs interactifs (nvim, vim) ne sont pas supportés depuis Discord. Ouvrez le [terminal Web UI]({url}) pour continuer."
+  },
   "discord.run.interactive_pip_uninstall": {
-    "en": "This command needs interactive confirmation — from Discord use `{suggested}`, or answer y/n in the Web UI terminal (Terminal tab).",
-    "fr": "Cette commande demande une confirmation interactive — depuis Discord utilisez `{suggested}`, ou répondez y/n dans le terminal Web UI (onglet Terminal)."
+    "en": "This command needs interactive confirmation — from Discord use `{suggested}`, or answer y/n in the [Web UI terminal]({url}).",
+    "fr": "Cette commande demande une confirmation interactive — depuis Discord utilisez `{suggested}`, ou répondez y/n dans le [terminal Web UI]({url})."
   },
   "discord.run.interactive_git": {
-    "en": "Interactive git command — use the Web UI terminal, or non-interactive flags (e.g. `git commit -m \"…\"`) from Discord.",
-    "fr": "Commande git interactive — utilisez le terminal Web UI, ou des flags non-interactifs (ex. `git commit -m \"…\"`) depuis Discord."
+    "en": "Interactive git command — open the [Web UI terminal]({url}), or use non-interactive flags (e.g. `git commit -m \"…\"`) from Discord.",
+    "fr": "Commande git interactive — ouvrez le [terminal Web UI]({url}), ou utilisez des flags non-interactifs (ex. `git commit -m \"…\"`) depuis Discord."
   },
   "discord.run.interactive_generic": {
-    "en": "Interactive command — use the Web UI terminal to answer prompts (y/n, editor, etc.).",
-    "fr": "Commande interactive — utilisez le terminal Web UI pour répondre aux invites (y/n, éditeur, etc.)."
+    "en": "Interactive command — open the [Web UI terminal]({url}) to answer prompts (y/n, editor, etc.).",
+    "fr": "Commande interactive — ouvrez le [terminal Web UI]({url}) pour répondre aux invites (y/n, éditeur, etc.)."
   },
   "discord.run.interactive_tui_blocked": {
-    "en": "Interactive command not supported from Discord — use the Web UI terminal.",
-    "fr": "Commande interactive non supportée depuis Discord — utilisez le terminal Web UI."
+    "en": "Interactive command not supported from Discord — open the [Web UI terminal]({url}).",
+    "fr": "Commande interactive non supportée depuis Discord — ouvrez le [terminal Web UI]({url})."
   },
   "discord.run.critical_blocked": {
     "en": "This command is blocked from Discord for safety — use the Web UI terminal.",

@@ -39,6 +39,10 @@ function isClaudeSetupMode() {
   return new URLSearchParams(location.search).get('claude') === 'setup';
 }
 
+function terminalIdFromQuery(): string | null {
+  return new URLSearchParams(location.search).get('terminal');
+}
+
 interface Props {
   sessionId: string;
 }
@@ -168,7 +172,11 @@ export default function SessionWorkspace({ sessionId }: Props) {
     );
     shellIdsRef.current = list.map((s) => s.id);
     setShells(list);
-    if (newDiscord) {
+    const queryTerm = terminalIdFromQuery();
+    if (queryTerm && list.some((s) => s.id === queryTerm)) {
+      setActiveId(queryTerm);
+      setWorkspaceTab('terminal');
+    } else if (newDiscord) {
       setActiveId(newDiscord.id);
       setWorkspaceTab('terminal');
     }

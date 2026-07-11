@@ -429,6 +429,7 @@ pub async fn internal_thread_bind(
     let binding_bg = binding.clone();
     let goal_text = body.goal_text.clone();
     let thread_id_bg = body.thread_id.clone();
+    let acting_user_bg = Some(bunny_user);
     tokio::task::spawn(async move {
         let run = execute_thread_claude(
             &state_bg,
@@ -436,6 +437,7 @@ pub async fn internal_thread_bind(
             &goal_text,
             "User",
             &[],
+            acting_user_bg,
         )
         .await;
         match run {
@@ -514,6 +516,7 @@ async fn execute_thread_claude(
     user_message: &str,
     author_label: &str,
     extra_transcript: &[DiscordThreadMessage],
+    acting_user_id: Option<Uuid>,
 ) -> Result<crate::discord_claude::ThreadClaudeResult, ApiError> {
     let goal = binding
         .goal_text
@@ -546,6 +549,7 @@ async fn execute_thread_claude(
             &user_msg,
             &label,
             &transcript,
+            acting_user_id,
         )
     })
     .await
@@ -687,6 +691,7 @@ pub async fn internal_thread_input(
     let discussion_msgs_bg = discussion_msgs.clone();
     let thread_id_bg = body.thread_id.clone();
     let discord_msg_id = body.discord_message_id.clone();
+    let acting_user_bg = Some(bunny_user);
     tokio::task::spawn(async move {
         let run = execute_thread_claude(
             &state_bg,
@@ -694,6 +699,7 @@ pub async fn internal_thread_input(
             &text,
             &author_label_bg,
             &discussion_msgs_bg,
+            acting_user_bg,
         )
         .await;
         match run {

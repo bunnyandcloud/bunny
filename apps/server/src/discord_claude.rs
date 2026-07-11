@@ -1014,6 +1014,7 @@ pub fn run_thread_claude(
     user_message: &str,
     author_label: &str,
     transcript: &[DiscordThreadMessage],
+    acting_user_id: Option<Uuid>,
 ) -> Result<ThreadClaudeResult, ApiError> {
     let prompt = build_thread_claude_prompt(
         goal_text,
@@ -1031,8 +1032,14 @@ pub fn run_thread_claude(
 
     let max_turns = agent_max_turns(state);
     let cmd = build_thread_claude_cmd(&prompt, resume.as_deref(), max_turns, &[]);
-    let (raw, exit_code) =
-        terminals::exec_discord_shell_command_for_thread(state, term_id, session_id, thread_id, &cmd, None)?;
+    let (raw, exit_code) = terminals::exec_discord_shell_command_for_thread(
+        state,
+        term_id,
+        session_id,
+        thread_id,
+        &cmd,
+        acting_user_id,
+    )?;
     thread_claude_result_from_raw(
         state,
         thread_id,
@@ -1042,7 +1049,7 @@ pub fn run_thread_claude(
         exit_code,
         || build_thread_claude_cmd(&prompt, None, max_turns, &[]),
         0,
-        None,
+        acting_user_id,
     )
 }
 

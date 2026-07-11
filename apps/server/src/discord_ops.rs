@@ -306,9 +306,6 @@ async fn internal_shell_run(
     if bunny_discord::risk::classify_shell_risk(&body.command) == bunny_policy::RiskLevel::Critical {
         return Err(ApiError::validation_i18n("discord.run.critical_blocked", &[]));
     }
-    if let Err(preflight) = crate::terminals::discord_shell_run_preflight(&body.command) {
-        return Err(preflight.to_api_error());
-    }
     let resolved_term_id = resolve_discord_shell(
         &state,
         link.session_id,
@@ -340,6 +337,14 @@ async fn internal_shell_run(
                 "cwd": cwd,
             }),
         );
+    }
+    if let Some(err) = crate::terminals::discord_shell_preflight_api_error(
+        &state,
+        link.session_id,
+        term_id,
+        &body.command,
+    ) {
+        return Err(err);
     }
     let run = capture_shell_run_output(
         Arc::clone(&state),

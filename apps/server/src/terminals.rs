@@ -710,7 +710,13 @@ pub fn exec_discord_shell_command(
         cmd.env(k, v);
     }
 
-    let out = run_command_with_timeout(&mut cmd, std::time::Duration::from_secs(120), None)?;
+    let locale = resolve_discord_shell_locale(state, acting_user_id);
+    let out = run_command_with_timeout(
+        &mut cmd,
+        std::time::Duration::from_secs(120),
+        None,
+        Some((state, session_id, term_id, locale)),
+    )?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -1156,12 +1162,64 @@ impl DiscordShellPreflightError {
     }
 }
 
-/// User-facing hint when a Discord shell run is waiting for stdin (y/n, editor, etc.).
-pub fn discord_shell_interactive_hint(locale: Locale, command: &str) -> String {
-    if let Err(err) = discord_shell_run_preflight(command) {
-        return err.localized_message(locale);
+/// Web UI deep link to a session terminal (opens the Terminal tab on the given shell).
+pub fn session_terminal_web_url(state: &AppState, session_id: Uuid, term_id: Uuid) -> String {
+    let base = state
+        .config
+        .resolve_public_url()
+        .trim_end_matches('/')
+        .to_string();
+    format!("{base}/s/{session_id}?terminal={term_id}")
+}
+
+fn resolve_discord_shell_locale(state: &AppState, acting_user_id: Option<Uuid>) -> Locale {
+    if let Some(uid) = acting_user_id {
+        if let Ok(loc) = state.auth.get_user_locale(uid) {
+            return Locale::from_db(&loc);
+        }
     }
-    bunny_i18n::t(locale, "discord.run.interactive_generic", &[])
+    Locale::En
+}
+
+fn discord_shell_timeout_message(
+    state: &AppState,
+    locale: Locale,
+    session_id: Uuid,
+    term_id: Uuid,
+    seconds: u64,
+) -> String {
+    let url = session_terminal_web_url(state, session_id, term_id);
+    bunny_i18n::t(
+        locale,
+        "discord.run.timeout",
+        &[("seconds", &seconds.to_string()), ("url", &url)],
+    )
+}
+
+fn discord_shell_interactive_message(
+    locale: Locale,
+    key: &str,
+    args: &[(String, String)],
+    web_url: &str,
+) -> String {
+    let mut merged: Vec<(&str, &str)> = args
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    merged.push(("url", web_url));
+    bunny_i18n::t(locale, key, &merged)
+}
+
+/// User-facing hint when a Discord shell run is waiting for stdin (y/n, editor, etc.).
+pub fn discord_shell_interactive_hint(
+    locale: Locale,
+    command: &str,
+    web_url: &str,
+) -> String {
+    if let Err(err) = discord_shell_run_preflight(command) {
+        return discord_shell_interactive_message(locale, err.key, &err.args, web_url);
+    }
+    discord_shell_interactive_message(locale, "discord.run.interactive_generic", &[], web_url)
 }
 
 /// Reject Discord shell runs that cannot complete without a TTY or stdin.
@@ -1191,6 +1249,23 @@ pub fn discord_shell_run_preflight(command: &str) -> Result<(), DiscordShellPref
         });
     }
     Ok(())
+}
+
+/// `/bunny run` preflight with Web UI deep link for interactive-command errors.
+pub fn discord_shell_preflight_api_error(
+    state: &AppState,
+    session_id: Uuid,
+    term_id: Uuid,
+    command: &str,
+) -> Option<crate::api::ApiError> {
+    let Err(mut err) = discord_shell_run_preflight(command) else {
+        return None;
+    };
+    err.args.push((
+        "url".into(),
+        session_terminal_web_url(state, session_id, term_id),
+    ));
+    Some(err.to_api_error())
 }
 
 /// True when tmux capture shows a shell prompt waiting for y/n (or similar) on stdin.
@@ -1737,7 +1812,11 @@ pub fn exec_discord_shell_command_run(
 
     let excerpt = finalize_discord_run_excerpt(command, &last_delta);
     if pane_text_awaits_user_input(&last_cap) || pane_text_awaits_user_input(&excerpt) {
-        let hint = discord_shell_interactive_hint(locale, command);
+        let hint = discord_shell_interactive_hint(
+            locale,
+            command,
+            &session_terminal_web_url(state, session_id, term_id),
+        );
         append_discord_transcript(
             state,
             term_id,
@@ -3993,10 +4072,15 @@ pub fn exec_discord_shell_command_timed(
     use bunny_pty::locale;
     use std::process::{Command, Stdio};
 
+    let locale = resolve_discord_shell_locale(state, acting_user_id);
+    let web_url = session_terminal_web_url(state, session_id, term_id);
     if bunny_discord::risk::is_interactive_discord_command(command) {
-        anyhow::bail!(
-            "interactive command not supported from Discord — use the Web UI terminal, or e.g. `head -n 80 landing-page.html` / `cat landing-page.html`"
-        );
+        anyhow::bail!(discord_shell_interactive_message(
+            locale,
+            "discord.run.interactive_tui_blocked",
+            &[],
+            &web_url,
+        ));
     }
 
     let long_running = bunny_discord::risk::is_long_running_discord_shell_command(command);
@@ -4054,7 +4138,12 @@ pub fn exec_discord_shell_command_timed(
         cmd.env(k, v);
     }
 
-    let out = run_command_with_timeout(&mut cmd, run_timeout, thread_id.map(|t| (state, t)))?;
+    let out = run_command_with_timeout(
+        &mut cmd,
+        run_timeout,
+        thread_id.map(|t| (state, t)),
+        Some((state, session_id, term_id, locale)),
+    )?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let text = match (stdout.trim_end().is_empty(), stderr.trim_end().is_empty()) {
@@ -4207,6 +4296,7 @@ fn run_command_with_timeout(
     cmd: &mut std::process::Command,
     timeout: std::time::Duration,
     pid_registry: Option<(&AppState, &str)>,
+    web_link: Option<(&AppState, Uuid, Uuid, Locale)>,
 ) -> Result<TimedOutput> {
     use std::io::Read;
     use std::process::Stdio;
@@ -4255,10 +4345,21 @@ fn run_command_with_timeout(
                     }
                     let _ = child.kill();
                     let _ = child.wait();
-                    anyhow::bail!(
-                        "command timed out after {}s — interactive editors (nvim, vim) are not supported from Discord. Use the Web UI terminal instead.",
-                        timeout.as_secs()
-                    );
+                    let message = if let Some((state, session_id, term_id, locale)) = web_link {
+                        discord_shell_timeout_message(
+                            state,
+                            locale,
+                            session_id,
+                            term_id,
+                            timeout.as_secs(),
+                        )
+                    } else {
+                        format!(
+                            "command timed out after {}s — interactive editors (nvim, vim) are not supported from Discord.",
+                            timeout.as_secs()
+                        )
+                    };
+                    anyhow::bail!(message);
                 }
                 thread::sleep(std::time::Duration::from_millis(200));
             }
