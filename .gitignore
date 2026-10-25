@@ -1,5 +1,6 @@
 # Rust (workspace root)
 /target/
+/rust_out
 **/*.rs.bk
 
 # Node / frontend
